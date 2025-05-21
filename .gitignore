@@ -1,0 +1,6 @@
+cloudfiles.json
+playlist.json
+venv/
+.vscode/
+playlists.json
+__pycache__/
