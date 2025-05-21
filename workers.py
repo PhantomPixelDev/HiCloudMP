@@ -70,6 +70,29 @@ class ScanCloudWorker(QObject):
             
             handler = handler_cls(self.cloud_data["config"])
             
+            # Patch handler to emit progress for every file found
+            orig_scan_dir = getattr(handler, '_scan_directory', None)
+            orig_scan_path = getattr(handler, '_scan_path', None)
+            worker_self = self
+            def scan_dir_with_emit(client, path):
+                files = orig_scan_dir(client, path)
+                for f in files:
+                    if worker_self._abort:
+                        break
+                    worker_self.progress_updated.emit(int(handler.get_progress()), f"File: {f.get('path', f)}", self.cloud_data["name"])
+                return files
+            def scan_path_with_emit(dbx, path):
+                files = orig_scan_path(dbx, path)
+                for f in files:
+                    if worker_self._abort:
+                        break
+                    worker_self.progress_updated.emit(int(handler.get_progress()), f"File: {f.get('path', f)}", self.cloud_data["name"])
+                return files
+            if orig_scan_dir:
+                handler._scan_directory = scan_dir_with_emit
+            if orig_scan_path:
+                handler._scan_path = scan_path_with_emit
+            
             # Start a monitoring thread
             self._abort = False
             monitor_thread = threading.Thread(target=self._monitor_progress, args=(handler,))
@@ -81,8 +104,11 @@ class ScanCloudWorker(QObject):
             
             # Signal we're done
             self._abort = True
-            monitor_thread.join(1.0)  # Wait for monitor to finish
-            
+            # Wait for monitor thread to exit, but don't block forever
+            for _ in range(50):  # Wait up to 1 second total (50 x 0.02)
+                if not monitor_thread.is_alive():
+                    break
+                threading.Event().wait(0.02)
             # Only emit if we haven't aborted
             self.scan_finished.emit(self.cloud_index, handler.get_links())
         
@@ -112,7 +138,7 @@ class ScanCloudWorker(QObject):
                 print(f"Error in progress monitoring: {e}")
             
             # Very short sleep to make UI more responsive
-            threading.Event().wait(0.1)
+            threading.Event().wait(0.02)  # Faster UI updates
     
     def abort(self):
         self._abort = True 

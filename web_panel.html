@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HiCloudMP Web Control</title>
+    <style>
+        :root {
+            --bg: #222;
+            --fg: #fff;
+            --accent: #2a82da;
+            --accent-hover: #3b93e6;
+            --panel: #333;
+            --button-bg: #2a82da;
+            --button-fg: #fff;
+            --toggle-bg: #444;
+            --toggle-active: #2a82da;
+            --toggle-fg: #fff;
+        }
+        body[data-theme='light'] {
+            --bg: #f5f5f5;
+            --fg: #222;
+            --accent: #1976d2;
+            --accent-hover: #42a5f5;
+            --panel: #fff;
+            --button-bg: #1976d2;
+            --button-fg: #fff;
+            --toggle-bg: #e0e0e0;
+            --toggle-active: #1976d2;
+            --toggle-fg: #222;
+        }
+        body {
+            font-family: sans-serif;
+            background: var(--bg);
+            color: var(--fg);
+            text-align: center;
+            margin: 0;
+            min-height: 100vh;
+            transition: background 0.2s, color 0.2s;
+        }
+        .controls {
+            margin: 30px auto;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 10px;
+        }
+        button {
+            font-size: 1.5em;
+            margin: 0 5px;
+            padding: 10px 20px;
+            border-radius: 8px;
+            border: none;
+            background: var(--button-bg);
+            color: var(--button-fg);
+            transition: background 0.2s;
+        }
+        button:hover {
+            background: var(--accent-hover);
+        }
+        .slider { 
+            width: 200px; 
+            max-width: 100%;
+            height: 6px;
+            border-radius: 4px;
+            background: var(--toggle-bg);
+            accent-color: var(--accent);
+            transition: background 0.2s;
+        }
+        input[type="range"] {
+            width: 100%;
+            max-width: 400px;
+            margin: 0 8px;
+            height: 2.2em;
+            background: transparent;
+        }
+        @media (max-width: 600px) {
+            .controls, #progressbar {
+                flex-direction: column;
+                gap: 8px;
+            }
+            #playlist, #progressbar {
+                max-width: 98vw;
+            }
+            button, .toggle-btn, #theme-toggle {
+                font-size: 1.1em;
+                padding: 8px 10px;
+            }
+            #theme-toggle {
+                width: 100%;
+                margin-top: 8px;
+                margin-bottom: 8px;
+            }
+            .slider, input[type="range"] {
+                width: 100%;
+                max-width: 98vw;
+                min-width: 0;
+                height: 2.8em;
+            }
+        }
+        .info { margin: 20px auto; font-size: 1.2em; }
+        #playlist {
+            margin: 30px auto;
+            width: 100%;
+            max-width: 400px;
+            background: var(--panel);
+            border-radius: 8px;
+            padding: 10px;
+            text-align: left;
+        }
+        #playlist .track {
+            padding: 6px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        #playlist .track.active {
+            background: var(--accent);
+            color: #fff;
+        }
+        #playlist .track:hover {
+            background: var(--accent-hover);
+            color: #fff;
+        }
+        #progressbar {
+            width: 100%;
+            max-width: 400px;
+            margin: 20px auto;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .toggle-btn {
+            font-size: 1.2em;
+            padding: 6px 16px;
+            margin: 0 8px;
+            border-radius: 6px;
+            border: none;
+            background: var(--toggle-bg);
+            color: var(--toggle-fg);
+            transition: background 0.2s, color 0.2s;
+        }
+        .toggle-btn.active {
+            background: var(--toggle-active);
+            color: #fff;
+        }
+        #playlist-select {
+            margin: 10px auto 20px auto;
+            font-size: 1.1em;
+            padding: 6px 12px;
+            border-radius: 6px;
+            border: none;
+            background: var(--toggle-bg);
+            color: var(--toggle-fg);
+        }
+        #theme-toggle {
+            position: static;
+            display: inline-block;
+            margin-top: 8px;
+            margin-bottom: 8px;
+            top: unset;
+            right: unset;
+            font-size: 1.1em;
+            padding: 6px 16px;
+            border-radius: 6px;
+            border: none;
+            background: var(--toggle-bg);
+            color: var(--toggle-fg);
+            cursor: pointer;
+        }
+        /* Button color improvements */
+        #play {
+            background: linear-gradient(90deg, #43e97b 0%, #38f9d7 100%);
+            color: #222;
+        }
+        #play:hover {
+            background: linear-gradient(90deg, #38f9d7 0%, #43e97b 100%);
+        }
+        #stop {
+            background: linear-gradient(90deg, #ff5858 0%, #f09819 100%);
+            color: #fff;
+        }
+        #stop:hover {
+            background: linear-gradient(90deg, #f09819 0%, #ff5858 100%);
+        }
+        #next, #prev {
+            background: linear-gradient(90deg, #36d1c4 0%, #5b86e5 100%);
+            color: #fff;
+        }
+        #next:hover, #prev:hover {
+            background: linear-gradient(90deg, #5b86e5 0%, #36d1c4 100%);
+        }
+        #shuffle {
+            background: linear-gradient(90deg, #f7971e 0%, #ffd200 100%);
+            color: #222;
+        }
+        #shuffle.active {
+            background: linear-gradient(90deg, #ffd200 0%, #f7971e 100%);
+            color: #222;
+        }
+        #repeat {
+            background: linear-gradient(90deg, #c471f5 0%, #fa71cd 100%);
+            color: #fff;
+        }
+        #repeat.active {
+            background: linear-gradient(90deg, #fa71cd 0%, #c471f5 100%);
+            color: #fff;
+        }
+    </style>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+</head>
+<body data-theme="dark">
+    <h1>HiCloudMP Web Control</h1>
+    <div class="info">
+        <div id="track">Title: -</div>
+        <div id="artist">Artist: -</div>
+        <div id="album">Album: -</div>
+    </div>
+    <div>
+        <select id="playlist-select"></select>
+    </div>
+    <div style="margin-bottom: 16px;">
+        <button id="theme-toggle">🌙 Dark</button>
+    </div>
+    <div class="controls">
+        <button id="prev">⏮️</button>
+        <button id="play">▶️</button>
+        <button id="stop">⏹️</button>
+        <button id="next">⏭️</button>
+        <button id="shuffle" class="toggle-btn">🔀</button>
+        <button id="repeat" class="toggle-btn">🔁</button>
+    </div>
+    <div class="controls">
+        <label>Volume: <span id="volval">70</span></label>
+        <input type="range" min="0" max="100" value="70" class="slider" id="volume">
+    </div>
+    <div id="progressbar">
+        <span id="curtime">00:00</span>
+        <input type="range" min="0" max="100" value="0" id="seek" style="flex:1;">
+        <span id="duration">00:00</span>
+    </div>
+    <div id="playlist"></div>
+    <script>
+        // Theme switcher
+        const themeToggle = document.getElementById('theme-toggle');
+        function setTheme(theme) {
+            document.body.setAttribute('data-theme', theme);
+            themeToggle.innerText = theme === 'dark' ? '🌙 Dark' : '☀️ Light';
+            localStorage.setItem('hicloudmp_theme', theme);
+        }
+        themeToggle.onclick = function() {
+            setTheme(document.body.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+        };
+        // Load theme from storage
+        (function() {
+            const saved = localStorage.getItem('hicloudmp_theme');
+            if (saved) setTheme(saved);
+        })();
+
+        // SocketIO logic
+        const socket = io();
+        let userChangingVolume = false;
+        let userSeeking = false;
+        const volumeSlider = document.getElementById('volume');
+        const seekSlider = document.getElementById('seek');
+        volumeSlider.addEventListener('input', function() {
+            userChangingVolume = true;
+            document.getElementById('volval').innerText = this.value;
+            socket.emit('set_volume', {volume: this.value});
+        });
+        volumeSlider.addEventListener('mousedown', function() { userChangingVolume = true; });
+        volumeSlider.addEventListener('touchstart', function() { userChangingVolume = true; });
+        volumeSlider.addEventListener('mouseup', function() { userChangingVolume = false; });
+        volumeSlider.addEventListener('touchend', function() { userChangingVolume = false; });
+        volumeSlider.addEventListener('change', function() { userChangingVolume = false; });
+        document.getElementById('play').onclick = function() { socket.emit('play'); };
+        document.getElementById('stop').onclick = function() { socket.emit('stop'); };
+        document.getElementById('next').onclick = function() { socket.emit('next'); };
+        document.getElementById('prev').onclick = function() { socket.emit('prev'); };
+        document.getElementById('shuffle').onclick = function() { socket.emit('toggle_shuffle'); };
+        document.getElementById('repeat').onclick = function() { socket.emit('toggle_repeat'); };
+        // Playlist
+        function renderPlaylist(list, current) {
+            const pl = document.getElementById('playlist');
+            pl.innerHTML = '';
+            list.forEach(function(track, idx) {
+                const div = document.createElement('div');
+                div.className = 'track' + (idx === current ? ' active' : '');
+                div.innerText = (idx+1) + '. ' + track.name;
+                div.onclick = function() { socket.emit('play_index', {index: idx}); };
+                pl.appendChild(div);
+            });
+        }
+        socket.on('playlist', function(list) {
+            window._playlist = list;
+            renderPlaylist(list, window._current_index || 0);
+        });
+        // Playlist selector
+        function updatePlaylistSelector(playlists, currentId) {
+            const sel = document.getElementById('playlist-select');
+            sel.innerHTML = '';
+            playlists.forEach(function(pl) {
+                const opt = document.createElement('option');
+                opt.value = pl.id;
+                opt.innerText = pl.name;
+                if (pl.id === currentId) opt.selected = true;
+                sel.appendChild(opt);
+            });
+        }
+        document.getElementById('playlist-select').onchange = function() {
+            socket.emit('switch_playlist', {playlist_id: this.value});
+        };
+        socket.on('all_playlists', function(list) {
+            window._all_playlists = list;
+            updatePlaylistSelector(list, window._current_playlist_id || '__queue__');
+        });
+        socket.on('status', function(data) {
+            document.getElementById('track').innerText = data.track;
+            document.getElementById('artist').innerText = data.artist;
+            document.getElementById('album').innerText = data.album;
+            window._current_index = data.current_index;
+            window._current_playlist_id = data.playlist_id;
+            if (window._all_playlists) updatePlaylistSelector(window._all_playlists, data.playlist_id);
+            if (window._playlist) renderPlaylist(window._playlist, data.current_index);
+            if (!userChangingVolume) {
+                document.getElementById('volval').innerText = data.volume;
+                volumeSlider.value = data.volume;
+            }
+            document.getElementById('shuffle').classList.toggle('active', !!data.shuffle);
+            document.getElementById('repeat').classList.toggle('active', !!data.repeat);
+            // Play/Pause toggle logic
+            const playBtn = document.getElementById('play');
+            if (data.state && data.state.includes('Playing')) {
+                playBtn.innerText = '⏸️';
+                playBtn.onclick = function() { socket.emit('pause'); };
+            } else {
+                playBtn.innerText = '▶️';
+                playBtn.onclick = function() { socket.emit('play'); };
+            }
+        });
+        // Progress
+        function formatTime(ms) {
+            let s = Math.floor(ms/1000);
+            let m = Math.floor(s/60);
+            s = s%60;
+            return m.toString().padStart(2,'0')+':'+s.toString().padStart(2,'0');
+        }
+        socket.on('progress', function(data) {
+            if (!userSeeking) {
+                seekSlider.max = data.duration || 1;
+                seekSlider.value = data.position || 0;
+                document.getElementById('curtime').innerText = formatTime(data.position||0);
+                document.getElementById('duration').innerText = formatTime(data.duration||0);
+            }
+        });
+        seekSlider.addEventListener('input', function() {
+            userSeeking = true;
+            document.getElementById('curtime').innerText = formatTime(this.value);
+        });
+        seekSlider.addEventListener('change', function() {
+            userSeeking = false;
+            socket.emit('seek', {position: this.value});
+        });
+        // Request all playlists on connect
+        socket.on('connect', function() {
+            socket.emit('get_playlist');
+            socket.emit('get_progress');
+            socket.emit('get_all_playlists');
+        });
+        // Poll progress every second
+        setInterval(function() { socket.emit('get_progress'); }, 1000);
+    </script>
+</body>
+</html> 

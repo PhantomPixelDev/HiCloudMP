@@ -35,10 +35,9 @@ class MediaKeyEventFilter(QObject):
         return super().eventFilter(obj, event)
 
 def setup_windows_media_keys(window):
-    """Set up Windows-specific media key handling using win32api"""
+    """Set up Windows-specific media key handling using win32gui"""
     if not HAS_WIN32:
         return
-        
     try:
         # Define Windows media key constants if not already defined
         if not hasattr(win32con, 'VK_MEDIA_PLAY_PAUSE'):
@@ -46,23 +45,21 @@ def setup_windows_media_keys(window):
             win32con.VK_MEDIA_STOP = 0xB2
             win32con.VK_MEDIA_PREV_TRACK = 0xB1
             win32con.VK_MEDIA_NEXT_TRACK = 0xB0
-        
         # Register for Windows messages
         window.old_win_proc = win32gui.SetWindowLong(
             int(window.winId()),
             win32con.GWL_WNDPROC,
             window.win_proc
         )
-        
-        # Register hot keys
+        # Register hot keys using win32gui
         try:
-            win32api.RegisterHotKey(int(window.winId()), 1, 0, win32con.VK_MEDIA_PLAY_PAUSE)
-            win32api.RegisterHotKey(int(window.winId()), 2, 0, win32con.VK_MEDIA_STOP)
-            win32api.RegisterHotKey(int(window.winId()), 3, 0, win32con.VK_MEDIA_PREV_TRACK)
-            win32api.RegisterHotKey(int(window.winId()), 4, 0, win32con.VK_MEDIA_NEXT_TRACK)
+            win32gui.RegisterHotKey(int(window.winId()), 1, 0, win32con.VK_MEDIA_PLAY_PAUSE)
+            win32gui.RegisterHotKey(int(window.winId()), 2, 0, win32con.VK_MEDIA_STOP)
+            win32gui.RegisterHotKey(int(window.winId()), 3, 0, win32con.VK_MEDIA_PREV_TRACK)
+            win32gui.RegisterHotKey(int(window.winId()), 4, 0, win32con.VK_MEDIA_NEXT_TRACK)
             print("Windows media keys registered successfully")
         except Exception as e:
-            print(f"Failed to register Windows media keys: {e}")
+            print(f"Failed to register Windows media keys (win32gui): {e}")
     except Exception as e:
         print(f"Error setting up Windows media keys: {e}")
 
@@ -70,13 +67,11 @@ def cleanup_windows_media_keys(window):
     """Clean up Windows media key registration"""
     if not HAS_WIN32:
         return
-        
     try:
-        win32api.UnregisterHotKey(int(window.winId()), 1)
-        win32api.UnregisterHotKey(int(window.winId()), 2)
-        win32api.UnregisterHotKey(int(window.winId()), 3)
-        win32api.UnregisterHotKey(int(window.winId()), 4)
-        
+        win32gui.UnregisterHotKey(int(window.winId()), 1)
+        win32gui.UnregisterHotKey(int(window.winId()), 2)
+        win32gui.UnregisterHotKey(int(window.winId()), 3)
+        win32gui.UnregisterHotKey(int(window.winId()), 4)
         # Restore original window procedure
         if hasattr(window, 'old_win_proc'):
             win32gui.SetWindowLong(

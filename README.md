@@ -20,10 +20,11 @@ A powerful, modern music player with support for local and cloud-based music lib
 
 🎧 **Playback Features**
 - 📋 Playlist management (create, save, edit)
-- 🔄 Repeat and shuffle modes
+- 🔄 Repeat and shuffle modes (now with true playlist shuffling)
 - 🎚️ Volume control
 - ⌨️ Media key support (play/pause, next, previous)
 - 🔍 Progress tracking and seeking
+- 🌐 **Web Interface**: Control playback, volume, playlist, shuffle, repeat, and seek from any device on your LAN in real time
 
 ☁️ **Cloud Integration**
 - 🌐 WebDAV support (Nextcloud, OwnCloud, etc.)
@@ -45,7 +46,7 @@ A powerful, modern music player with support for local and cloud-based music lib
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/phantompixeldev/HiCloud-MP.git
+git clone https://github.com/phantompixeldev/HiCloudMP.git
 cd HiCloud-MP
 ```
 
@@ -60,13 +61,34 @@ source venv/bin/activate
 
 3. Install dependencies:
 ```bash
-pip install PySide6 webdavclient3 dropbox sounddevice soundfile
+pip install PySide6 webdavclient3 dropbox sounddevice soundfile flask flask-socketio python-socketio
 ```
 
 4. Run the player:
 ```bash
 python main.py
 ```
+
+## Web Interface (LAN Remote Control)
+
+HiCloud MP now includes a powerful web interface for remote control from any device on your local network!
+
+### Features
+- 🎛️ **Full playback control** (play, pause, next, previous, stop)
+- 🔊 **Volume control**
+- 📋 **Playlist view** (see and play any track)
+- ⏩ **Seek bar** (see and seek track progress)
+- 🔀 **Shuffle** and 🔁 **Repeat** toggles
+- ⚡ **Real-time updates** (instant sync between desktop and all web clients)
+- 📱 **Multi-device**: Control from your phone, tablet, or another PC
+
+### How to use
+1. Open HiCloud MP and go to **Settings**
+2. Enable **Web Interface (LAN control)**
+3. On any device/browser in your LAN, go to:  
+   `http://<your-pc-ip>:5000`  
+   (replace `<your-pc-ip>` with your computer's local IP address)
+4. Enjoy full remote control of your music player!
 
 ## Usage
 
