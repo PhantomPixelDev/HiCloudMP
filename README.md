@@ -45,7 +45,7 @@ A powerful, modern music player with support for local and cloud-based music lib
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/HiCloud-MP.git
+git clone https://github.com/phantompixeldev/HiCloud-MP.git
 cd HiCloud-MP
 ```
 
