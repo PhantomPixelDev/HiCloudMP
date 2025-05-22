@@ -4,241 +4,57 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>HiCloudMP Web Control</title>
-    <style>
-        :root {
-            --bg: #222;
-            --fg: #fff;
-            --accent: #2a82da;
-            --accent-hover: #3b93e6;
-            --panel: #333;
-            --button-bg: #2a82da;
-            --button-fg: #fff;
-            --toggle-bg: #444;
-            --toggle-active: #2a82da;
-            --toggle-fg: #fff;
-        }
-        body[data-theme='light'] {
-            --bg: #f5f5f5;
-            --fg: #222;
-            --accent: #1976d2;
-            --accent-hover: #42a5f5;
-            --panel: #fff;
-            --button-bg: #1976d2;
-            --button-fg: #fff;
-            --toggle-bg: #e0e0e0;
-            --toggle-active: #1976d2;
-            --toggle-fg: #222;
-        }
-        body {
-            font-family: sans-serif;
-            background: var(--bg);
-            color: var(--fg);
-            text-align: center;
-            margin: 0;
-            min-height: 100vh;
-            transition: background 0.2s, color 0.2s;
-        }
-        .controls {
-            margin: 30px auto;
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: center;
-            gap: 10px;
-        }
-        button {
-            font-size: 1.5em;
-            margin: 0 5px;
-            padding: 10px 20px;
-            border-radius: 8px;
-            border: none;
-            background: var(--button-bg);
-            color: var(--button-fg);
-            transition: background 0.2s;
-        }
-        button:hover {
-            background: var(--accent-hover);
-        }
-        .slider { 
-            width: 200px; 
-            max-width: 100%;
-            height: 6px;
-            border-radius: 4px;
-            background: var(--toggle-bg);
-            accent-color: var(--accent);
-            transition: background 0.2s;
-        }
-        input[type="range"] {
-            width: 100%;
-            max-width: 400px;
-            margin: 0 8px;
-            height: 2.2em;
-            background: transparent;
-        }
-        @media (max-width: 600px) {
-            .controls, #progressbar {
-                flex-direction: column;
-                gap: 8px;
-            }
-            #playlist, #progressbar {
-                max-width: 98vw;
-            }
-            button, .toggle-btn, #theme-toggle {
-                font-size: 1.1em;
-                padding: 8px 10px;
-            }
-            #theme-toggle {
-                width: 100%;
-                margin-top: 8px;
-                margin-bottom: 8px;
-            }
-            .slider, input[type="range"] {
-                width: 100%;
-                max-width: 98vw;
-                min-width: 0;
-                height: 2.8em;
-            }
-        }
-        .info { margin: 20px auto; font-size: 1.2em; }
-        #playlist {
-            margin: 30px auto;
-            width: 100%;
-            max-width: 400px;
-            background: var(--panel);
-            border-radius: 8px;
-            padding: 10px;
-            text-align: left;
-        }
-        #playlist .track {
-            padding: 6px 10px;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-        #playlist .track.active {
-            background: var(--accent);
-            color: #fff;
-        }
-        #playlist .track:hover {
-            background: var(--accent-hover);
-            color: #fff;
-        }
-        #progressbar {
-            width: 100%;
-            max-width: 400px;
-            margin: 20px auto;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .toggle-btn {
-            font-size: 1.2em;
-            padding: 6px 16px;
-            margin: 0 8px;
-            border-radius: 6px;
-            border: none;
-            background: var(--toggle-bg);
-            color: var(--toggle-fg);
-            transition: background 0.2s, color 0.2s;
-        }
-        .toggle-btn.active {
-            background: var(--toggle-active);
-            color: #fff;
-        }
-        #playlist-select {
-            margin: 10px auto 20px auto;
-            font-size: 1.1em;
-            padding: 6px 12px;
-            border-radius: 6px;
-            border: none;
-            background: var(--toggle-bg);
-            color: var(--toggle-fg);
-        }
-        #theme-toggle {
-            position: static;
-            display: inline-block;
-            margin-top: 8px;
-            margin-bottom: 8px;
-            top: unset;
-            right: unset;
-            font-size: 1.1em;
-            padding: 6px 16px;
-            border-radius: 6px;
-            border: none;
-            background: var(--toggle-bg);
-            color: var(--toggle-fg);
-            cursor: pointer;
-        }
-        /* Button color improvements */
-        #play {
-            background: linear-gradient(90deg, #43e97b 0%, #38f9d7 100%);
-            color: #222;
-        }
-        #play:hover {
-            background: linear-gradient(90deg, #38f9d7 0%, #43e97b 100%);
-        }
-        #stop {
-            background: linear-gradient(90deg, #ff5858 0%, #f09819 100%);
-            color: #fff;
-        }
-        #stop:hover {
-            background: linear-gradient(90deg, #f09819 0%, #ff5858 100%);
-        }
-        #next, #prev {
-            background: linear-gradient(90deg, #36d1c4 0%, #5b86e5 100%);
-            color: #fff;
-        }
-        #next:hover, #prev:hover {
-            background: linear-gradient(90deg, #5b86e5 0%, #36d1c4 100%);
-        }
-        #shuffle {
-            background: linear-gradient(90deg, #f7971e 0%, #ffd200 100%);
-            color: #222;
-        }
-        #shuffle.active {
-            background: linear-gradient(90deg, #ffd200 0%, #f7971e 100%);
-            color: #222;
-        }
-        #repeat {
-            background: linear-gradient(90deg, #c471f5 0%, #fa71cd 100%);
-            color: #fff;
-        }
-        #repeat.active {
-            background: linear-gradient(90deg, #fa71cd 0%, #c471f5 100%);
-            color: #fff;
-        }
-    </style>
+    <!-- RetroCSS CDN -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@phantompixeldev/retrocss/dist/retro.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/@phantompixeldev/retrocss/dist/retro.min.js"></script>
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <style>:root{--retro-font:MS Sans Serif,Microsoft Sans Serif,Arial,sans-serif;}</style>
 </head>
-<body data-theme="dark">
-    <h1>HiCloudMP Web Control</h1>
-    <div class="info">
-        <div id="track">Title: -</div>
-        <div id="artist">Artist: -</div>
-        <div id="album">Album: -</div>
+<body data-theme="dark" class="retro-body">
+    <div class="retro-window mx-auto my-4 px-4 py-3" style="max-width: 500px;">
+        <div class="retro-titlebar retro-flex retro-align-center retro-gap-2 mb-2">
+            <h1 class="retro-title">HiCloudMP Web Control - <button id="theme-toggle" class="retro-btn retro-btn-secondary">🌙 Dark</button></h1>
+        </div>
+        <div class="retro-toolbar retro-flex retro-justify-content-between retro-align-center mb-3 px-2 py-1">
+            <span class="retro-title mr-2">Playlist</span>
+            <select id="playlist-select" class="retro-select"></select>
+        </div>
+        <div class="retro-window-content px-2 py-2">
+            <div class="retro-card mb-3">
+                <div class="retro-card-header">Now Playing</div>
+                <div class="retro-card-content">
+                    <div id="track">Title: -</div>
+                    <div id="artist">Artist: -</div>
+                    <div id="album">Album: -</div>
+                </div>
+            </div>
+            <hr class="retro-divider mb-3 mt-3" />
+            <div class="retro-flex retro-gap-2 mb-3 retro-justify-content-center">
+                <button id="prev" class="retro-btn retro-btn-primary" title="Previous">⏮️</button>
+                <button id="play" class="retro-btn retro-btn-success" title="Play/Pause">▶️</button>
+                <button id="stop" class="retro-btn retro-btn-danger" title="Stop">⏹️</button>
+                <button id="next" class="retro-btn retro-btn-primary" title="Next">⏭️</button>
+                <button id="shuffle" class="retro-btn retro-btn-warning toggle-btn" title="Shuffle">🔀</button>
+                <button id="repeat" class="retro-btn retro-btn-info toggle-btn" title="Repeat">🔁</button>
+            </div>
+            <div class="retro-flex retro-gap-2 mb-3 retro-align-center retro-justify-content-center">
+                <label class="retro-label mr-2">Volume: <span id="volval">70</span></label>
+                <input type="range" min="0" max="100" value="70" class="retro-range" id="volume">
+            </div>
+            <div class="retro-flex retro-gap-2 mb-3 retro-align-center" id="progressbar">
+                <span id="curtime">00:00</span>
+                <input type="range" min="0" max="100" value="0" id="seek" class="retro-range flex-1">
+                <span id="duration">00:00</span>
+            </div>
+            <hr class="retro-divider mb-3 mt-3" />
+            <div class="mb-2 retro-text-bold">Playlist</div>
+            <div class="retro-form-group mb-2">
+                <input id="playlist-search" class="retro-input" type="text" placeholder="Search tracks..." autocomplete="off">
+            </div>
+            <ul id="playlist" class="retro-list retro-list-hover retro-list-bordered mb-3"></ul>
+        </div>
+        <div class="retro-statusbar mt-2 px-2 py-1" id="statusbar">Ready.</div>
     </div>
-    <div>
-        <select id="playlist-select"></select>
-    </div>
-    <div style="margin-bottom: 16px;">
-        <button id="theme-toggle">🌙 Dark</button>
-    </div>
-    <div class="controls">
-        <button id="prev">⏮️</button>
-        <button id="play">▶️</button>
-        <button id="stop">⏹️</button>
-        <button id="next">⏭️</button>
-        <button id="shuffle" class="toggle-btn">🔀</button>
-        <button id="repeat" class="toggle-btn">🔁</button>
-    </div>
-    <div class="controls">
-        <label>Volume: <span id="volval">70</span></label>
-        <input type="range" min="0" max="100" value="70" class="slider" id="volume">
-    </div>
-    <div id="progressbar">
-        <span id="curtime">00:00</span>
-        <input type="range" min="0" max="100" value="0" id="seek" style="flex:1;">
-        <span id="duration">00:00</span>
-    </div>
-    <div id="playlist"></div>
     <script>
         // Theme switcher
         const themeToggle = document.getElementById('theme-toggle');
@@ -262,32 +78,70 @@
         let userSeeking = false;
         const volumeSlider = document.getElementById('volume');
         const seekSlider = document.getElementById('seek');
+        const statusbar = document.getElementById('statusbar');
+        function showStatus(msg, type) {
+            statusbar.textContent = msg;
+            statusbar.className = 'retro-statusbar' + (type ? ' retro-alert retro-alert-' + type : '');
+            setTimeout(() => {
+                statusbar.className = 'retro-statusbar';
+                statusbar.textContent = 'Ready.';
+            }, 2500);
+        }
         volumeSlider.addEventListener('input', function() {
             userChangingVolume = true;
             document.getElementById('volval').innerText = this.value;
             socket.emit('set_volume', {volume: this.value});
+            showStatus('Volume: ' + this.value, 'info');
         });
         volumeSlider.addEventListener('mousedown', function() { userChangingVolume = true; });
         volumeSlider.addEventListener('touchstart', function() { userChangingVolume = true; });
         volumeSlider.addEventListener('mouseup', function() { userChangingVolume = false; });
         volumeSlider.addEventListener('touchend', function() { userChangingVolume = false; });
         volumeSlider.addEventListener('change', function() { userChangingVolume = false; });
-        document.getElementById('play').onclick = function() { socket.emit('play'); };
-        document.getElementById('stop').onclick = function() { socket.emit('stop'); };
-        document.getElementById('next').onclick = function() { socket.emit('next'); };
-        document.getElementById('prev').onclick = function() { socket.emit('prev'); };
-        document.getElementById('shuffle').onclick = function() { socket.emit('toggle_shuffle'); };
-        document.getElementById('repeat').onclick = function() { socket.emit('toggle_repeat'); };
+        document.getElementById('play').onclick = function() { socket.emit('play'); showStatus('Play', 'success'); };
+        document.getElementById('stop').onclick = function() { socket.emit('stop'); showStatus('Stop', 'danger'); };
+        document.getElementById('next').onclick = function() { socket.emit('next'); showStatus('Next track', 'info'); };
+        document.getElementById('prev').onclick = function() { socket.emit('prev'); showStatus('Previous track', 'info'); };
+        document.getElementById('shuffle').onclick = function() { socket.emit('toggle_shuffle'); showStatus('Shuffle toggled', 'warning'); };
+        document.getElementById('repeat').onclick = function() { socket.emit('toggle_repeat'); showStatus('Repeat toggled', 'info'); };
         // Playlist
+        let playlistFilter = '';
         function renderPlaylist(list, current) {
             const pl = document.getElementById('playlist');
             pl.innerHTML = '';
-            list.forEach(function(track, idx) {
-                const div = document.createElement('div');
-                div.className = 'track' + (idx === current ? ' active' : '');
-                div.innerText = (idx+1) + '. ' + track.name;
-                div.onclick = function() { socket.emit('play_index', {index: idx}); };
-                pl.appendChild(div);
+            let filtered = list;
+            if (playlistFilter) {
+                const q = playlistFilter.toLowerCase();
+                filtered = list.filter(track =>
+                    (track.name && track.name.toLowerCase().includes(q)) ||
+                    (track.artist && track.artist.toLowerCase().includes(q))
+                );
+            }
+            filtered.forEach(function(track, idx) {
+                // Find the original index for play_index
+                const origIdx = list.indexOf(track);
+                const li = document.createElement('li');
+                li.className = 'retro-list-item track retro-flex retro-align-center retro-justify-content-between px-2 py-2' + (origIdx === current ? ' active retro-active retro-text-bold' : '');
+                li.tabIndex = 0;
+                // Main track name and badge
+                const left = document.createElement('span');
+                left.innerText = (origIdx+1) + '. ' + track.name;
+                if (origIdx === current) {
+                    const badge = document.createElement('span');
+                    badge.className = 'retro-badge retro-badge-primary ml-2';
+                    badge.innerText = 'Now';
+                    left.appendChild(badge);
+                }
+                li.appendChild(left);
+                // Optional: show artist as subtitle if available
+                if (track.artist) {
+                    const subtitle = document.createElement('span');
+                    subtitle.className = 'retro-text-xs retro-text-italic retro-text-muted ml-2';
+                    subtitle.innerText = track.artist;
+                    li.appendChild(subtitle);
+                }
+                li.onclick = function() { socket.emit('play_index', {index: origIdx}); showStatus('Playing: ' + track.name, 'success'); };
+                pl.appendChild(li);
             });
         }
         socket.on('playlist', function(list) {
@@ -308,6 +162,7 @@
         }
         document.getElementById('playlist-select').onchange = function() {
             socket.emit('switch_playlist', {playlist_id: this.value});
+            showStatus('Switched playlist', 'info');
         };
         socket.on('all_playlists', function(list) {
             window._all_playlists = list;
@@ -331,10 +186,10 @@
             const playBtn = document.getElementById('play');
             if (data.state && data.state.includes('Playing')) {
                 playBtn.innerText = '⏸️';
-                playBtn.onclick = function() { socket.emit('pause'); };
+                playBtn.onclick = function() { socket.emit('pause'); showStatus('Paused', 'info'); };
             } else {
                 playBtn.innerText = '▶️';
-                playBtn.onclick = function() { socket.emit('play'); };
+                playBtn.onclick = function() { socket.emit('play'); showStatus('Play', 'success'); };
             }
         });
         // Progress
@@ -359,6 +214,7 @@
         seekSlider.addEventListener('change', function() {
             userSeeking = false;
             socket.emit('seek', {position: this.value});
+            showStatus('Seek: ' + formatTime(this.value), 'info');
         });
         // Request all playlists on connect
         socket.on('connect', function() {
@@ -368,6 +224,11 @@
         });
         // Poll progress every second
         setInterval(function() { socket.emit('get_progress'); }, 1000);
+        // Playlist search
+        document.getElementById('playlist-search').addEventListener('input', function() {
+            playlistFilter = this.value;
+            renderPlaylist(window._playlist || [], window._current_index || 0);
+        });
     </script>
 </body>
 </html> 
