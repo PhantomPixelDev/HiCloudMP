@@ -646,7 +646,40 @@ class MusicPlayer(QMainWindow):
         cloud_type = cloud["type"]
         file_name = os.path.basename(file_info["path"])
         self.status_bar.showMessage(f"Streaming: {file_name}")
-        # Direct streaming instead of downloading
+        # --- If MP3, try to stream with loaded/seek workaround ---
+        if file_name.lower().endswith('.mp3'):
+            if cloud_type == "webdav":
+                auth_user = cloud["config"].get("webdav_login", "")
+                auth_pass = cloud["config"].get("webdav_password", "")
+                if "@" not in url and auth_user and auth_pass:
+                    parsed_url = QUrl(url)
+                    auth_url = url.replace(f"{parsed_url.scheme()}://", f"{parsed_url.scheme()}://{auth_user}:{auth_pass}@")
+                    stream_url = QUrl(auth_url)
+                else:
+                    stream_url = QUrl(url)
+            elif cloud_type == "dropbox":
+                stream_url = QUrl(url)
+            else:
+                self.stream_cloud_file(url, cloud_type, cloud["config"])
+                return
+            self.player.stop()
+            self.player.setSource(QUrl())
+            self.player.setSource(stream_url)
+            self.now_playing_label.setText(f"Streaming: {file_name}")
+            self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+            def on_loaded(status):
+                from PySide6.QtMultimedia import QMediaPlayer
+                if status == QMediaPlayer.MediaStatus.LoadedMedia:
+                    self.player.setPosition(1)
+                    self.player.play()
+                    try:
+                        self.player.mediaStatusChanged.disconnect(on_loaded)
+                    except Exception:
+                        pass
+            self.player.mediaStatusChanged.connect(on_loaded)
+            self.player.play()
+            return
+        # Direct streaming instead of downloading for other formats
         if cloud_type == "webdav":
             auth_user = cloud["config"].get("webdav_login", "")
             auth_pass = cloud["config"].get("webdav_password", "")
@@ -661,7 +694,6 @@ class MusicPlayer(QMainWindow):
         else:
             self.stream_cloud_file(url, cloud_type, cloud["config"])
             return
-        # Workaround: reset player before setting new source
         self.player.stop()
         self.player.setSource(QUrl())
         self.player.setSource(stream_url)
@@ -1296,39 +1328,30 @@ class MusicPlayer(QMainWindow):
     def load_playlist(self, playlist):
         """Load a playlist into the player"""
         self.active_playlist = playlist
-        self.playlist = []
+        self.playlist = self.active_playlist.items  # Use reference, not copy
         self.playlist_widget.clear()
-        
         # Load all items from the playlist
-        for item in playlist.items:
+        for item in self.playlist:
             if isinstance(item, dict):
                 # This is a cloud item
                 if item.get("type") == "cloud":
                     cloud_idx = item.get("cloud_idx")
                     file_idx = item.get("file_idx")
-                    
                     # Verify the cloud and file still exist
                     if cloud_idx < 0 or cloud_idx >= len(self.clouds):
                         continue
-                        
                     cloud = self.clouds[cloud_idx]
                     files = cloud.get("files", [])
-                    
                     if file_idx < 0 or file_idx >= len(files):
                         continue
-                        
                     file_info = files[file_idx]
                     file_name = os.path.basename(file_info["path"])
-                    
                     # Add to playlist
                     self.playlist_widget.addItem(f"{file_name} (Cloud)")
-                    self.playlist.append(item)
             else:
                 # This is a local file
                 if os.path.exists(item):
                     self.playlist_widget.addItem(os.path.basename(item))
-                    self.playlist.append(item)
-        
         if self.playlist:
             self.current_index = 0
             self.status_bar.showMessage(f"Loaded playlist: {playlist.name}")
@@ -1370,15 +1393,11 @@ class MusicPlayer(QMainWindow):
     def remove_from_playlist(self, index):
         """Remove an item from the current playlist"""
         if 0 <= index < len(self.playlist):
-            # Remove from UI
             self.playlist_widget.takeItem(index)
-            
-            # Remove from playlist data
             del self.playlist[index]
-            
-            # If this is an active saved playlist, mark as modified
             if self.active_playlist:
                 self.active_playlist.modified = datetime.now().isoformat()
+                self.save_playlists()
     
     def load_folder_playlist(self, folder):
         """Load music files from a folder into the playlist"""
@@ -1556,50 +1575,39 @@ class MusicPlayer(QMainWindow):
     
     def add_file_to_playlist(self, data):
         """Add a single file to the current playlist"""
+        target_list = self.playlist
+        if self.active_playlist:
+            target_list = self.active_playlist.items
         if data["type"] == "local_file":
-            # Local file
             path = data["path"]
-            self.playlist.append(path)
+            target_list.append(path)
             self.playlist_widget.addItem(os.path.basename(path))
-            
-            # If this is the first item, set the current index
-            if len(self.playlist) == 1 and self.current_index < 0:
+            if len(target_list) == 1 and self.current_index < 0:
                 self.current_index = 0
-                
             self.status_bar.showMessage(f"Added {os.path.basename(path)} to playlist")
-            
         elif data["type"] == "cloud_file":
-            # Cloud file
             cloud_idx = data["cloud_index"]
             file_idx = data["file_index"]
-            
             if cloud_idx < 0 or cloud_idx >= len(self.clouds):
                 return
-                
             cloud = self.clouds[cloud_idx]
             files = cloud.get("files", [])
-            
             if file_idx < 0 or file_idx >= len(files):
                 return
-                
             file_info = files[file_idx]
             file_name = os.path.basename(file_info["path"])
-            
-            # Add to playlist widget
-            self.playlist_widget.addItem(f"{file_name} (Cloud)")
-            
-            # Add to playlist data
-            self.playlist.append({
+            target_list.append({
                 "type": "cloud",
                 "cloud_idx": cloud_idx,
                 "file_idx": file_idx
             })
-            
-            # If this is the first item, set the current index
-            if len(self.playlist) == 1 and self.current_index < 0:
+            self.playlist_widget.addItem(f"{file_name} (Cloud)")
+            if len(target_list) == 1 and self.current_index < 0:
                 self.current_index = 0
-                
             self.status_bar.showMessage(f"Added {file_name} to playlist")
+        if self.active_playlist:
+            self.active_playlist.modified = datetime.now().isoformat()
+            self.save_playlists()
     
     def add_folder_to_specific_playlist(self, playlist, data):
         """Add folder contents to a specific playlist"""
@@ -1826,36 +1834,35 @@ class MusicPlayer(QMainWindow):
         if mode == "Original":
             # TODO: restore original order if needed
             return
-        # Build a list of (index, item, meta) for sorting
+        # Build a list of (playlist_entry, display_text, meta) for sorting
         items = []
         for i in range(self.playlist_widget.count()):
+            entry = self.playlist[i] if i < len(self.playlist) else None
             item = self.playlist_widget.item(i)
-            path = self.playlist[i] if i < len(self.playlist) else None
-            meta = None
-            if isinstance(path, str) and os.path.exists(path):
-                # Try to get metadata
-                from PySide6.QtMultimedia import QMediaMetaData, QMediaPlayer
-                # This is a bit slow, so only do for visible items
-                # (In production, cache this info)
-                # For now, just use filename as fallback
-                meta = {"title": os.path.basename(path), "artist": "", "album": ""}
-            else:
-                meta = {"title": item.text(), "artist": "", "album": ""}
-            items.append((i, item, meta))
+            display_text = item.text() if item else ""
+            meta = {"title": display_text, "artist": "", "album": ""}
+            if isinstance(entry, str) and os.path.exists(entry):
+                meta["title"] = os.path.basename(entry)
+            items.append((entry, display_text, meta))
         if mode == "Title":
             items.sort(key=lambda x: x[2]["title"].lower())
         elif mode == "Artist":
             items.sort(key=lambda x: x[2]["artist"].lower())
         elif mode == "Album":
             items.sort(key=lambda x: x[2]["album"].lower())
-        # Rearrange playlist_widget and playlist
         self.playlist_widget.clear()
         new_playlist = []
-        for _, item, _ in items:
-            self.playlist_widget.addItem(item.text())
-            new_playlist.append(item.text())
-        # Note: This only sorts the view, not the underlying playlist data structure.
-        # For a full implementation, you would also sort self.playlist accordingly. 
+        for entry, display_text, _ in items:
+            self.playlist_widget.addItem(display_text)
+            new_playlist.append(entry)
+        # Update the underlying playlist data
+        if self.active_playlist:
+            self.active_playlist.items[:] = new_playlist
+            self.active_playlist.modified = datetime.now().isoformat()
+            self.save_playlists()
+            self.playlist = self.active_playlist.items
+        else:
+            self.playlist = new_playlist
 
     def _check_all_scans_complete(self):
         all_done = all(not thread.isRunning() for thread in getattr(self, 'scan_threads', []))
