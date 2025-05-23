@@ -1,4 +1,3 @@
-import sys
 import os
 import json
 import tempfile
@@ -9,6 +8,10 @@ import requests
 from concurrent.futures import ThreadPoolExecutor
 import glob
 import random
+import mutagen
+import mutagen.flac
+import mutagen.mp3
+import mutagen.oggvorbis
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
@@ -148,6 +151,56 @@ class SettingsDialog(QDialog):
             dlg = CloudAccountsDialog(self, self.parent.clouds)
             dlg.exec()
 
+class CoverArtWorker(QThread):
+    cover_ready = Signal(str, str)  # url, cover_path
+    def __init__(self, url, ext, auth=None, parent=None):
+        super().__init__(parent)
+        self.url = url
+        self.ext = ext
+        self.auth = auth
+        self.cover_path = None
+    def run(self):
+        try:
+            headers = {"Range": "bytes=0-524287"}  # 512KB
+            r = requests.get(self.url, headers=headers, stream=True, timeout=10, auth=self.auth)
+            r.raise_for_status()
+            with tempfile.NamedTemporaryFile(delete=False, suffix=self.ext) as tmp:
+                for chunk in r.iter_content(8192):
+                    tmp.write(chunk)
+                tmp_path = tmp.name
+            img_data = None
+            if self.ext == ".flac":
+                audio = mutagen.flac.FLAC(tmp_path)
+                if audio.pictures:
+                    img_data = audio.pictures[0].data
+            elif self.ext == ".mp3":
+                audio = mutagen.mp3.MP3(tmp_path)
+                for tag in audio.tags.values():
+                    if tag.FrameID == "APIC":
+                        img_data = tag.data
+                        break
+            elif self.ext == ".ogg":
+                audio = mutagen.oggvorbis.OggVorbis(tmp_path)
+                if "metadata_block_picture" in audio:
+                    import base64
+                    from mutagen.flac import Picture
+                    pic = Picture()
+                    pic_data = base64.b64decode(audio["metadata_block_picture"][0])
+                    pic.parse(pic_data)
+                    img_data = pic.data
+            if img_data:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as img_tmp:
+                    img_tmp.write(img_data)
+                    img_path = img_tmp.name
+                self.cover_path = img_path
+            else:
+                self.cover_path = None
+            os.remove(tmp_path)
+        except Exception as e:
+            print(f"CoverArtWorker error: {e}")
+            self.cover_path = None
+        self.cover_ready.emit(self.url, self.cover_path or "")
+
 class MusicPlayer(QMainWindow):
     cloud_file_downloaded = Signal(str)
     
@@ -213,6 +266,9 @@ class MusicPlayer(QMainWindow):
         settings_action = QAction("Settings", self)
         settings_action.triggered.connect(self.open_settings_dialog)
         self.menuBar().addAction(settings_action)
+        
+        self.cover_cache = {}  # url -> cover_path
+        self.cover_worker = None
         
     def setup_system_media_controls(self):
         """Setup system-wide media controls (keyboard, taskbar, etc.)"""
@@ -403,7 +459,11 @@ class MusicPlayer(QMainWindow):
         meta_info_layout.addWidget(self.track_album_label)
         meta_info_layout.addStretch(1)
         cover_and_meta_layout.addLayout(meta_info_layout)
-        player_layout.addLayout(cover_and_meta_layout)
+        # Wrap in QWidget and set max height
+        cover_and_meta_widget = QWidget()
+        cover_and_meta_widget.setLayout(cover_and_meta_layout)
+        cover_and_meta_widget.setMaximumHeight(140)
+        player_layout.addWidget(cover_and_meta_widget)
         
         # Playback controls
         controls_frame = QFrame()
@@ -447,8 +507,9 @@ class MusicPlayer(QMainWindow):
         self.next_btn.clicked.connect(self.next_track)
         
         self.shuffle_btn = QToolButton()
-        self.shuffle_btn.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
+        self.shuffle_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaSeekForward))
         self.shuffle_btn.setCheckable(True)
+        self.shuffle_btn.setToolTip("Shuffle: Play random song each time")
         self.shuffle_btn.clicked.connect(self.toggle_shuffle)
         
         self.repeat_btn = QToolButton()
@@ -506,9 +567,7 @@ class MusicPlayer(QMainWindow):
     def play(self):
         if not self.playlist or self.current_index < 0 or self.current_index >= len(self.playlist):
             return
-        
         current_item = self.playlist[self.current_index]
-        
         if isinstance(current_item, dict) and current_item.get("type") == "cloud":
             cloud_idx = current_item.get("cloud_idx")
             file_idx = current_item.get("file_idx")
@@ -518,9 +577,12 @@ class MusicPlayer(QMainWindow):
             url = QUrl.fromLocalFile(os.path.abspath(path))
             self.player.setSource(url)
             self.player.play()
-            
             self.now_playing_label.setText(f"Playing: {os.path.basename(path)}")
             self.playlist_widget.setCurrentRow(self.current_index)
+            # Scroll to the current playing track
+            item = self.playlist_widget.item(self.current_index)
+            if item:
+                self.playlist_widget.scrollToItem(item)
             self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
         self.update_metadata_display()
         self.highlight_current_track()
@@ -545,7 +607,14 @@ class MusicPlayer(QMainWindow):
         self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
     
     def next_track(self):
-        if self.current_index < len(self.playlist) - 1:
+        if self.shuffle_btn.isChecked() and len(self.playlist) > 1:
+            import random
+            next_index = self.current_index
+            while next_index == self.current_index:
+                next_index = random.randint(0, len(self.playlist) - 1)
+            self.current_index = next_index
+            self.play()
+        elif self.current_index < len(self.playlist) - 1:
             self.current_index += 1
             self.play()
     
@@ -571,49 +640,13 @@ class MusicPlayer(QMainWindow):
         self.audio_output.setVolume(volume / 100.0)
     
     def toggle_shuffle(self, enabled):
+        # Only update the button style and state
         if enabled:
-            # Save the original order if not already saved
-            if not self.original_playlist_order:
-                self.original_playlist_order = self.playlist.copy()
-            # Shuffle the playlist
-            random.shuffle(self.playlist)
-            # Update the UI
-            self.playlist_widget.clear()
-            for item in self.playlist:
-                if isinstance(item, dict) and item.get("type") == "cloud":
-                    cloud_idx = item.get("cloud_idx")
-                    file_idx = item.get("file_idx")
-                    cloud = self.clouds[cloud_idx] if 0 <= cloud_idx < len(self.clouds) else None
-                    file_info = cloud["files"][file_idx] if cloud and "files" in cloud and 0 <= file_idx < len(cloud["files"]) else None
-                    name = os.path.basename(file_info["path"]) if file_info else f"Cloud Track"
-                else:
-                    name = os.path.basename(item) if isinstance(item, str) else str(item)
-                self.playlist_widget.addItem(f"{name}")
-            # Reset current index to first track
-            self.current_index = 0 if self.playlist else -1
+            self.shuffle_btn.setStyleSheet("background-color: #007bff; color: white;")
+            self.status_bar.showMessage("Shuffle mode enabled: random song will play after each track.")
         else:
-            # Restore the original order if available
-            if self.original_playlist_order:
-                self.playlist = self.original_playlist_order.copy()
-                self.original_playlist_order = []
-                # Update the UI
-                self.playlist_widget.clear()
-                for item in self.playlist:
-                    if isinstance(item, dict) and item.get("type") == "cloud":
-                        cloud_idx = item.get("cloud_idx")
-                        file_idx = item.get("file_idx")
-                        cloud = self.clouds[cloud_idx] if 0 <= cloud_idx < len(self.clouds) else None
-                        file_info = cloud["files"][file_idx] if cloud and "files" in cloud and 0 <= file_idx < len(cloud["files"]) else None
-                        name = os.path.basename(file_info["path"]) if file_info else f"Cloud Track"
-                    else:
-                        name = os.path.basename(item) if isinstance(item, str) else str(item)
-                    self.playlist_widget.addItem(f"{name}")
-                # Reset current index to first track
-                self.current_index = 0 if self.playlist else -1
-        # Update shuffle button style
-        self.shuffle_btn.setStyleSheet(
-            "background-color: #007bff; color: white;" if enabled else ""
-        )
+            self.shuffle_btn.setStyleSheet("")
+            self.status_bar.showMessage("Shuffle mode disabled: normal order.")
         self.highlight_current_track()
     
     def toggle_repeat(self, enabled):
@@ -628,8 +661,14 @@ class MusicPlayer(QMainWindow):
                 self.player.setPosition(0)
                 self.player.play()
             elif self.shuffle_btn.isChecked() and len(self.playlist) > 1:
-                # Play random track
-                self.play()
+                # Play a random track (not the same as current)
+                import random
+                if len(self.playlist) > 1:
+                    next_index = self.current_index
+                    while next_index == self.current_index:
+                        next_index = random.randint(0, len(self.playlist) - 1)
+                    self.current_index = next_index
+                    self.play()
             elif self.current_index < len(self.playlist) - 1:
                 # Play next track
                 self.next_track()
@@ -943,7 +982,19 @@ class MusicPlayer(QMainWindow):
         elif data["type"] == "cloud_file":
             cloud_idx = data["cloud_index"]
             file_idx = data["file_index"]
-            self.play_cloud_file(cloud_idx, file_idx)
+            # Set playlist to just this cloud file
+            self.playlist = [{
+                "type": "cloud",
+                "cloud_idx": cloud_idx,
+                "file_idx": file_idx
+            }]
+            self.playlist_widget.clear()
+            cloud = self.clouds[cloud_idx]
+            file_info = cloud["files"][file_idx]
+            file_name = os.path.basename(file_info["path"])
+            self.playlist_widget.addItem(f"{file_name} (Cloud)")
+            self.current_index = 0
+            self.play()
         elif data["type"] == "playlist":
             self.load_playlist_by_id(data["id"])
         elif data["type"] == "new_playlist":
@@ -1491,6 +1542,41 @@ class MusicPlayer(QMainWindow):
         if data.get("type") == "local_folder":
             remove_action = context_menu.addAction("Remove Folder")
             remove_action.triggered.connect(lambda: self.remove_media_folder(data["path"]))
+        # Improved: cloud_account context menu (add ALL files from all folders)
+        if data["type"] == "cloud_account":
+            cloud_idx = data["index"]
+            if 0 <= cloud_idx < len(self.clouds):
+                cloud = self.clouds[cloud_idx]
+                # Gather all file indices from all folders
+                file_indices = [i for i, f in enumerate(cloud.get("files", []))]
+                if file_indices:
+                    # Add to current playlist
+                    add_to_queue_action = context_menu.addAction("Add ALL Files to Current Queue")
+                    add_to_queue_action.triggered.connect(
+                        lambda: self.add_folder_to_playlist({
+                            "type": "cloud_folder",
+                            "cloud_index": cloud_idx,
+                            "folder": None,  # Not used, just for compatibility
+                            "file_indices": file_indices
+                        })
+                    )
+                    # Add to specific playlist
+                    if self.playlists:
+                        add_to_menu = QMenu("Add ALL Files to Playlist", context_menu)
+                        context_menu.addMenu(add_to_menu)
+                        for playlist in self.playlists:
+                            playlist_action = add_to_menu.addAction(playlist.name)
+                            playlist_action.triggered.connect(
+                                lambda checked, p=playlist: self.add_folder_to_specific_playlist(
+                                    p,
+                                    {
+                                        "type": "cloud_folder",
+                                        "cloud_index": cloud_idx,
+                                        "folder": None,
+                                        "file_indices": file_indices
+                                    }
+                                )
+                            )
         # Existing context menu logic...
         if data["type"] in ["local_folder", "cloud_folder"]:
             add_to_playlist_action = context_menu.addAction("Add to Current Playlist")
@@ -1728,17 +1814,114 @@ class MusicPlayer(QMainWindow):
         app.setStyleSheet("") 
 
     def update_metadata_display(self):
+        import mutagen
         meta = self.player.metaData()
         title = meta.stringValue(meta.Key.Title) if meta and meta.stringValue(meta.Key.Title) else "-"
-        artist = meta.stringValue(meta.Key.Author) if meta and meta.stringValue(meta.Key.Author) else "-"
+        # Try multiple keys for artist info
+        artist = "-"
+        if meta:
+            for key in [meta.Key.ContributingArtist, meta.Key.LeadPerformer, meta.Key.AlbumArtist, meta.Key.Author, meta.Key.Composer]:
+                val = meta.value(key)
+                if val:
+                    if isinstance(val, list):
+                        val = ", ".join(val)
+                    artist = str(val)
+                    break
         album = meta.stringValue(meta.Key.AlbumTitle) if meta and meta.stringValue(meta.Key.AlbumTitle) else "-"
         self.track_title_label.setText(f"Title: {title}")
         self.track_artist_label.setText(f"Artist: {artist}")
         self.track_album_label.setText(f"Album: {album}")
-        # Album art
+        # --- More file info ---
+        file_info_lines = []
+        file_path = None
+        file_name = "-"
+        file_format = "-"
+        bitrate = "-"
+        samplerate = "-"
+        samplesize = "-"
+        duration = "-"
+        size = "-"
+        if self.current_index >= 0 and self.current_index < len(self.playlist):
+            item = self.playlist[self.current_index]
+            if isinstance(item, str):
+                file_path = item
+                file_name = os.path.basename(item)
+            elif isinstance(item, dict) and item.get("type") == "cloud":
+                cloud_idx = item.get("cloud_idx")
+                file_idx = item.get("file_idx")
+                if 0 <= cloud_idx < len(self.clouds):
+                    cloud = self.clouds[cloud_idx]
+                    files = cloud.get("files", [])
+                    if 0 <= file_idx < len(files):
+                        file_info = files[file_idx]
+                        file_path = file_info.get("path")
+                        file_name = os.path.basename(file_info.get("path", "-"))
+                        size = file_info.get("size", "-")
+        # Format, bitrate, samplerate, duration from QMediaPlayer
+        if meta:
+            file_format = meta.stringValue(meta.Key.FileFormat) if meta.stringValue(meta.Key.FileFormat) else file_format
+            br = meta.value(meta.Key.AudioBitRate)
+            if br:
+                bitrate = f"{int(br)//1000} kbps"
+            sr = meta.value(meta.Key.AudioSampleRate) if hasattr(meta.Key, 'AudioSampleRate') else None
+            if sr:
+                samplerate = f"{sr} Hz"
+            dur = meta.value(meta.Key.Duration)
+            if dur:
+                duration = format_time(dur)
+        # Fallback for duration
+        if duration == "-" and self.player.duration() > 0:
+            duration = format_time(self.player.duration())
+        # Fallback for file size
+        if size == "-" and file_path and os.path.exists(file_path):
+            try:
+                size = f"{os.path.getsize(file_path)//1024} KB"
+            except Exception:
+                pass
+        # Fallback to mutagen for local files if needed
+        if file_path and os.path.exists(file_path) and (bitrate == "-" or samplerate == "-" or samplesize == "-"):
+            try:
+                audio = mutagen.File(file_path, easy=False)
+                if audio:
+                    # Bitrate
+                    if bitrate == "-":
+                        if hasattr(audio.info, 'bitrate') and audio.info.bitrate:
+                            bitrate = f"{int(audio.info.bitrate)//1000} kbps"
+                    # Sample rate
+                    if samplerate == "-":
+                        if hasattr(audio.info, 'sample_rate') and audio.info.sample_rate:
+                            samplerate = f"{audio.info.sample_rate} Hz"
+                    # Sample size
+                    if samplesize == "-":
+                        if hasattr(audio.info, 'bits_per_sample') and audio.info.bits_per_sample:
+                            samplesize = f"{audio.info.bits_per_sample} bit"
+                        elif hasattr(audio.info, 'sample_width') and audio.info.sample_width:
+                            samplesize = f"{audio.info.sample_width*8} bit"
+            except Exception:
+                pass
+        # For cloud files, only show size if present
+        if samplesize == "-":
+            samplesize = "?"
+        file_info_lines.append(f"File: {file_name}")
+        file_info_lines.append(f"Format: {file_format}")
+        file_info_lines.append(f"Bitrate: {bitrate}")
+        file_info_lines.append(f"Sample Rate: {samplerate}")
+        file_info_lines.append(f"Sample Size: {samplesize}")
+        file_info_lines.append(f"Duration: {duration}")
+        file_info_lines.append(f"Size: {size}")
+        # Add or update a label for file info
+        if not hasattr(self, 'file_info_label'):
+            self.file_info_label = QLabel()
+            self.file_info_label.setStyleSheet("font-size: 10px; color: #aaa;")
+            self.file_info_label.setWordWrap(True)
+            parent_layout = self.track_album_label.parentWidget().layout()
+            if parent_layout is not None:
+                parent_layout.addWidget(self.file_info_label)
+        self.file_info_label.setText("<br>".join(file_info_lines))
+        # --- Cover art logic unchanged below ---
         pixmap = None
         cover_names = ["cover.jpg", "folder.jpg", "cover.png", "folder.png", "front.jpg", "front.png"]
-        # 1. Try embedded art
+        # 1. Try embedded art from QMediaPlayer
         if meta and meta.value(meta.Key.CoverArtImage):
             image = meta.value(meta.Key.CoverArtImage)
             if hasattr(image, 'toImage'):
@@ -1785,7 +1968,6 @@ class MusicPlayer(QMainWindow):
                             try:
                                 url = cover_file["url"]
                                 ext = os.path.splitext(cover_file["path"])[1]
-                                # Only try to download if it's a valid http(s) url
                                 if url.startswith("http://") or url.startswith("https://"):
                                     with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
                                         r = requests.get(url, stream=True, timeout=10)
@@ -1796,10 +1978,40 @@ class MusicPlayer(QMainWindow):
                                     pixmap = QPixmap(tmp_path)
                                     self.temp_files_to_cleanup.add(tmp_path)
                                 else:
-                                    # For WebDAV, try direct QPixmap load if possible
                                     pixmap = QPixmap(url)
                             except Exception as e:
                                 print(f"Failed to fetch cloud cover art: {e}")
+                        # --- NEW: Try to extract embedded cover from stream if still no pixmap ---
+                        if not pixmap:
+                            url = file_info.get("url")
+                            ext = os.path.splitext(file_info["path"])[1].lower()
+                            cloud_type = cloud.get("type", "")
+                            auth = None
+                            if cloud_type == "webdav":
+                                auth_user = cloud["config"].get("webdav_login", "")
+                                auth_pass = cloud["config"].get("webdav_password", "")
+                                if auth_user and auth_pass:
+                                    auth = (auth_user, auth_pass)
+                            # --- Caching logic ---
+                            if url and ext in [".flac", ".mp3", ".ogg"]:
+                                if url in self.cover_cache:
+                                    cover_path = self.cover_cache[url]
+                                    if cover_path and os.path.exists(cover_path):
+                                        pixmap = QPixmap(cover_path)
+                                else:
+                                    # Show default cover immediately
+                                    fallback_path = os.path.join(os.path.dirname(__file__), "cover.png")
+                                    if os.path.exists(fallback_path):
+                                        self.album_art_label.setPixmap(QPixmap(fallback_path).scaled(120, 120, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                                    else:
+                                        self.album_art_label.setPixmap(QPixmap())
+                                    # Start background extraction
+                                    if self.cover_worker and self.cover_worker.isRunning():
+                                        self.cover_worker.terminate()
+                                    self.cover_worker = CoverArtWorker(url, ext, auth)
+                                    self.cover_worker.cover_ready.connect(self._on_cover_ready)
+                                    self.cover_worker.start()
+                                    return  # Don't set pixmap now, will update when ready
         # 3. Fallback: use local cover.png in UI dir
         if not pixmap:
             fallback_path = os.path.join(os.path.dirname(__file__), "cover.png")
@@ -1809,6 +2021,19 @@ class MusicPlayer(QMainWindow):
             self.album_art_label.setPixmap(pixmap.scaled(120, 120, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         else:
             self.album_art_label.setPixmap(QPixmap())
+
+    def _on_cover_ready(self, url, cover_path):
+        if cover_path and os.path.exists(cover_path):
+            self.cover_cache[url] = cover_path
+            pixmap = QPixmap(cover_path)
+            self.album_art_label.setPixmap(pixmap.scaled(120, 120, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        else:
+            # fallback
+            fallback_path = os.path.join(os.path.dirname(__file__), "cover.png")
+            if os.path.exists(fallback_path):
+                self.album_art_label.setPixmap(QPixmap(fallback_path).scaled(120, 120, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            else:
+                self.album_art_label.setPixmap(QPixmap())
 
     def highlight_current_track(self):
         for i in range(self.playlist_widget.count()):
