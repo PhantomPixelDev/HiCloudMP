@@ -43,16 +43,55 @@ class WebDAVHandler(CloudHandlerBase):
         super().__init__(config)
         self.debug = False  # Set to True only for debugging
         self._dir_cache = {}  # Cache for is_dir checks
+        self._list_cache = {}  # Cache for directory listings
         self.current_file = ""  # Track current file being processed
         self.discovery_progress = 0  # Progress during discovery phase
-        
-    def scan(self):
-        try:
-            # Import here to avoid global dependency
+        self._client = None  # Cached client instance
+        self._session = None  # For connection reuse
+        self._lock = threading.Lock()  # Thread safety for shared resources
+
+    def _get_client(self):
+        """Get or create a WebDAV client with optimized settings"""
+        if self._client is None:
             from webdav3.client import Client as WebDAVClient
             
-            # Setup the client with more verbose error reporting
-            client = WebDAVClient(self.config)
+            # Configure client with optimized settings
+            client_options = {
+                'webdav_hostname': self.config.get('webdav_hostname'),
+                'webdav_login': self.config.get('webdav_login', ''),
+                'webdav_password': self.config.get('webdav_password', ''),
+                'webdav_root': self.config.get('webdav_root', '/'),
+                'webdav_timeout': 30,  # 30 seconds timeout
+                'webdav_verbose': self.debug,
+                'webdav_override_methods': {
+                    'check': 'GET',  # Use GET for checking existence (lighter than PROPFIND)
+                },
+                'webdav_headers': {
+                    'Connection': 'keep-alive',
+                    'Cache-Control': 'no-cache',
+                    'Pragma': 'no-cache'
+                }
+            }
+            self._client = WebDAVClient(client_options)
+            
+            # Enable session reuse
+            if self._session is None:
+                import requests
+                self._session = requests.Session()
+                adapter = requests.adapters.HTTPAdapter(
+                    pool_connections=10,
+                    pool_maxsize=10,
+                    max_retries=3
+                )
+                self._session.mount('http://', adapter)
+                self._session.mount('https://', adapter)
+                self._client.session = self._session
+                
+        return self._client
+
+    def scan(self):
+        try:
+            client = self._get_client()
             self.files = []
             
             # Test the connection first
@@ -86,38 +125,45 @@ class WebDAVHandler(CloudHandlerBase):
             # Phase 2: Scanning for files (remaining 50% of progress)
             self.status_message = f"Phase 2/2: Scanning {len(all_dirs)} directories for music files..."
             
-            # Process directories in parallel - increase worker count for better performance
+            # Process directories in parallel with optimized worker count
+            max_workers = min(32, (os.cpu_count() or 4) * 4)
             dir_count = len(all_dirs)
             dir_processed = 0
             
-            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-                future_to_dir = {executor.submit(self._scan_directory, client, dir_path): dir_path for dir_path in all_dirs}
+            # Process directories in batches to avoid too many concurrent connections
+            batch_size = max(10, max_workers * 2)
+            all_files = []
+            
+            for i in range(0, len(all_dirs), batch_size):
+                batch = all_dirs[i:i + batch_size]
                 
-                # Also scan the root if not already included
-                if "" not in all_dirs and "/" not in all_dirs:
-                    future_to_dir[executor.submit(self._scan_directory, client, "")] = "/"
-                    dir_count += 1
-                
-                all_files = []
-                for future in concurrent.futures.as_completed(future_to_dir):
-                    dir_path = future_to_dir[future]
-                    try:
-                        dir_files = future.result()
-                        all_files.extend(dir_files)
-                        dir_processed += 1
-                        
-                        # Calculate the exact progress
-                        # Phase 1 was 50%, phase 2 is the other 50%
-                        # Within phase 2, each directory is equal weight
-                        phase2_progress = (dir_processed / dir_count) * 50
-                        overall_progress = 50 + phase2_progress
-                        
-                        self.status_message = f"Scanning directory {dir_processed}/{dir_count}: {dir_path}"
-                        
-                        # Force progress update
-                        self.discovery_progress = overall_progress
-                    except Exception as e:
-                        if self.debug: print(f"Error scanning directory {dir_path}: {e}")
+                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    future_to_dir = {executor.submit(self._scan_directory, client, dir_path): dir_path for dir_path in batch}
+                    
+                    # Also scan the root if not already included
+                    if "" not in all_dirs and "/" not in all_dirs:
+                        future_to_dir[executor.submit(self._scan_directory, client, "")] = "/"
+                        dir_count += 1
+                    
+                    for future in concurrent.futures.as_completed(future_to_dir):
+                        dir_path = future_to_dir[future]
+                        try:
+                            dir_files = future.result()
+                            all_files.extend(dir_files)
+                            dir_processed += 1
+                            
+                            # Calculate the exact progress
+                            # Phase 1 was 50%, phase 2 is the other 50%
+                            # Within phase 2, each directory is equal weight
+                            phase2_progress = (dir_processed / dir_count) * 50
+                            overall_progress = 50 + phase2_progress
+                            
+                            self.status_message = f"Scanning directory {dir_processed}/{dir_count}: {dir_path}"
+                            
+                            # Force progress update
+                            self.discovery_progress = overall_progress
+                        except Exception as e:
+                            if self.debug: print(f"Error scanning directory {dir_path}: {e}")
             
             self.files = all_files
             # Explicitly set to 100% when done
@@ -154,20 +200,34 @@ class WebDAVHandler(CloudHandlerBase):
         return f"{base}/{child}"
     
     def _is_dir(self, client, path):
-        """Check if path is a directory with caching for performance"""
-        if path in self._dir_cache:
-            return self._dir_cache[path]
-            
-        try:
-            result = client.is_dir(path)
-            self._dir_cache[path] = result
-            return result
-        except Exception:
-            self._dir_cache[path] = False
-            return False
-    
+        """Check if path is a directory with caching and optimized checking"""
+        with self._lock:
+            if path in self._dir_cache:
+                return self._dir_cache[path]
+                
+            try:
+                # First check if we have this path in our list cache
+                parent = os.path.dirname(path)
+                if parent in self._list_cache:
+                    for item in self._list_cache[parent]:
+                        item_path = self._join_path(parent, item)
+                        if item_path == path:
+                            is_dir = client.is_dir(path)
+                            self._dir_cache[path] = is_dir
+                            return is_dir
+                
+                # If not in cache, do a direct check with timeout
+                result = client.is_dir(path)
+                self._dir_cache[path] = result
+                return result
+            except Exception as e:
+                if self.debug:
+                    print(f"Error checking if {path} is directory: {e}")
+                self._dir_cache[path] = False
+                return False
+
     def _discover_directories_with_progress(self, client, path, max_depth=10, depth=0):
-        """Discover directories with progress updates"""
+        """Discover directories with progress updates and optimized listing"""
         if depth > max_depth:  # Prevent infinite recursion
             return []
             
@@ -175,15 +235,21 @@ class WebDAVHandler(CloudHandlerBase):
             dirs = []
             norm_path = self._normalize_path(path)
             
-            try:
-                # Update status for better user feedback
-                self.status_message = f"Discovering directories... Current path: {norm_path or '/'}"
-                self.discovery_progress = min(50, self.discovery_progress + 1)  # Max 50% for discovery phase
-                
-                items = client.list(norm_path)
-            except Exception as e:
-                if self.debug: print(f"Error listing directory '{path}': {e}")
-                return []
+            # Check cache first
+            with self._lock:
+                if norm_path in self._list_cache:
+                    items = self._list_cache[norm_path]
+                else:
+                    # Update status for better user feedback
+                    self.status_message = f"Discovering directories... Current path: {norm_path or "/"}"
+                    self.discovery_progress = min(50, self.discovery_progress + 1)
+                    
+                    try:
+                        items = client.list(norm_path)
+                        self._list_cache[norm_path] = items  # Cache the result
+                    except Exception as e:
+                        if self.debug: print(f"Error listing directory '{path}': {e}")
+                        return []
             
             # Count potential subdirectories first
             subdirs_to_process = []
@@ -364,18 +430,7 @@ class DropboxHandler(CloudHandlerBase):
             return []
 
 # Stubs for Google Drive, OneDrive
-class GoogleDriveHandler(CloudHandlerBase):
-    def scan(self):
-        self.files = []  # TODO: Implement
-
-class OneDriveHandler(CloudHandlerBase):
-    def scan(self):
-        self.files = []  # TODO: Implement
-
 # Dictionary mapping cloud types to their handler classes
 CLOUD_TYPES = {
-    "webdav": WebDAVHandler,
-    "dropbox": DropboxHandler,
-    "gdrive": GoogleDriveHandler,
-    "onedrive": OneDriveHandler
-} 
+    "webdav": WebDAVHandler
+}

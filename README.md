@@ -28,8 +28,6 @@ A powerful, modern music player with support for local and cloud-based music lib
 
 ☁️ **Cloud Integration**
 - 🌐 WebDAV support (Nextcloud, OwnCloud, etc.)
-- 📦 Dropbox integration
-- 🔜 Google Drive and OneDrive (coming soon)
 
 🎨 **Modern UI**
 - 🌙 Dark theme with sleek purple-blue accents

@@ -1,8 +1,10 @@
 import os
 import json
 import tempfile
+import time
 import uuid
 import traceback
+import shutil
 from datetime import datetime
 import requests
 from concurrent.futures import ThreadPoolExecutor
@@ -12,6 +14,7 @@ import mutagen
 import mutagen.flac
 import mutagen.mp3
 import mutagen.oggvorbis
+from platformdirs import user_data_dir, user_cache_dir
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
@@ -209,7 +212,26 @@ class MusicPlayer(QMainWindow):
         self.setWindowTitle("HiCloud MP")
         self.resize(1000, 600)
         self.setWindowIcon(QIcon("icon.ico"))
+        
+        # Set up application directories
+        self.app_name = "HiCloudMP"
+        self.app_author = "HiCloudMP"
+        self.data_dir = user_data_dir(self.app_name, self.app_author, ensure_exists=True)
+        self.cache_dir = user_cache_dir(self.app_name, self.app_author, ensure_exists=True)
+        
+        # Create directories if they don't exist
+        os.makedirs(self.data_dir, exist_ok=True)
+        os.makedirs(self.cache_dir, exist_ok=True)
+        
+        # Initialize settings
         self.settings = QSettings("HiCloudMP", "HiCloudMP")
+        
+        # Set up temporary directory for downloads
+        self.temp_dir = os.path.join(self.cache_dir, "temp")
+        os.makedirs(self.temp_dir, exist_ok=True)
+        
+        # Clean up old temp files on startup
+        self.cleanup_temp_files()
         
         # State
         self.media_folders = []
@@ -655,7 +677,45 @@ class MusicPlayer(QMainWindow):
         )
     
     def on_media_status_changed(self, status):
-        if status == QMediaPlayer.MediaStatus.EndOfMedia:
+        # Update status bar with current media status
+        status_messages = {
+            QMediaPlayer.MediaStatus.NoMedia: "No media loaded",
+            QMediaPlayer.MediaStatus.LoadingMedia: "Loading media...",
+            QMediaPlayer.MediaStatus.LoadedMedia: "Media loaded",
+            QMediaPlayer.MediaStatus.StalledMedia: "Buffering...",
+            QMediaPlayer.MediaStatus.BufferingMedia: "Buffering...",
+            QMediaPlayer.MediaStatus.BufferedMedia: "Ready to play",
+            QMediaPlayer.MediaStatus.EndOfMedia: "End of media",
+            QMediaPlayer.MediaStatus.InvalidMedia: "Invalid media"
+        }
+        
+        # Show status message if we have one for this status
+        if status in status_messages:
+            self.status_bar.showMessage(status_messages[status], 3000)  # Show for 3 seconds
+        
+        # Handle specific status changes
+        if status == QMediaPlayer.MediaStatus.LoadedMedia:
+            # Media is loaded, but not yet playing
+            current_item = self.playlist[self.current_index] if self.playlist and 0 <= self.current_index < len(self.playlist) else None
+            if current_item:
+                if isinstance(current_item, dict):
+                    name = os.path.basename(current_item.get('path', 'Unknown'))
+                else:
+                    name = os.path.basename(str(current_item))
+                self.now_playing_label.setText(f"Loaded: {name}")
+            
+        elif status == QMediaPlayer.MediaStatus.BufferedMedia:
+            # Media is buffered and ready to play
+            if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+                current_item = self.playlist[self.current_index] if self.playlist and 0 <= self.current_index < len(self.playlist) else None
+                if current_item:
+                    if isinstance(current_item, dict):
+                        name = os.path.basename(current_item.get('path', 'Unknown'))
+                    else:
+                        name = os.path.basename(str(current_item))
+                    self.now_playing_label.setText(f"Now Playing: {name}")
+        
+        elif status == QMediaPlayer.MediaStatus.EndOfMedia:
             if self.repeat_btn.isChecked():
                 # Repeat current track
                 self.player.setPosition(0)
@@ -665,81 +725,79 @@ class MusicPlayer(QMainWindow):
                 import random
                 if len(self.playlist) > 1:
                     next_index = self.current_index
-                    while next_index == self.current_index:
+                    while next_index == self.current_index and len(self.playlist) > 1:
                         next_index = random.randint(0, len(self.playlist) - 1)
                     self.current_index = next_index
                     self.play()
             elif self.current_index < len(self.playlist) - 1:
                 # Play next track
                 self.next_track()
+                
+        elif status == QMediaPlayer.MediaStatus.InvalidMedia:
+            error_msg = "Error: Could not play media (invalid or unsupported format)"
+            self.status_bar.showMessage(error_msg, 5000)
+            QMessageBox.critical(self, "Playback Error", error_msg)
+            
+        # Update play/pause button based on playback state
+        if status in [QMediaPlayer.MediaStatus.LoadedMedia, 
+                     QMediaPlayer.MediaStatus.BufferedMedia,
+                     QMediaPlayer.MediaStatus.BufferingMedia]:
+            self.play_btn.setIcon(self.style().standardIcon(
+                QStyle.SP_MediaPause if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState 
+                else QStyle.SP_MediaPlay
+            ))
 
     # === Cloud Methods ===
     def play_cloud_file(self, cloud_idx, file_idx):
-        if cloud_idx < 0 or cloud_idx >= len(self.clouds):
-            return
-        cloud = self.clouds[cloud_idx]
-        if file_idx < 0 or file_idx >= len(cloud.get("files", [])):
-            return
-        file_info = cloud["files"][file_idx]
-        url = file_info["url"]
-        cloud_type = cloud["type"]
-        file_name = os.path.basename(file_info["path"])
-        self.status_bar.showMessage(f"Streaming: {file_name}")
-        # --- If MP3, try to stream with loaded/seek workaround ---
-        if file_name.lower().endswith('.mp3'):
+        try:
+            if cloud_idx < 0 or cloud_idx >= len(self.clouds):
+                raise ValueError("Invalid cloud account")
+                
+            cloud = self.clouds[cloud_idx]
+            if file_idx < 0 or file_idx >= len(cloud.get("files", [])):
+                raise ValueError("Invalid file index")
+                
+            file_info = cloud["files"][file_idx]
+            url = file_info["url"]
+            cloud_type = cloud["type"]
+            file_name = os.path.basename(file_info["path"])
+            
+            self.status_bar.showMessage(f"Preparing to stream: {file_name}...")
+            QApplication.processEvents()  # Update UI
+            
+            # Handle different cloud types
             if cloud_type == "webdav":
                 auth_user = cloud["config"].get("webdav_login", "")
                 auth_pass = cloud["config"].get("webdav_password", "")
-                if "@" not in url and auth_user and auth_pass:
+                if auth_user and auth_pass and "@" not in url:
                     parsed_url = QUrl(url)
-                    auth_url = url.replace(f"{parsed_url.scheme()}://", f"{parsed_url.scheme()}://{auth_user}:{auth_pass}@")
-                    stream_url = QUrl(auth_url)
-                else:
-                    stream_url = QUrl(url)
-            elif cloud_type == "dropbox":
-                stream_url = QUrl(url)
-            else:
-                self.stream_cloud_file(url, cloud_type, cloud["config"])
-                return
+                    auth_url = f"{parsed_url.scheme()}://{auth_user}:{auth_pass}@{parsed_url.host()}{parsed_url.path()}"
+                    if parsed_url.query():
+                        auth_url += f"?{parsed_url.query()}"
+                    url = auth_url
+            
+            media_url = QUrl(url)
+            
+            # Stop current playback asynchronously
             self.player.stop()
             self.player.setSource(QUrl())
-            self.player.setSource(stream_url)
+            QApplication.processEvents()  # Process events to ensure clean state
+            
+            # Set new source and start playback
+            self.player.setSource(media_url)
             self.now_playing_label.setText(f"Streaming: {file_name}")
             self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
-            def on_loaded(status):
-                from PySide6.QtMultimedia import QMediaPlayer
-                if status == QMediaPlayer.MediaStatus.LoadedMedia:
-                    self.player.setPosition(1)
-                    self.player.play()
-                    try:
-                        self.player.mediaStatusChanged.disconnect(on_loaded)
-                    except Exception:
-                        pass
-            self.player.mediaStatusChanged.connect(on_loaded)
-            self.player.play()
-            return
-        # Direct streaming instead of downloading for other formats
-        if cloud_type == "webdav":
-            auth_user = cloud["config"].get("webdav_login", "")
-            auth_pass = cloud["config"].get("webdav_password", "")
-            if "@" not in url and auth_user and auth_pass:
-                parsed_url = QUrl(url)
-                auth_url = url.replace(f"{parsed_url.scheme()}://", f"{parsed_url.scheme()}://{auth_user}:{auth_pass}@")
-                stream_url = QUrl(auth_url)
-            else:
-                stream_url = QUrl(url)
-        elif cloud_type == "dropbox":
-            stream_url = QUrl(url)
-        else:
-            self.stream_cloud_file(url, cloud_type, cloud["config"])
-            return
-        self.player.stop()
-        self.player.setSource(QUrl())
-        self.player.setSource(stream_url)
-        self._pending_stream_play = True
-        self.player.mediaStatusChanged.connect(self._on_stream_media_status)
-        self.now_playing_label.setText(f"Streaming: {file_name}")
-        self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+            
+            # Use a small delay to prevent race conditions
+            QTimer.singleShot(100, self.player.play)
+            
+            if hasattr(self, 'current_index') and 0 <= self.current_index < len(self.playlist):
+                self.playlist_widget.setCurrentRow(self.current_index)
+                
+        except Exception as e:
+            error_msg = f"Failed to start streaming: {str(e)}"
+            self.status_bar.showMessage(error_msg)
+            QMessageBox.critical(self, "Streaming Error", error_msg)
     def _on_stream_media_status(self, status):
         if getattr(self, '_pending_stream_play', False):
             if status in (QMediaPlayer.MediaStatus.BufferedMedia, QMediaPlayer.MediaStatus.LoadedMedia):
@@ -750,35 +808,152 @@ class MusicPlayer(QMainWindow):
                 except Exception:
                     pass
     
+    def cleanup_temp_files(self):
+        """Clean up old temporary files on startup"""
+        try:
+            # Clean up any files older than 1 day
+            now = time.time()
+            for filename in os.listdir(self.temp_dir):
+                file_path = os.path.join(self.temp_dir, filename)
+                try:
+                    # Delete files older than 1 day
+                    if os.path.isfile(file_path):
+                        if now - os.path.getmtime(file_path) > 86400:  # 1 day in seconds
+                            os.unlink(file_path)
+                except Exception as e:
+                    print(f"Error cleaning up {file_path}: {e}")
+        except Exception as e:
+            print(f"Error in cleanup_temp_files: {e}")
+    
     def stream_cloud_file(self, url, cloud_type="webdav", config=None):
-        temp = tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(url)[1])
-        temp_path = temp.name
-        temp.close()
-        self.temp_files_to_cleanup.add(temp_path)
-        auth = None
-        if cloud_type == "webdav" and config:
-            auth = (config.get("webdav_login", ""), config.get("webdav_password", ""))
-        self.download_thread = QThread()
-        self.download_worker = DownloadWorker(url, temp_path, auth)
-        self.download_worker.finished.connect(lambda path: self.cloud_file_downloaded.emit(path))
-        self.download_worker.error.connect(lambda msg: QMessageBox.critical(self, "Download Error", msg))
-        self.download_worker.progress.connect(lambda p: self.status_bar.showMessage(f"Downloading... {p}%"))
-        self.download_worker.finished.connect(self.download_thread.quit)
-        self.download_worker.error.connect(self.download_thread.quit)
-        self.download_worker.moveToThread(self.download_thread)
-        self.download_thread.started.connect(self.download_worker.run)
-        self.download_thread.finished.connect(lambda: self.download_worker.deleteLater())
-        self.download_thread.finished.connect(self.download_thread.deleteLater)
-        # Progress dialog for download
-        self.download_progress_dialog = QProgressDialog("Downloading file...", "Cancel", 0, 100, self)
-        self.download_progress_dialog.setWindowTitle("Download Progress")
-        self.download_progress_dialog.setWindowModality(Qt.WindowModal)
-        self.download_progress_dialog.setValue(0)
-        self.download_progress_dialog.canceled.connect(self.cancel_download)
-        self.download_worker.progress.connect(self.download_progress_dialog.setValue)
-        self.download_worker.finished.connect(self.download_progress_dialog.close)
-        self.download_worker.error.connect(self.download_progress_dialog.close)
-        self.download_thread.start()
+        try:
+            # For WebDAV, we can stream directly with authentication
+            if cloud_type == "webdav" and config:
+                from urllib.parse import quote_plus
+                from base64 import b64encode
+                
+                # Get credentials
+                username = config.get("webdav_login", "")
+                password = config.get("webdav_password", "")
+                
+                if username and password:
+                    # Create authenticated URL
+                    auth_string = f"{username}:{password}"
+                    encoded_auth = b64encode(auth_string.encode()).decode('utf-8')
+                    
+                    # Create the streaming URL with basic auth
+                    parsed_url = url.split('://', 1)
+                    if len(parsed_url) == 2:
+                        scheme, path = parsed_url
+                        streaming_url = f"{scheme}://{username}:{password}@{path}"
+                        
+                        # Play the stream directly
+                        self._play_stream(streaming_url, os.path.basename(url))
+                        return
+            
+            # Fall back to progressive download for other cloud types or if auth fails
+            self._download_and_play(url, cloud_type, config)
+            
+        except Exception as e:
+            QMessageBox.critical(
+                self, 
+                "Error", 
+                f"Failed to start streaming: {str(e)}"
+            )
+    
+    def _play_stream(self, url, display_name):
+        """Play a stream from a direct URL"""
+        try:
+            self.status_bar.showMessage(f"Streaming: {display_name}")
+            QApplication.processEvents()
+            
+            # Stop any currently playing media
+            self.player.stop()
+            self.player.setSource(QUrl())
+            QApplication.processEvents()
+            
+            # Set the streaming URL
+            self.player.setSource(QUrl(url))
+            
+            # Update UI
+            self.now_playing_label.setText(f"Streaming: {display_name}")
+            self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+            
+            # Start playback with a small delay to prevent race conditions
+            QTimer.singleShot(100, self.player.play)
+            
+        except Exception as e:
+            error_msg = f"Failed to start streaming: {str(e)}"
+            self.status_bar.showMessage(error_msg)
+            QMessageBox.critical(self, "Streaming Error", error_msg)
+    
+    def _download_and_play(self, url, cloud_type, config):
+        """Fallback method to download the file first, then play it"""
+        try:
+            # Create a temporary file in our cache directory
+            file_ext = os.path.splitext(url.split('?')[0])[1]  # Remove query params before getting extension
+            if not file_ext:
+                file_ext = ".mp3"  # Default extension if none found
+                
+            # Create a unique filename in our temp directory
+            temp_path = os.path.join(self.temp_dir, f"{uuid.uuid4()}{file_ext}")
+            self.temp_files_to_cleanup.add(temp_path)
+            
+            # Set up authentication if needed
+            auth = None
+            if cloud_type == "webdav" and config:
+                auth = (config.get("webdav_login", ""), config.get("webdav_password", ""))
+            
+            # Create and configure the download worker
+            self.download_thread = QThread()
+            self.download_worker = DownloadWorker(url, temp_path, auth)
+            
+            # Connect worker signals
+            self.download_worker.finished.connect(
+                lambda path: self.cloud_file_downloaded.emit(path)
+            )
+            self.download_worker.error.connect(
+                lambda msg: QMessageBox.critical(self, "Download Error", msg)
+            )
+            self.download_worker.progress.connect(
+                lambda p: self.status_bar.showMessage(f"Downloading... {p}%")
+            )
+            
+            # Clean up when done
+            self.download_worker.finished.connect(self.download_thread.quit)
+            self.download_worker.error.connect(self.download_thread.quit)
+            self.download_worker.moveToThread(self.download_thread)
+            
+            # Set up progress dialog
+            self.download_progress_dialog = QProgressDialog(
+                f"Downloading {os.path.basename(url)}...", 
+                "Cancel", 0, 100, self
+            )
+            self.download_progress_dialog.setWindowTitle("Downloading Media File")
+            self.download_progress_dialog.setWindowModality(Qt.WindowModal)
+            self.download_progress_dialog.setValue(0)
+            self.download_progress_dialog.canceled.connect(self.cancel_download)
+            
+            # Connect progress updates
+            self.download_worker.progress.connect(self.download_progress_dialog.setValue)
+            self.download_worker.finished.connect(self.download_progress_dialog.close)
+            self.download_worker.error.connect(self.download_progress_dialog.close)
+            
+            # Clean up thread and worker when done
+            self.download_thread.started.connect(self.download_worker.run)
+            self.download_thread.finished.connect(lambda: self.download_worker.deleteLater())
+            self.download_thread.finished.connect(self.download_thread.deleteLater)
+            
+            # Start the download
+            self.download_thread.start()
+            self.download_progress_dialog.show()
+            
+        except Exception as e:
+            QMessageBox.critical(
+                self, 
+                "Error", 
+                f"Failed to start download: {str(e)}"
+            )
     def cancel_download(self):
         if hasattr(self, 'download_worker') and hasattr(self.download_worker, 'abort'):
             self.download_worker.abort()
@@ -787,13 +962,64 @@ class MusicPlayer(QMainWindow):
             self.download_progress_dialog.close()
     
     def play_downloaded_file(self, path):
-        """Called when a cloud file has been downloaded"""
-        self.status_bar.showMessage(f"Playing downloaded file: {os.path.basename(path)}")
-        url = QUrl.fromLocalFile(path)
-        self.player.setSource(url)
-        self.player.play()
-        self.now_playing_label.setText(f"Playing: {os.path.basename(path)}")
-        self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+        """
+        Called when a cloud file has been downloaded and is ready to play.
+        Handles the actual playback of the downloaded file.
+        """
+        try:
+            if not os.path.exists(path):
+                raise FileNotFoundError(f"Downloaded file not found: {path}")
+                
+            file_name = os.path.basename(path)
+            self.status_bar.showMessage(f"Playing: {file_name}")
+            QApplication.processEvents()  # Ensure UI updates
+            
+            try:
+                # Stop any currently playing media
+                self.player.stop()
+                self.player.setSource(QUrl())
+                QApplication.processEvents()  # Process events to ensure clean state
+                
+                # Set the new media source with absolute path
+                abs_path = os.path.abspath(path)
+                if not os.path.exists(abs_path):
+                    raise FileNotFoundError(f"File not found at absolute path: {abs_path}")
+                    
+                url = QUrl.fromLocalFile(abs_path)
+                self.player.setSource(url)
+                
+                # Update UI
+                self.now_playing_label.setText(f"Playing: {file_name}")
+                self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+                
+                # Start playback with a small delay to prevent race conditions
+                QTimer.singleShot(100, self.player.play)
+                
+                # Update the current track in the playlist if it exists
+                if self.playlist_widget and hasattr(self, 'current_index') and 0 <= self.current_index < self.playlist_widget.count():
+                    self.playlist_widget.setCurrentRow(self.current_index)
+                
+            except Exception as inner_e:
+                # If playback fails, clean up and re-raise
+                try:
+                    self.player.stop()
+                    self.player.setSource(QUrl())
+                except:
+                    pass
+                raise inner_e
+            
+        except Exception as e:
+            error_msg = f"Failed to play {os.path.basename(path)}: {str(e)}"
+            self.status_bar.showMessage(error_msg)
+            QMessageBox.critical(self, "Playback Error", error_msg)
+            
+            # Clean up the temporary file if it exists
+            if path in self.temp_files_to_cleanup:
+                try:
+                    os.unlink(path)
+                    self.temp_files_to_cleanup.remove(path)
+                except Exception as cleanup_error:
+                    print(f"Error cleaning up file {path}: {cleanup_error}")
 
     # === Playlist Management ===
     def load_cloud_folder_playlist(self, cloud_idx, file_indices):
@@ -1508,25 +1734,41 @@ class MusicPlayer(QMainWindow):
         if self.web_server:
             self.web_server.stop()
             self.web_server = None
-        # Clean up temp files
-        for path in list(self.temp_files_to_cleanup):
+        # Clean up temporary files
+        for temp_file in list(self.temp_files_to_cleanup):
             try:
-                os.remove(path)
-            except Exception:
-                pass
-        # Ensure all scan threads are stopped
-        for thread in getattr(self, 'scan_threads', []):
-            if thread.isRunning():
-                thread.quit()
-                thread.wait(2000)  # Wait up to 2 seconds for each thread
-        # Hide to tray if enabled and tray is available
-        if hasattr(self, 'tray_icon') and self.tray_icon.isVisible():
-            # Optional: Minimize to tray instead of closing
-            # Uncomment the next two lines to enable minimize to tray
-            # self.hide()
-            # event.ignore()
-            # return
-            pass
+                if os.path.exists(temp_file):
+                    os.unlink(temp_file)
+                    self.temp_files_to_cleanup.remove(temp_file)
+            except Exception as e:
+                print(f"Error deleting temp file {temp_file}: {e}")
+        
+        # Save state
+        self.save_media_folders()
+        self.save_clouds()
+        self.save_playlists()
+        
+        # Clean up web server if running
+        if hasattr(self, 'web_server') and self.web_server:
+            self.web_server.shutdown()
+        
+        # Clean up Windows message handler if on Windows
+        if hasattr(self, 'win_proc') and self.win_proc:
+            cleanup_windows_media_keys()
+        
+        # Clean up any remaining temp files in the temp directory
+        try:
+            if os.path.exists(self.temp_dir):
+                for filename in os.listdir(self.temp_dir):
+                    file_path = os.path.join(self.temp_dir, filename)
+                    try:
+                        if os.path.isfile(file_path):
+                            os.unlink(file_path)
+                    except Exception as e:
+                        print(f"Error cleaning up {file_path}: {e}")
+        except Exception as e:
+            print(f"Error during final cleanup: {e}")
+        
         event.accept()
 
     def show_library_context_menu(self, position):
