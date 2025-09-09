@@ -16,12 +16,17 @@ class WebControlServer:
         self._setup_socketio()
 
     def _setup_routes(self):
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        static_dir = os.path.join(base_dir, 'static')
         @self.app.route('/')
         def index():
-            return send_from_directory('.', 'web_panel.html')
+            return send_from_directory(base_dir, 'web_panel.html')
         @self.app.route('/static/<path:path>')
         def static_files(path):
-            return send_from_directory('static', path)
+            return send_from_directory(static_dir, path)
+        @self.app.route('/health')
+        def health():
+            return {'status': 'ok'}
 
     def _setup_socketio(self):
         @self.socketio.on('connect')
@@ -33,43 +38,42 @@ class WebControlServer:
 
         @self.socketio.on('play')
         def handle_play():
-            self.player.play()
-            self._broadcast_status()
-            self._broadcast_progress()
+            def _do():
+                # If no current index, default to first track
+                if (not hasattr(self.player, 'playlist') or not self.player.playlist):
+                    return
+                if not hasattr(self.player, 'current_index') or self.player.current_index < 0 or self.player.current_index >= len(self.player.playlist):
+                    self.player.current_index = 0
+                self.player.play()
+                self._broadcast_status()
+                self._broadcast_progress()
+            self.player.run_on_ui.emit(_do)
 
         @self.socketio.on('pause')
         def handle_pause():
-            self.player.toggle_play()
-            self._broadcast_status()
-            self._broadcast_progress()
+            self.player.run_on_ui.emit(lambda: (self.player.toggle_play(), self._broadcast_status(), self._broadcast_progress()))
 
         @self.socketio.on('next')
         def handle_next():
-            self.player.next_track()
-            self._broadcast_status()
-            self._broadcast_progress()
-            self._broadcast_playlist()
+            self.player.run_on_ui.emit(lambda: (self.player.next_track(), self._broadcast_status(), self._broadcast_progress(), self._broadcast_playlist()))
 
         @self.socketio.on('prev')
         def handle_prev():
-            self.player.prev_track()
-            self._broadcast_status()
-            self._broadcast_progress()
-            self._broadcast_playlist()
+            self.player.run_on_ui.emit(lambda: (self.player.prev_track(), self._broadcast_status(), self._broadcast_progress(), self._broadcast_playlist()))
 
         @self.socketio.on('stop')
         def handle_stop():
-            self.player.stop()
-            self._broadcast_status()
-            self._broadcast_progress()
+            self.player.run_on_ui.emit(lambda: (self.player.stop(), self._broadcast_status(), self._broadcast_progress()))
 
         @self.socketio.on('set_volume')
         def handle_set_volume(data):
             vol = int(data.get('volume', 70))
-            self.player.set_volume(vol)
-            if hasattr(self.player, 'volume_slider'):
-                self.player.volume_slider.setValue(vol)
-            self._broadcast_status()
+            def _do():
+                self.player.set_volume(vol)
+                if hasattr(self.player, 'volume_slider'):
+                    self.player.volume_slider.setValue(vol)
+                self._broadcast_status()
+            self.player.run_on_ui.emit(_do)
 
         @self.socketio.on('get_playlist')
         def handle_get_playlist():
@@ -78,12 +82,14 @@ class WebControlServer:
         @self.socketio.on('play_index')
         def handle_play_index(data):
             idx = int(data.get('index', 0))
-            if 0 <= idx < len(self.player.playlist):
-                self.player.current_index = idx
-                self.player.play()
-                self._broadcast_status()
-                self._broadcast_progress()
-                self._broadcast_playlist()
+            def _do():
+                if 0 <= idx < len(self.player.playlist):
+                    self.player.current_index = idx
+                    self.player.play()
+                    self._broadcast_status()
+                    self._broadcast_progress()
+                    self._broadcast_playlist()
+            self.player.run_on_ui.emit(_do)
 
         @self.socketio.on('get_progress')
         def handle_get_progress():
@@ -92,22 +98,25 @@ class WebControlServer:
         @self.socketio.on('seek')
         def handle_seek(data):
             pos = int(data.get('position', 0))
-            self.player.player.setPosition(pos)
-            self._broadcast_progress()
+            self.player.run_on_ui.emit(lambda: (self.player.player.setPosition(pos), self._broadcast_progress()))
 
         @self.socketio.on('toggle_shuffle')
         def handle_toggle_shuffle():
-            if hasattr(self.player, 'shuffle_btn'):
-                self.player.shuffle_btn.setChecked(not self.player.shuffle_btn.isChecked())
-                self.player.toggle_shuffle(self.player.shuffle_btn.isChecked())
-            self._broadcast_status()
+            def _do():
+                if hasattr(self.player, 'shuffle_btn'):
+                    self.player.shuffle_btn.setChecked(not self.player.shuffle_btn.isChecked())
+                    self.player.toggle_shuffle(self.player.shuffle_btn.isChecked())
+                self._broadcast_status()
+            self.player.run_on_ui.emit(_do)
 
         @self.socketio.on('toggle_repeat')
         def handle_toggle_repeat():
-            if hasattr(self.player, 'repeat_btn'):
-                self.player.repeat_btn.setChecked(not self.player.repeat_btn.isChecked())
-                self.player.toggle_repeat(self.player.repeat_btn.isChecked())
-            self._broadcast_status()
+            def _do():
+                if hasattr(self.player, 'repeat_btn'):
+                    self.player.repeat_btn.setChecked(not self.player.repeat_btn.isChecked())
+                    self.player.toggle_repeat(self.player.repeat_btn.isChecked())
+                self._broadcast_status()
+            self.player.run_on_ui.emit(_do)
 
         @self.socketio.on('get_all_playlists')
         def handle_get_all_playlists():
@@ -116,18 +125,20 @@ class WebControlServer:
         @self.socketio.on('switch_playlist')
         def handle_switch_playlist(data):
             pid = data.get('playlist_id')
-            if pid == '__queue__':
-                # Switch to current queue
-                self.player.active_playlist = None
-                # Keep current playlist as is
-            else:
-                for p in self.player.playlists:
-                    if getattr(p, 'id', None) == pid:
-                        self.player.load_playlist(p)
-                        break
-            self._broadcast_status()
-            self._broadcast_playlist()
-            self._broadcast_progress()
+            def _do():
+                if pid == '__queue__':
+                    # Switch to current queue
+                    self.player.active_playlist = None
+                    # Keep current playlist as is
+                else:
+                    for p in self.player.playlists:
+                        if getattr(p, 'id', None) == pid:
+                            self.player.load_playlist(p)
+                            break
+                self._broadcast_status()
+                self._broadcast_playlist()
+                self._broadcast_progress()
+            self.player.run_on_ui.emit(_do)
 
     def _get_status(self):
         return {

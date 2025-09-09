@@ -4,54 +4,181 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>HiCloudMP Web Control</title>
-    <!-- RetroCSS CDN -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@phantompixeldev/retrocss/dist/retro.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/@phantompixeldev/retrocss/dist/retro.min.js"></script>
+    <!-- Tailwind CSS (configure before loading CDN script) -->
+    <script>
+      // Tailwind config: enable dark mode with class
+      tailwind.config = { darkMode: 'class' };
+    </script>
+     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-    <style>:root{--retro-font:MS Sans Serif,Microsoft Sans Serif,Arial,sans-serif;}</style>
+    <!-- Remix Icons for crisp, lightweight icons -->
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@4.3.0/fonts/remixicon.css" rel="stylesheet">
+    <!-- Tailwind-styled components mapped to existing classes -->
+    <style type="text/tailwindcss">
+      @layer components {
+        /* Layout */
+        .container { @apply max-w-5xl; }
+        .layout { @apply grid gap-3 md:gap-4 grid-cols-1 md:grid-cols-2; }
+        .sticky { @apply sticky top-0 z-20; }
+        .sticky-progress { @apply sticky bottom-0 bg-transparent px-2 py-1 border-t border-white/10; }
+        .playlist-panel { @apply flex flex-col min-h-0; }
+        .playlist-scroll { @apply overflow-auto max-h-[65vh] md:max-h-[70vh]; }
+        .col-left { @apply flex flex-col items-center text-center; }
+        #track { @apply text-lg font-semibold; }
+        #artist, #album { @apply opacity-90; }
+        #cover-art { @apply w-80 h-80 object-cover rounded-lg shadow; display: none; }
+
+        /* Window */
+        .retro-window { @apply mx-auto my-4 px-4 py-3 container; }
+        .retro-titlebar { @apply flex items-center gap-2 mb-2; }
+        .retro-title { @apply text-2xl font-bold; }
+        .retro-window-content { @apply px-2 py-2; }
+        .retro-toolbar { @apply flex justify-between items-center mb-3 px-2 py-1 bg-white/5 rounded-md backdrop-blur; }
+
+        /* Cards */
+        .retro-card { @apply w-full bg-white/5 dark:bg-white/5 rounded-xl border border-white/10 shadow; }
+        .retro-card-header { @apply px-3 py-2 font-semibold border-b border-white/10; }
+        .retro-card-content { @apply p-3; }
+
+        /* Buttons */
+        .retro-btn { @apply inline-flex items-center justify-center rounded-md px-3 py-2 text-sm font-medium transition-colors; }
+        .retro-btn-primary { @apply bg-blue-600 hover:bg-blue-500 text-white; }
+        .retro-btn-success { @apply bg-emerald-600 hover:bg-emerald-500 text-white; }
+        .retro-btn-danger { @apply bg-rose-600 hover:bg-rose-500 text-white; }
+        .retro-btn-warning { @apply bg-amber-600 hover:bg-amber-500 text-white; }
+        .retro-btn-info { @apply bg-sky-600 hover:bg-sky-500 text-white; }
+        .retro-btn-secondary { @apply bg-white/10 hover:bg-white/20 text-white; }
+        .controls { @apply flex flex-wrap gap-3 justify-center; }
+        #play { @apply text-lg px-4 py-2; }
+        .retro-btn .ri { @apply text-[1.25rem] leading-none; }
+        #play .ri { @apply text-[1.75rem]; }
+        .toggle-btn.active { @apply ring-2 ring-white/40; }
+        /* Circular, larger control buttons */
+        .retro-btn-circle { @apply rounded-full w-16 h-16 md:w-20 md:h-20; }
+        .retro-btn-circle .ri { @apply text-[1.5rem] md:text-[1.75rem]; }
+        #play.retro-btn-circle { @apply w-24 h-24 md:w-28 md:h-28; }
+        #play.retro-btn-circle .ri { @apply text-[2.25rem] md:text-[2.5rem]; }
+        .retro-btn .ri { @apply text-[1.25rem] leading-none; }
+        #play .ri { @apply text-[1.5rem]; }
+        .toggle-btn.active { @apply ring-2 ring-white/40; }
+
+        /* Inputs */
+        .retro-select { @apply bg-white/10 border border-white/10 rounded-md px-2 py-1 outline-none focus:ring-2 focus:ring-blue-500; }
+        .retro-input { @apply w-full bg-white/10 border border-white/10 rounded-md px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500; }
+        .retro-label { @apply text-sm; }
+        .retro-range { @apply w-full accent-blue-500; }
+        /* Enhanced slider styling */
+        .retro-range { appearance: none; height: 0.5rem; background: linear-gradient(to right, rgb(59 130 246) 0%, rgb(59 130 246) 0%, rgba(255,255,255,0.2) 0%); border-radius: 9999px; }
+        .retro-range:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(59,130,246,0.35); }
+        /* WebKit */
+        .retro-range::-webkit-slider-runnable-track { height: 0.5rem; background: transparent; border-radius: 9999px; }
+        .retro-range::-webkit-slider-thumb { appearance: none; width: 1rem; height: 1rem; background: #fff; border: 2px solid rgb(59 130 246); border-radius: 9999px; margin-top: -0.25rem; box-shadow: 0 1px 2px rgba(0,0,0,0.3); transition: transform .12s ease; }
+        .dark .retro-range::-webkit-slider-thumb { background: rgb(15 23 42); border-color: rgb(59 130 246); }
+        .retro-range:active::-webkit-slider-thumb { transform: scale(1.05); }
+        /* Firefox */
+        .retro-range::-moz-range-track { height: 0.5rem; background: transparent; border-radius: 9999px; }
+        .retro-range::-moz-range-progress { height: 0.5rem; background: transparent; border-radius: 9999px; }
+        .retro-range::-moz-range-thumb { width: 1rem; height: 1rem; background: #fff; border: 2px solid rgb(59 130 246); border-radius: 9999px; box-shadow: 0 1px 2px rgba(0,0,0,0.3); transition: transform .12s ease; }
+        .dark .retro-range::-moz-range-thumb { background: rgb(15 23 42); border-color: rgb(59 130 246); }
+        .retro-range:active::-moz-range-thumb { transform: scale(1.05); }
+
+        /* Lists */
+        .retro-list { @apply divide-y divide-white/10 rounded-md border border-white/10 bg-white/5; }
+        .retro-list-item { @apply px-2 py-2; line-height: 1.2; }
+        .retro-list-hover .retro-list-item:hover { @apply bg-white/10; }
+        .retro-list-bordered { /* already handled with border */ }
+        .retro-active { @apply bg-white/10; }
+        .retro-text-bold { @apply font-semibold; }
+        .retro-badge { @apply ml-2 inline-flex items-center rounded-full px-2 py-0.5 text-xs bg-blue-600 text-white; }
+        .retro-text-xs { @apply text-xs; }
+        .retro-text-italic { @apply italic; }
+        .retro-text-muted { @apply text-white/60; }
+
+        /* Statusbar */
+        .retro-statusbar { @apply mt-2 px-2 py-1 text-sm bg-white/5 rounded-md border border-white/10; }
+        .retro-alert { @apply border; }
+        .retro-alert-info { @apply border-sky-500/60; }
+        .retro-alert-warning { @apply border-amber-500/60; }
+        .retro-alert-danger { @apply border-rose-500/60; }
+        .retro-alert-success { @apply border-emerald-500/60; }
+      }
+
+      /* Density tweaks */
+      body[data-density="compact"] .controls .retro-btn { @apply min-h-9; }
+      body[data-density="compact"] #play { font-size: 1rem; padding: 6px 12px; }
+      body[data-density="compact"] #playlist .retro-list-item { padding-top: 4px; padding-bottom: 4px; }
+      body[data-density="compact"] .retro-window-content { padding-top: 6px; padding-bottom: 6px; }
+
+      /* Responsive */
+      @media (max-width: 799px) {
+        .controls .retro-btn { flex: 1 1 calc(25% - 6px); min-height: 48px; font-size: 1.1rem; }
+        .retro-toolbar { flex-wrap: wrap; gap: 8px; }
+        #playlist-search { width: 100%; }
+        .playlist-scroll { max-height: 50vh; }
+        #cover-art { width: 160px; height: 160px; }
+      }
+    </style>
 </head>
-<body data-theme="dark" class="retro-body">
-    <div class="retro-window mx-auto my-4 px-4 py-3" style="max-width: 500px;">
+<body data-theme="dark" class="retro-body bg-slate-50 text-slate-900 dark:bg-slate-900 dark:text-slate-100">
+    <div class="retro-window mx-auto my-4 px-4 py-3 container">
         <div class="retro-titlebar retro-flex retro-align-center retro-gap-2 mb-2">
-            <h1 class="retro-title">HiCloudMP Web Control - <button id="theme-toggle" class="retro-btn retro-btn-secondary">🌙 Dark</button></h1>
+            <h1 class="retro-title">HiCloudMP Web Control - 
+                <button id="theme-toggle" class="retro-btn retro-btn-secondary"><i class="ri-moon-line"></i><span class="ml-2">Dark</span></button>
+                <button id="density-toggle" class="retro-btn retro-btn-secondary" title="Toggle density">Comfortable</button>
+            </h1>
         </div>
-        <div class="retro-toolbar retro-flex retro-justify-content-between retro-align-center mb-3 px-2 py-1">
+        <div class="retro-toolbar retro-flex retro-justify-content-between retro-align-center mb-3 px-2 py-1 sticky">
             <span class="retro-title mr-2">Playlist</span>
             <select id="playlist-select" class="retro-select"></select>
         </div>
         <div class="retro-window-content px-2 py-2">
-            <div class="retro-card mb-3">
-                <div class="retro-card-header">Now Playing</div>
-                <div class="retro-card-content">
-                    <div id="track">Title: -</div>
-                    <div id="artist">Artist: -</div>
-                    <div id="album">Album: -</div>
+            <div class="layout">
+                <!-- Left column: Now playing + controls -->
+                <div class="col-left">
+                    <div class="retro-card mb-3" style="width: 100%;">
+                        <div class="retro-card-header">Now Playing</div>
+                        <div class="retro-card-content">
+                            <div class="flex flex-col items-center gap-3">
+                              <img id="cover-art" alt="Cover art" aria-hidden="true" />
+                              <div class="text-center">
+                                <div id="track" class="text-xl font-semibold leading-tight">Title: -</div>
+                                <div id="artist" class="text-sm opacity-80">Artist: -</div>
+                                <div id="album" class="text-sm opacity-70">Album: -</div>
+                              </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="retro-flex retro-gap-2 mb-3 retro-justify-content-center controls">
+                        <button id="prev" class="retro-btn retro-btn-primary retro-btn-circle" title="Previous" aria-label="Previous"><i class="ri-skip-back-fill"></i></button>
+                        <button id="play" class="retro-btn retro-btn-success retro-btn-circle" title="Play/Pause" aria-label="Play or pause"><i class="ri-play-fill"></i></button>
+                        <button id="stop" class="retro-btn retro-btn-danger retro-btn-circle" title="Stop" aria-label="Stop"><i class="ri-stop-fill"></i></button>
+                        <button id="next" class="retro-btn retro-btn-primary retro-btn-circle" title="Next" aria-label="Next track"><i class="ri-skip-forward-fill"></i></button>
+                        <button id="shuffle" class="retro-btn retro-btn-warning retro-btn-circle toggle-btn" title="Shuffle" aria-label="Toggle shuffle"><i class="ri-shuffle-line"></i></button>
+                        <button id="repeat" class="retro-btn retro-btn-info retro-btn-circle toggle-btn" title="Repeat" aria-label="Toggle repeat"><i class="ri-repeat-2-line"></i></button>
+                    </div>
+                    <div class="retro-flex retro-gap-2 mb-3 retro-align-center retro-justify-content-center">
+                        <label class="retro-label mr-2">Volume: <span id="volval">70</span></label>
+                        <input type="range" min="0" max="100" value="70" class="retro-range" id="volume">
+                    </div>
+                    <div class="retro-flex retro-gap-2 mb-3 retro-align-center sticky-progress" id="progressbar">
+                        <span id="curtime">00:00</span>
+                        <input type="range" min="0" max="100" value="0" id="seek" class="retro-range flex-1">
+                        <span id="duration">00:00</span>
+                    </div>
+                </div>
+                <!-- Right column: Playlist -->
+                <div class="col-right">
+                    <div class="retro-card playlist-panel">
+                        <div class="retro-card-header">Playlist</div>
+                        <div class="retro-card-content">
+                            <div class="retro-form-group mb-2">
+                                <input id="playlist-search" class="retro-input" type="text" placeholder="Search tracks..." autocomplete="off">
+                            </div>
+                            <ul id="playlist" class="retro-list retro-list-hover retro-list-bordered mb-0 playlist-scroll" role="listbox" aria-label="Playlist tracks"></ul>
+                        </div>
+                    </div>
                 </div>
             </div>
-            <hr class="retro-divider mb-3 mt-3" />
-            <div class="retro-flex retro-gap-2 mb-3 retro-justify-content-center">
-                <button id="prev" class="retro-btn retro-btn-primary" title="Previous">⏮️</button>
-                <button id="play" class="retro-btn retro-btn-success" title="Play/Pause">▶️</button>
-                <button id="stop" class="retro-btn retro-btn-danger" title="Stop">⏹️</button>
-                <button id="next" class="retro-btn retro-btn-primary" title="Next">⏭️</button>
-                <button id="shuffle" class="retro-btn retro-btn-warning toggle-btn" title="Shuffle">🔀</button>
-                <button id="repeat" class="retro-btn retro-btn-info toggle-btn" title="Repeat">🔁</button>
-            </div>
-            <div class="retro-flex retro-gap-2 mb-3 retro-align-center retro-justify-content-center">
-                <label class="retro-label mr-2">Volume: <span id="volval">70</span></label>
-                <input type="range" min="0" max="100" value="70" class="retro-range" id="volume">
-            </div>
-            <div class="retro-flex retro-gap-2 mb-3 retro-align-center" id="progressbar">
-                <span id="curtime">00:00</span>
-                <input type="range" min="0" max="100" value="0" id="seek" class="retro-range flex-1">
-                <span id="duration">00:00</span>
-            </div>
-            <hr class="retro-divider mb-3 mt-3" />
-            <div class="mb-2 retro-text-bold">Playlist</div>
-            <div class="retro-form-group mb-2">
-                <input id="playlist-search" class="retro-input" type="text" placeholder="Search tracks..." autocomplete="off">
-            </div>
-            <ul id="playlist" class="retro-list retro-list-hover retro-list-bordered mb-3"></ul>
         </div>
         <div class="retro-statusbar mt-2 px-2 py-1" id="statusbar">Ready.</div>
     </div>
@@ -60,16 +187,38 @@
         const themeToggle = document.getElementById('theme-toggle');
         function setTheme(theme) {
             document.body.setAttribute('data-theme', theme);
-            themeToggle.innerText = theme === 'dark' ? '🌙 Dark' : '☀️ Light';
+            // Toggle Tailwind dark mode class
+            const root = document.documentElement; // use <html> for broader scope
+            if (theme === 'dark') {
+                root.classList.add('dark');
+            } else {
+                root.classList.remove('dark');
+            }
+            themeToggle.innerHTML = theme === 'dark'
+              ? '<i class="ri-moon-line"></i><span class="ml-2">Dark</span>'
+              : '<i class="ri-sun-line"></i><span class="ml-2">Light</span>';
             localStorage.setItem('hicloudmp_theme', theme);
         }
         themeToggle.onclick = function() {
             setTheme(document.body.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
         };
-        // Load theme from storage
+        // Density toggle
+        const densityToggle = document.getElementById('density-toggle');
+        function setDensity(density) {
+            document.body.setAttribute('data-density', density);
+            densityToggle.innerText = density === 'compact' ? 'Compact' : 'Comfortable';
+            localStorage.setItem('hicloudmp_density', density);
+        }
+        densityToggle.onclick = function() {
+            const current = document.body.getAttribute('data-density') || 'comfortable';
+            setDensity(current === 'compact' ? 'comfortable' : 'compact');
+        };
+        // Load theme/density from storage
         (function() {
             const saved = localStorage.getItem('hicloudmp_theme');
             if (saved) setTheme(saved);
+            const savedDensity = localStorage.getItem('hicloudmp_density');
+            if (savedDensity) setDensity(savedDensity); else setDensity('comfortable');
         })();
 
         // SocketIO logic
@@ -79,6 +228,14 @@
         const volumeSlider = document.getElementById('volume');
         const seekSlider = document.getElementById('seek');
         const statusbar = document.getElementById('statusbar');
+        // Paint slider background to show progress fill
+        function setSliderBG(el, color) {
+            const max = parseFloat(el.max || 100);
+            const val = parseFloat(el.value || 0);
+            const pct = Math.max(0, Math.min(100, (val / (max || 1)) * 100));
+            const track = 'rgba(255,255,255,0.2)';
+            el.style.background = `linear-gradient(to right, ${color} 0%, ${color} ${pct}%, ${track} ${pct}%)`;
+        }
         function showStatus(msg, type) {
             statusbar.textContent = msg;
             statusbar.className = 'retro-statusbar' + (type ? ' retro-alert retro-alert-' + type : '');
@@ -92,12 +249,39 @@
             document.getElementById('volval').innerText = this.value;
             socket.emit('set_volume', {volume: this.value});
             showStatus('Volume: ' + this.value, 'info');
+            setSliderBG(volumeSlider, 'rgb(16 185 129)');
         });
+        // Swipe gestures (mobile)
+        (function(){
+            let startX=0, startY=0, startTime=0;
+            const area = document.querySelector('.col-left') || document.body;
+            area.addEventListener('touchstart', function(e){
+                const t = e.changedTouches[0];
+                startX = t.clientX; startY = t.clientY; startTime = Date.now();
+            }, {passive: true});
+            area.addEventListener('touchend', function(e){
+                const t = e.changedTouches[0];
+                const dx = t.clientX - startX; const dy = t.clientY - startY; const dt = Date.now() - startTime;
+                if (dt < 800 && Math.abs(dx) > 60 && Math.abs(dy) < 40) {
+                    if (dx < 0) { socket.emit('next'); showStatus('Next track', 'info'); }
+                    else { socket.emit('prev'); showStatus('Previous track', 'info'); }
+                }
+            }, {passive: true});
+        })();
         volumeSlider.addEventListener('mousedown', function() { userChangingVolume = true; });
         volumeSlider.addEventListener('touchstart', function() { userChangingVolume = true; });
         volumeSlider.addEventListener('mouseup', function() { userChangingVolume = false; });
         volumeSlider.addEventListener('touchend', function() { userChangingVolume = false; });
         volumeSlider.addEventListener('change', function() { userChangingVolume = false; });
+        // Initial paint for sliders
+        setSliderBG(volumeSlider, 'rgb(16 185 129)');
+        setSliderBG(seekSlider, 'rgb(59 130 246)');
+        document.getElementById('play').setAttribute('aria-label', 'Play or pause');
+        document.getElementById('stop').setAttribute('aria-label', 'Stop');
+        document.getElementById('next').setAttribute('aria-label', 'Next track');
+        document.getElementById('prev').setAttribute('aria-label', 'Previous track');
+        document.getElementById('shuffle').setAttribute('aria-label', 'Toggle shuffle');
+        document.getElementById('repeat').setAttribute('aria-label', 'Toggle repeat');
         document.getElementById('play').onclick = function() { socket.emit('play'); showStatus('Play', 'success'); };
         document.getElementById('stop').onclick = function() { socket.emit('stop'); showStatus('Stop', 'danger'); };
         document.getElementById('next').onclick = function() { socket.emit('next'); showStatus('Next track', 'info'); };
@@ -123,6 +307,8 @@
                 const li = document.createElement('li');
                 li.className = 'retro-list-item track retro-flex retro-align-center retro-justify-content-between px-2 py-2' + (origIdx === current ? ' active retro-active retro-text-bold' : '');
                 li.tabIndex = 0;
+                li.setAttribute('role', 'option');
+                li.setAttribute('aria-selected', (origIdx === current).toString());
                 // Main track name and badge
                 const left = document.createElement('span');
                 left.innerText = (origIdx+1) + '. ' + track.name;
@@ -172,6 +358,20 @@
             document.getElementById('track').innerText = data.track;
             document.getElementById('artist').innerText = data.artist;
             document.getElementById('album').innerText = data.album;
+            // Cover art support (optional fields)
+            (function(){
+                const cover = document.getElementById('cover-art');
+                const url = data.cover_url || data.cover || data.artwork || data.album_art;
+                if (url) {
+                    cover.src = url;
+                    cover.style.display = 'block';
+                    cover.setAttribute('aria-hidden', 'false');
+                } else {
+                    cover.removeAttribute('src');
+                    cover.style.display = 'none';
+                    cover.setAttribute('aria-hidden', 'true');
+                }
+            })();
             window._current_index = data.current_index;
             window._current_playlist_id = data.playlist_id;
             if (window._all_playlists) updatePlaylistSelector(window._all_playlists, data.playlist_id);
@@ -179,16 +379,21 @@
             if (!userChangingVolume) {
                 document.getElementById('volval').innerText = data.volume;
                 volumeSlider.value = data.volume;
+                // Repaint volume slider background when updated from server
+                if (typeof setSliderBG === 'function') setSliderBG(volumeSlider, 'rgb(16 185 129)');
             }
             document.getElementById('shuffle').classList.toggle('active', !!data.shuffle);
             document.getElementById('repeat').classList.toggle('active', !!data.repeat);
+            document.getElementById('shuffle').setAttribute('aria-pressed', (!!data.shuffle).toString());
+            document.getElementById('repeat').setAttribute('aria-pressed', (!!data.repeat).toString());
             // Play/Pause toggle logic
             const playBtn = document.getElementById('play');
-            if (data.state && data.state.includes('Playing')) {
-                playBtn.innerText = '⏸️';
+            window._is_playing = !!(data.state && data.state.includes('Playing'));
+            if (window._is_playing) {
+                playBtn.innerHTML = '<i class="ri-pause-fill"></i>';
                 playBtn.onclick = function() { socket.emit('pause'); showStatus('Paused', 'info'); };
             } else {
-                playBtn.innerText = '▶️';
+                playBtn.innerHTML = '<i class="ri-play-fill"></i>';
                 playBtn.onclick = function() { socket.emit('play'); showStatus('Play', 'success'); };
             }
         });
@@ -205,16 +410,90 @@
                 seekSlider.value = data.position || 0;
                 document.getElementById('curtime').innerText = formatTime(data.position||0);
                 document.getElementById('duration').innerText = formatTime(data.duration||0);
+                setSliderBG(seekSlider, 'rgb(59 130 246)');
             }
         });
         seekSlider.addEventListener('input', function() {
             userSeeking = true;
             document.getElementById('curtime').innerText = formatTime(this.value);
+            setSliderBG(seekSlider, 'rgb(59 130 246)');
         });
         seekSlider.addEventListener('change', function() {
             userSeeking = false;
             socket.emit('seek', {position: this.value});
             showStatus('Seek: ' + formatTime(this.value), 'info');
+            setSliderBG(seekSlider, 'rgb(59 130 246)');
+        });
+        // Keyboard shortcuts
+        function isTypingInInput(ev) {
+            const t = ev.target;
+            return t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+        }
+        function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+        window.addEventListener('keydown', function(ev) {
+            if (ev.altKey || ev.metaKey || ev.ctrlKey) return; // ignore with modifiers
+            if (isTypingInInput(ev)) {
+                // Allow "/" to focus search even in other inputs
+                if (ev.key === '/') {
+                    const s = document.getElementById('playlist-search');
+                    if (s) { s.focus(); s.select(); ev.preventDefault(); }
+                }
+                return;
+            }
+            switch (ev.key) {
+                case ' ': // Space: play/pause
+                    ev.preventDefault();
+                    if (window._is_playing) { socket.emit('pause'); showStatus('Paused', 'info'); }
+                    else { socket.emit('play'); showStatus('Play', 'success'); }
+                    break;
+                case 'ArrowRight': { // seek forward 5s
+                    const newPos = clamp(parseInt(seekSlider.value||0) + 5000, 0, parseInt(seekSlider.max||0));
+                    seekSlider.value = newPos;
+                    socket.emit('seek', {position: newPos});
+                    showStatus('Seek: ' + formatTime(newPos), 'info');
+                    break; }
+                case 'ArrowLeft': { // seek back 5s
+                    const newPos = clamp(parseInt(seekSlider.value||0) - 5000, 0, parseInt(seekSlider.max||0));
+                    seekSlider.value = newPos;
+                    socket.emit('seek', {position: newPos});
+                    showStatus('Seek: ' + formatTime(newPos), 'info');
+                    break; }
+                case 'ArrowUp': { // volume up 5
+                    const newVol = clamp(parseInt(volumeSlider.value||0) + 5, 0, 100);
+                    volumeSlider.value = newVol;
+                    document.getElementById('volval').innerText = newVol;
+                    socket.emit('set_volume', {volume: newVol});
+                    showStatus('Volume: ' + newVol, 'info');
+                    ev.preventDefault();
+                    break; }
+                case 'ArrowDown': { // volume down 5
+                    const newVol = clamp(parseInt(volumeSlider.value||0) - 5, 0, 100);
+                    volumeSlider.value = newVol;
+                    document.getElementById('volval').innerText = newVol;
+                    socket.emit('set_volume', {volume: newVol});
+                    showStatus('Volume: ' + newVol, 'info');
+                    ev.preventDefault();
+                    break; }
+                case 'n': case 'N':
+                    socket.emit('next'); showStatus('Next track', 'info');
+                    break;
+                case 'p': case 'P':
+                    socket.emit('prev'); showStatus('Previous track', 'info');
+                    break;
+                case 's': case 'S':
+                    socket.emit('stop'); showStatus('Stop', 'danger');
+                    break;
+                case 'r': case 'R':
+                    socket.emit('toggle_repeat'); showStatus('Repeat toggled', 'info');
+                    break;
+                case 'h': case 'H':
+                    socket.emit('toggle_shuffle'); showStatus('Shuffle toggled', 'warning');
+                    break;
+                case '/': {
+                    const s = document.getElementById('playlist-search');
+                    if (s) { s.focus(); s.select(); ev.preventDefault(); }
+                    break; }
+            }
         });
         // Request all playlists on connect
         socket.on('connect', function() {

@@ -149,6 +149,7 @@ class SettingsDialog(QDialog):
 
 class MusicPlayer(QMainWindow):
     cloud_file_downloaded = Signal(str)
+    run_on_ui = Signal(object)  # pass a callable to execute on UI thread
     
     def __init__(self):
         super().__init__()
@@ -204,6 +205,7 @@ class MusicPlayer(QMainWindow):
         self.player.durationChanged.connect(self.update_duration)
         self.player.mediaStatusChanged.connect(self.on_media_status_changed)
         self.cloud_file_downloaded.connect(self.play_downloaded_file)
+        self.run_on_ui.connect(self._run_on_ui)
         
         # UI
         self.setup_ui()
@@ -224,7 +226,9 @@ class MusicPlayer(QMainWindow):
         self._last_cover_source = None
         self._last_cover_time = 0.0
         
-    
+        # Auto-start web interface if enabled in settings
+        if self.settings.value("web_interface", False, bool):
+            self.start_web_interface()
         
         # Create menu bar
         menubar = self.menuBar()
@@ -239,6 +243,7 @@ class MusicPlayer(QMainWindow):
         settings_action.triggered.connect(self.open_settings_dialog)
         menubar.addAction(settings_action)
         
+        # (autostart handled above once)
         
     def set_dark_theme(self):
         """Apply dark theme to the application"""
@@ -307,44 +312,45 @@ class MusicPlayer(QMainWindow):
                     self.stop_web_interface()
 
     def start_web_interface(self):
-        """Start the web interface server"""
-        if hasattr(self, 'web_server') and self.web_server:
-            return  # Already running
-            
+        """Start the web interface server using WebControlServer"""
+        if getattr(self, 'web_server', None):
+            return True  # Already running
         try:
-            from web_control import app
-            from threading import Thread
-            
-            # Configure the Flask app
-            app.config['PLAYER'] = self
-            
-            # Start the Flask server in a separate thread
-            def run_server():
-                from waitress import serve
-                serve(app, host='0.0.0.0', port=self.web_port)
-                
-            self.web_server = Thread(target=run_server, daemon=True)
+            from web_control import WebControlServer
+            self.web_server = WebControlServer(self, host='0.0.0.0', port=self.web_port)
             self.web_server.start()
+            self.status_bar.showMessage(f"Web interface started on http://localhost:{self.web_port}")
             return True
-        except ImportError as e:
+        except Exception as e:
             print(f"Failed to start web interface: {e}")
-            QMessageBox.warning(self, "Web Interface", 
-                             "Failed to start web interface. Make sure required packages are installed.")
+            QMessageBox.warning(self, "Web Interface",
+                                "Failed to start web interface. Make sure Flask and Flask-SocketIO are installed.")
+            self.web_server = None
             return False
     
     def stop_web_interface(self):
         """Stop the web interface server"""
-        if hasattr(self, 'web_server') and self.web_server:
-            # This is a simple implementation - in a real app, you'd want to properly shut down the server
+        if getattr(self, 'web_server', None):
+            try:
+                self.web_server.stop()
+            except Exception:
+                pass
             self.web_server = None
+            self.status_bar.showMessage("Web interface stopped")
     
     def open_web_panel(self):
         """Open the web control panel in the default browser"""
         import webbrowser
-        if hasattr(self, 'web_server') and self.web_server:
+        if getattr(self, 'web_server', None):
             url = f"http://localhost:{self.web_port}"
             webbrowser.open(url)
         else:
+            # If setting is enabled, try to start it automatically
+            if self.settings.value("web_interface", False, bool):
+                if self.start_web_interface():
+                    url = f"http://localhost:{self.web_port}"
+                    webbrowser.open(url)
+                    return
             QMessageBox.warning(self, "Web Panel", "Web interface is not enabled in settings.")
         
     def setup_system_media_controls(self):
@@ -709,6 +715,13 @@ class MusicPlayer(QMainWindow):
         
         self.status_bar.addPermanentWidget(self.progress_bar)
 
+    def _run_on_ui(self, fn):
+        try:
+            if callable(fn):
+                fn()
+        except Exception as e:
+            print(f"run_on_ui error: {e}")
+
     # === Playback Controls ===
     def play(self):
         if not self.playlist or self.current_index < 0 or self.current_index >= len(self.playlist):
@@ -908,17 +921,18 @@ class MusicPlayer(QMainWindow):
                         print("No cover bytes returned")
                         self.set_default_cover()
                 finally:
-                    # Signal the worker thread to finish; cleanup occurs on finished
-                    try:
-                        self._cover_thread.quit()
-                    except Exception:
-                        pass
+                    # Cleanup will be handled by thread.finished -> _cleanup_thread
                     self._cover_inflight_source = None
 
             def on_error(msg):
                 print(f"Cover art worker error: {msg}")
                 self._cover_inflight_source = None
 
+            # When worker finishes, quit the thread (no manual quit from on_finished)
+            try:
+                self._cover_worker.finished.connect(self._cover_thread.quit)
+            except Exception:
+                pass
             self._cover_worker.finished.connect(on_finished)
             self._cover_worker.error.connect(on_error)
             self._cover_inflight_source = source
@@ -1343,10 +1357,11 @@ class MusicPlayer(QMainWindow):
             self.player.stop()
             self.player.setSource(QUrl())
             QApplication.processEvents()  # Process events to ensure clean state
-            
-            # Set new source and start playback
-            self.player.setSource(media_url)
-            
+
+            # Stream directly using the resilient streaming helper (with retry)
+            stream_url = str(media_url.toString())
+            self._play_stream(stream_url, os.path.basename(file_name))
+
             # Update UI with track information
             base_name = os.path.splitext(file_name)[0]
             self.track_title_label.setText(f"Title: {base_name}")
@@ -1355,10 +1370,8 @@ class MusicPlayer(QMainWindow):
             
             
             self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
-            
-            # Use a small delay to prevent race conditions; also update metadata right away
-            QTimer.singleShot(100, self.player.play)
-            QTimer.singleShot(100, self.update_metadata_display)
+            # Update metadata shortly after starting stream
+            QTimer.singleShot(200, self.update_metadata_display)
             
             if hasattr(self, 'current_index') and 0 <= self.current_index < len(self.playlist):
                 self.playlist_widget.setCurrentRow(self.current_index)
@@ -1380,6 +1393,74 @@ class MusicPlayer(QMainWindow):
             error_msg = f"Failed to start streaming: {str(e)}"
             self.status_bar.showMessage(error_msg)
             QMessageBox.critical(self, "Streaming Error", error_msg)
+    
+    def _download_and_play(self, url, cloud_type, config, display_name, auth=None):
+        """Download the cloud track to a temporary file then play locally.
+        This avoids intermittent TLS resets that can break streaming demux.
+        """
+        try:
+            # Ensure previous downloads are stopped
+            if hasattr(self, 'download_worker') and self.download_worker:
+                try:
+                    self.download_worker.abort()
+                except Exception:
+                    pass
+            # Prepare temp file path
+            safe_name = os.path.basename(display_name) or 'track'
+            fd, temp_path = tempfile.mkstemp(prefix='hicloud_', suffix='_' + safe_name, dir=self.temp_dir)
+            os.close(fd)
+            # Track for later cleanup on failures
+            self.temp_files_to_cleanup.add(temp_path)
+
+            # Setup worker in its own thread
+            self.download_thread = QThread()
+            self.download_worker = DownloadWorker(url, temp_path, auth=auth)
+            self.download_worker.moveToThread(self.download_thread)
+
+            # UI: show progress
+            self.progress_bar.setValue(0)
+            self.progress_bar.show()
+            self.status_bar.showMessage(f"Downloading: {display_name}")
+
+            # Connect signals
+            self.download_thread.started.connect(self.download_worker.run)
+            self.download_worker.progress.connect(lambda p: self.progress_bar.setValue(max(0, min(100, p))))
+            def on_finished(path):
+                try:
+                    self.progress_bar.hide()
+                    self.status_bar.showMessage(f"Download complete: {display_name}")
+                    # Remove from cleanup set now that it's a valid file
+                    if path in self.temp_files_to_cleanup:
+                        self.temp_files_to_cleanup.remove(path)
+                    # Play on UI thread
+                    self.run_on_ui.emit(lambda: self.play_downloaded_file(path))
+                finally:
+                    try:
+                        self.download_thread.quit()
+                        self.download_thread.wait(1000)
+                    except Exception:
+                        pass
+            self.download_worker.finished.connect(on_finished)
+            def on_error(err):
+                try:
+                    self.progress_bar.hide()
+                    self.status_bar.showMessage(f"Download failed: {err}")
+                    QMessageBox.warning(self, "Download Error", f"Failed to download: {err}\nAttempting to stream directly…")
+                    # Fallback to stream
+                    self._play_stream(url, display_name)
+                finally:
+                    try:
+                        self.download_thread.quit()
+                        self.download_thread.wait(1000)
+                    except Exception:
+                        pass
+            self.download_worker.error.connect(on_error)
+
+            self.download_thread.start()
+        except Exception as e:
+            # As a last resort, try to stream directly
+            self.status_bar.showMessage(f"Download setup failed: {e}. Streaming instead…")
+            self._play_stream(url, display_name)
     def _on_stream_media_status(self, status):
         if getattr(self, '_pending_stream_play', False):
             if status in (QMediaPlayer.MediaStatus.BufferedMedia, QMediaPlayer.MediaStatus.LoadedMedia):
@@ -1390,6 +1471,37 @@ class MusicPlayer(QMainWindow):
                 except Exception:
                     pass
     
+    def _reset_stream_retry(self):
+        """Reset stream retry state."""
+        self._stream_retry = {
+            'attempts': 0,
+            'url': None,
+            'name': None,
+        }
+
+    def _schedule_stream_retry(self, url, display_name, immediate=False):
+        """Schedule a reconnect with exponential backoff and jitter."""
+        try:
+            if not hasattr(self, '_stream_retry'):
+                self._reset_stream_retry()
+            # Update latest target
+            self._stream_retry['url'] = url
+            self._stream_retry['name'] = display_name
+            # Compute delay
+            if immediate:
+                delay_ms = 250
+            else:
+                attempts = int(self._stream_retry.get('attempts', 0)) + 1
+                self._stream_retry['attempts'] = attempts
+                base = min(30000, 1000 * (2 ** (attempts - 1)))  # cap at 30s
+                jitter = random.randint(0, 500)
+                delay_ms = base + jitter
+            # Inform user
+            self.status_bar.showMessage(f"Network issue. Reconnecting to stream in {delay_ms//1000}.{(delay_ms%1000)//100}s…")
+            QTimer.singleShot(delay_ms, lambda: self._play_stream(self._stream_retry['url'], self._stream_retry['name']))
+        except Exception as e:
+            print(f"schedule_stream_retry error: {e}")
+
     def cleanup_temp_files(self):
         """Clean up old temporary files on startup"""
         try:
@@ -1444,66 +1556,74 @@ class MusicPlayer(QMainWindow):
             )
     
     def _play_stream(self, url, display_name):
-        
         try:
-            # Clear any existing media
+            # Ensure retry state exists
+            if not hasattr(self, '_stream_retry'):
+                self._reset_stream_retry()
+
+            # Clear any existing media and handlers
+            try:
+                self.player.errorOccurred.disconnect()
+            except Exception:
+                pass
+            try:
+                self.player.mediaStatusChanged.disconnect()
+            except Exception:
+                pass
+
+            # Stop and reset source first to avoid race conditions
             self.player.stop()
-            
-            # Set up the media content
-            media = QMediaContent(QUrl(url))
-            self.player.setSource(media)
-            
-            # Set up error handling
+            self.player.setSource(QUrl())
+
+            # Set up the media content correctly for Qt6
+            self.player.setSource(QUrl(url))
+
+            # Error handling with retry
             def handle_error(error, error_string):
-                if error != QMediaPlayer.NoError:
-                    self.status_bar.showMessage(f"Playback error: {error_string}")
-                    # Try to reconnect after a short delay
-                    QTimer.singleShot(5000, lambda: self._play_stream(url, display_name))
-            
-            # Connect error handling
-            self.player.errorOccurred.disconnect()
-            self.player.errorOccurred.connect(handle_error)
-            
-            # Set up buffering status handling
-            def handle_buffer_status(percent_filled):
-                self.status_bar.showMessage(f"Buffering... {percent_filled}%")
-                if percent_filled >= 100:
-                    self.status_bar.clearMessage()
-            
-            # Connect buffering status
-            if hasattr(self.player, 'bufferProgress'):
-                self.player.bufferProgress.connect(handle_buffer_status)
-            
-            # Set up media status changes
+                try:
+                    # Qt6 emits (error, errorString)
+                    if getattr(QMediaPlayer, 'NoError', None) is not None and error == QMediaPlayer.NoError:
+                        return
+                except Exception:
+                    pass
+                # Schedule retry with backoff
+                self._schedule_stream_retry(url, display_name)
+
+            try:
+                # Connect with the two-arg signature if available; PySide will adapt as needed
+                self.player.errorOccurred.connect(handle_error)
+            except Exception:
+                # Fallback: if signature mismatch, still attempt reconnect on media status
+                pass
+
+            # Media status handling for stalled/invalid/end
             def handle_media_status(status):
-                if status == QMediaPlayer.MediaStatus.EndOfMedia:
-                    # If we reach the end, try to reconnect to the stream
-                    QTimer.singleShot(1000, lambda: self._play_stream(url, display_name))
+                if status == QMediaPlayer.MediaStatus.BufferedMedia:
+                    # Success path: reset retry counter
+                    self._reset_stream_retry()
+                    self.status_bar.showMessage(f"Playing stream: {display_name}")
+                elif status == QMediaPlayer.MediaStatus.StalledMedia:
+                    # Network hiccup; schedule retry soon
+                    self.status_bar.showMessage("Stream stalled. Reconnecting…")
+                    self._schedule_stream_retry(url, display_name)
                 elif status == QMediaPlayer.MediaStatus.InvalidMedia:
-                    self.status_bar.showMessage("Invalid media. Trying to reconnect...")
-                    QTimer.singleShot(5000, lambda: self._play_stream(url, display_name))
-            
-            # Connect media status changes
-            self.player.mediaStatusChanged.disconnect()
+                    self.status_bar.showMessage("Invalid media. Reconnecting…")
+                    self._schedule_stream_retry(url, display_name)
+                elif status == QMediaPlayer.MediaStatus.EndOfMedia:
+                    # Some streams end unexpectedly; try to resume quickly
+                    self._schedule_stream_retry(url, display_name, immediate=True)
+
             self.player.mediaStatusChanged.connect(handle_media_status)
-            
-            # Set network configuration for better streaming
-            network_config = QNetworkConfiguration()
-            network_config.setConnectTimeout(10000)  # 10 seconds timeout
-            network_config.setTransferTimeout(30000)  # 30 seconds transfer timeout
-            
-            # Set the network configuration on the player's network access manager
-            if hasattr(self.player, 'networkConfiguration'):
-                self.player.networkConfiguration().setConfiguration(network_config)
-            
+
             # Start playback
             self.player.play()
-            self.status_bar.showMessage(f"Playing stream: {display_name}")
-            
+            self.status_bar.showMessage(f"Connecting to stream: {display_name}…")
+
         except Exception as e:
             error_msg = f"Failed to start stream: {str(e)}"
             self.status_bar.showMessage(error_msg)
-            QTimer.singleShot(5000, lambda: self._play_stream(url, display_name))
+            # Try again with backoff
+            self._schedule_stream_retry(url, display_name)
 
     def cancel_download(self):
         if hasattr(self, 'download_worker') and hasattr(self.download_worker, 'abort'):
