@@ -13,25 +13,25 @@ A powerful, modern music player with support for local and cloud-based music lib
 
 ## Features
 
-✨ **Unified Music Library** - Access all your music in one place
+✨ **Unified Music Library**
 - 🎵 Local files and folders
 - ☁️ Cloud storage via WebDAV (Nextcloud, OwnCloud, etc.)
-- 🔍 Powerful search across all sources
+- 🔍 Search across local and cloud
 
-🎧 **Playback Features**
-- 📋 Playlist management (create, save, edit)
-- 🔄 Repeat and shuffle modes (now with true playlist shuffling)
-- 🎚️ Volume control
-- ⌨️ Media key support (play/pause, next, previous)
-- 🔍 Progress tracking and seeking
-- 🌐 **Web Interface**: Control playback, volume, playlist, shuffle, repeat, and seek from any device on your LAN in real time
+🎧 **Playback & Control**
+- 📋 Playlists (create, save, load, edit)
+- 🔀 Shuffle and 🔁 Repeat
+- 🎚️ Volume, mute, seeking with progress
+- ⌨️ System media keys via MPRIS (Play/Pause, Next, Previous, Stop)
+- 🧰 Enhanced tray menu: Now Playing, Play/Pause, Next/Prev, Stop, Shuffle, Repeat, Mute, inline Volume slider, Seek ±10s, Show/Hide Window, Open Current Location, Settings, Web Panel, Quit
+- 🌐 Web Interface (LAN): real-time remote control from any device
 
 ☁️ **Cloud Integration**
-- 🌐 WebDAV support (Nextcloud, OwnCloud, etc.)
+- 🌐 WebDAV (Nextcloud, OwnCloud, etc.) with folder scanning and cover art
 
 🎨 **Modern UI**
 - 🌙 Dark theme with sleek purple-blue accents
-- 📱 Responsive design
+- 📱 Responsive layout
 
 ## Installation
 
@@ -45,24 +45,34 @@ A powerful, modern music player with support for local and cloud-based music lib
 1. Clone the repository:
 ```bash
 git clone https://github.com/phantompixeldev/HiCloudMP.git
-cd HiCloud-MP
+cd HiCloudMP
 ```
 
-2. Set up a virtual environment (recommended):
+2. (Recommended) Create and activate a virtual environment:
 ```bash
 python -m venv venv
-# On Windows:
+# Windows
 venv\Scripts\activate
-# On macOS/Linux:
+# macOS/Linux
 source venv/bin/activate
 ```
 
-3. Install dependencies:
+3. Install Python dependencies:
 ```bash
-pip install PySide6 webdavclient3 sounddevice soundfile flask flask-socketio python-socketio
+pip install -r requirements.txt
 ```
 
-4. Run the player:
+4. Linux desktop (for MPRIS/media keys): install system packages if missing
+- Arch/Endeavour/Manjaro:
+  ```bash
+  sudo pacman -S python-gobject
+  ```
+- Debian/Ubuntu:
+  ```bash
+  sudo apt-get install python3-gi gir1.2-glib-2.0
+  ```
+
+5. Run the player:
 ```bash
 python main.py
 ```
@@ -107,9 +117,26 @@ HiCloud MP now includes a powerful web interface for remote control from any dev
 4. Click "Save Playlist"
 
 ### Playback Controls
-- Use the transport controls (play/pause, next, previous)
-- Adjust volume with the slider
-- Use media keys on your keyboard for control from anywhere
+- Use the transport controls (Play/Pause, Next, Previous, Stop)
+- Adjust volume with the slider or the tray menu
+- Use your keyboard's media keys (via MPRIS) on supported desktops
+
+### Tray Menu
+- Right-click the tray icon to access controls and actions:
+  - Now Playing, Show/Hide Window
+  - Play/Pause, Previous, Next, Stop, Seek ±10s
+  - Shuffle, Repeat, Mute, Volume slider
+  - Open Current Location, Settings, Web Panel, Quit
+
+### Verify MPRIS (optional)
+With the app running:
+```bash
+playerctl -l                 # list detected players
+playerctl -p hicloudmp status
+playerctl -p hicloudmp play-pause
+playerctl -p hicloudmp next
+playerctl -p hicloudmp metadata
+```
 
 ## Configuration Files
 
@@ -127,6 +154,24 @@ The player stores settings in the following files:
 - AAC (.aac)
 - M4A (.m4a)
 - WMA (.wma)
+
+## Troubleshooting
+
+- Media keys not working but playerctl works:
+  - Close other media apps (e.g., Firefox, Spotify) so your desktop routes keys to HiCloud MP.
+  - Ensure the player is active/playing. Some desktops send keys to the last active MPRIS player.
+  - A desktop file can help desktops prefer your player (request one if you need it installed).
+
+- playerctl cannot find the player:
+  - Start the app and re-run `playerctl -l`. Look for `hicloudmp`.
+  - Check that your session has a DBus user bus (normal on desktop Linux).
+
+- Missing DBus/PyGObject on Linux:
+  - Install `python-gobject` (Arch) or `python3-gi` (Debian/Ubuntu) as shown above.
+
+- Web interface not starting:
+  - Ensure Flask and Flask-SocketIO are installed (`pip install -r requirements.txt`).
+  - Enable it in Settings, then open the Web Panel from the menu.
 
 ## License
 

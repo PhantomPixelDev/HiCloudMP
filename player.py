@@ -464,6 +464,16 @@ class MusicPlayer(QMainWindow):
         open_web_action = tray_menu.addAction("Open Web Panel")
         open_web_action.triggered.connect(self.open_web_panel)
 
+        # Add to Playlist submenu (dynamic)
+        self.tray_add_menu = tray_menu.addMenu("Add Current to Playlist")
+        # Placeholder; items will be populated when the menu opens
+        self.tray_add_menu.addAction("No saved playlists").setEnabled(False)
+
+        # When tray menu opens, rebuild the playlist submenu to reflect latest lists
+        def _rebuild_menu():
+            self._rebuild_tray_playlist_menu()
+        tray_menu.aboutToShow.connect(_rebuild_menu)
+
         open_loc_action = tray_menu.addAction("Open Current Location")
         open_loc_action.triggered.connect(self.open_current_location)
 
@@ -480,6 +490,96 @@ class MusicPlayer(QMainWindow):
         self.tray_icon.show()
         # Update initial tray state
         self.update_tray_ui()
+
+    def _rebuild_tray_playlist_menu(self):
+        """Rebuild the 'Add Current to Playlist' submenu dynamically."""
+        if not hasattr(self, 'tray_add_menu') or self.tray_add_menu is None:
+            return
+        self.tray_add_menu.clear()
+        # Action: Add to Active Playlist (if any)
+        if getattr(self, 'active_playlist', None):
+            act = self.tray_add_menu.addAction(f"Add to Active: {self.active_playlist.name}")
+            act.triggered.connect(lambda checked=False, n=self.active_playlist.name: self.add_current_to_named_playlist(n))
+            self.tray_add_menu.addSeparator()
+        # List saved playlists
+        if self.playlists:
+            for pl in self.playlists:
+                act = self.tray_add_menu.addAction(pl.name)
+                act.triggered.connect(lambda checked=False, n=pl.name: self.add_current_to_named_playlist(n))
+        else:
+            self.tray_add_menu.addAction("No saved playlists").setEnabled(False)
+        # Also allow creating a new playlist with the current track
+        self.tray_add_menu.addSeparator()
+        new_pl_act = self.tray_add_menu.addAction("New Playlist with Current Track…")
+        def _new_with_current():
+            name, ok = QInputDialog.getText(self, "New Playlist", "Playlist name:")
+            if ok and name:
+                from playlist import Playlist as _P
+                pl = _P(name)
+                item = self._get_current_item()
+                if item is not None:
+                    pl.items.append(item)
+                self.playlists.append(pl)
+                self.active_playlist = pl
+                self.save_playlists()
+                self.update_playlist_selector()
+                self.status_bar.showMessage(f"Created playlist '{name}' and added current track")
+        new_pl_act.triggered.connect(_new_with_current)
+
+    def _get_current_item(self):
+        """Return the currently playing/selected item (str path or dict for cloud), or None."""
+        try:
+            if not self.playlist or self.current_index < 0 or self.current_index >= len(self.playlist):
+                return None
+            return self.playlist[self.current_index]
+        except Exception:
+            return None
+
+    def add_current_to_named_playlist(self, name: str):
+        """Add the current item to the saved playlist with the given name."""
+        if not name:
+            return
+        item = self._get_current_item()
+        if item is None:
+            self.status_bar.showMessage("No current track to add")
+            return
+        target = None
+        for p in self.playlists:
+            if p.name == name:
+                target = p
+                break
+        if not target:
+            self.status_bar.showMessage(f"Playlist not found: {name}")
+            return
+        # Append item; optionally prevent exact duplicates for local files
+        try:
+            if isinstance(item, str):
+                if item not in target.items:
+                    target.items.append(item)
+            else:
+                target.items.append(item)
+        except Exception:
+            target.items.append(item)
+        target.modified = datetime.now().isoformat()
+        self.save_playlists()
+        # If the active playlist is the same, reflect in UI
+        if getattr(self, 'active_playlist', None) and self.active_playlist.id == target.id:
+            self.playlist.append(item)
+            if isinstance(item, dict):
+                display = "(Cloud)"
+                try:
+                    cloud_idx = item.get('cloud_idx')
+                    file_idx = item.get('file_idx')
+                    if isinstance(cloud_idx, int) and isinstance(file_idx, int):
+                        cloud = self.clouds[cloud_idx]
+                        file_info = cloud.get('files', [])[file_idx]
+                        display = os.path.basename(file_info.get('path', 'Cloud File')) + " (Cloud)"
+                except Exception:
+                    pass
+                self.playlist_widget.addItem(display)
+            else:
+                self.playlist_widget.addItem(os.path.basename(item))
+        self.status_bar.showMessage(f"Added current track to playlist: {name}")
 
     def update_tray_ui(self):
         """Refresh tray icon, tooltip, and action states based on playback and selection."""
