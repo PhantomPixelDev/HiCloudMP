@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QFormLayout,
-    QLineEdit, QTabWidget, QWidget, QLabel
+    QLineEdit, QTabWidget, QWidget, QLabel, QDialogButtonBox
 )
 from PySide6.QtCore import Qt
 
@@ -70,15 +70,6 @@ class AddCloudDialog(QDialog):
                 "webdav_password": self.webdav_password.text().strip()
             }
         }
-                "type": "dropbox",
-                "name": self.dropbox_name.text().strip(),
-                "config": {
-                    "token": self.dropbox_token.text().strip()
-                }
-            }
-        else:
-            # Placeholder for future implementations
-            return {"type": "unknown", "name": "Not Implemented", "config": {}}
 
 
 class EditCloudDialog(QDialog):
@@ -92,18 +83,8 @@ class EditCloudDialog(QDialog):
         # Create tab widget
         self.tab_widget = QTabWidget()
         
-        # Set up the appropriate tab based on cloud type
-        cloud_type = cloud_data["type"].lower()
-        if cloud_type == "webdav":
-            self.setup_webdav_tab()
-            self.tab_widget.setCurrentIndex(0)
-        elif cloud_type == "dropbox":
-            self.setup_dropbox_tab()
-            self.tab_widget.setCurrentIndex(1)
-        else:
-            # Add placeholder tabs for completeness
-            self.setup_webdav_tab()
-            self.setup_dropbox_tab()
+        # Only WebDAV is supported
+        self.setup_webdav_tab()
             
         # Buttons
         btns = QHBoxLayout()
@@ -154,55 +135,14 @@ class EditCloudDialog(QDialog):
         tab.setLayout(layout)
         self.tab_widget.addTab(tab, "WebDAV")
         
-    def setup_dropbox_tab(self):
-        tab = QWidget()
-        form = QFormLayout()
-        
-        self.dropbox_name = QLineEdit()
-        self.dropbox_token = QLineEdit()
-        
-        # Pre-fill fields with existing data
-        if self.cloud_data["type"] == "dropbox":
-            self.dropbox_name.setText(self.cloud_data["name"])
-            self.dropbox_token.setText(self.cloud_data["config"].get("token", ""))
-        
-        form.addRow("Account Name:", self.dropbox_name)
-        form.addRow("API Token:", self.dropbox_token)
-        
-        help_label = QLabel("To connect to Dropbox, you need an API token. Visit "
-                           "https://www.dropbox.com/developers/apps to create an app and generate a token.")
-        help_label.setWordWrap(True)
-        
-        layout = QVBoxLayout()
-        layout.addLayout(form)
-        layout.addWidget(help_label)
-        layout.addStretch()
-        
-        tab.setLayout(layout)
-        self.tab_widget.addTab(tab, "Dropbox")
         
     def get_data(self):
-        # Keep the original cloud type
-        cloud_type = self.cloud_data["type"]
-        
-        if cloud_type == "webdav":
-            return {
-                "type": cloud_type,
-                "name": self.webdav_name.text().strip(),
-                "config": {
-                    "webdav_hostname": self.webdav_url.text().strip(),
-                    "webdav_login": self.webdav_user.text().strip(),
-                    "webdav_password": self.webdav_pass.text().strip()
-                }
+        return {
+            "type": "webdav",
+            "name": self.webdav_name.text().strip(),
+            "config": {
+                "webdav_hostname": self.webdav_url.text().strip(),
+                "webdav_login": self.webdav_user.text().strip(),
+                "webdav_password": self.webdav_pass.text().strip()
             }
-        elif cloud_type == "dropbox":
-            return {
-                "type": cloud_type,
-                "name": self.dropbox_name.text().strip(),
-                "config": {
-                    "token": self.dropbox_token.text().strip()
-                }
-            }
-        else:
-            # Return original data if type not supported for editing
-            return self.cloud_data 
+        }

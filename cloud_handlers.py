@@ -317,9 +317,28 @@ class WebDAVHandler(CloudHandlerBase):
                         # Generate proper URL for the file
                         base_url = self.config["webdav_hostname"].rstrip("/")
                         file_url = f"{base_url}/{full_path}"
+                        
+                        # Extract basic metadata from filename
+                        name = os.path.splitext(os.path.basename(full_path))[0]
+                        
+                        # Try to extract artist and album from path if possible
+                        path_parts = full_path.split('/')
+                        artist = 'Unknown Artist'
+                        album = 'Unknown Album'
+                        
+                        # Common pattern: /Artist/Album/Track - Title.ext
+                        if len(path_parts) >= 3:
+                            artist = path_parts[-3]  # Second to last part is often artist
+                            album = path_parts[-2]   # Third to last part is often album
+                        elif len(path_parts) == 2:
+                            artist = path_parts[-2]  # If only one level deep, use that as artist
+                        
                         files.append({
                             "path": full_path,
-                            "url": file_url
+                            "url": file_url,
+                            "name": name,
+                            "artist": artist,
+                            "album": album
                         })
                 except Exception as e:
                     if self.debug: print(f"Error processing file '{full_path}': {e}")
@@ -332,104 +351,7 @@ class WebDAVHandler(CloudHandlerBase):
             self.current_file = ""
             return []
 
-class DropboxHandler(CloudHandlerBase):
-    """Handler for Dropbox cloud storage"""
-    def __init__(self, config):
-        super().__init__(config)
-        self.debug = False  # Set to True only for debugging
-        self._dir_cache = {}  # Cache for folder checks
-        self.current_file = ""
-        
-    def scan(self):
-        try:
-            # Import here to avoid global dependency
-            import dropbox
-            
-            dbx = dropbox.Dropbox(self.config["token"])
-            self.files = []
-            
-            # Get all directories to scan first
-            all_paths = self._discover_paths(dbx, "")
-            self.total_items = len(all_paths) + 1  # +1 for root
-            self.processed_items = 0
-            self.status_message = "Scanning Dropbox directories..."
-            
-            # Process directories in parallel - increase worker count
-            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-                future_to_path = {executor.submit(self._scan_path, dbx, path): path for path in all_paths}
-                future_to_path[executor.submit(self._scan_path, dbx, "")] = "/"
-                
-                all_files = []
-                for future in concurrent.futures.as_completed(future_to_path):
-                    path = future_to_path[future]
-                    try:
-                        path_files = future.result()
-                        all_files.extend(path_files)
-                        self.processed_items += 1
-                        self.status_message = f"Scanned {self.processed_items}/{self.total_items} Dropbox directories..."
-                    except Exception as e:
-                        if self.debug: print(f"Error scanning Dropbox path {path}: {e}")
-            
-            self.files = all_files
-            self.status_message = f"Dropbox scan complete. Found {len(self.files)} music files."
-            
-        except Exception as e:
-            error_msg = f"Dropbox scan error: {str(e)}"
-            self.status_message = error_msg
-            print(error_msg)
-            raise Exception(error_msg)
-    
-    def _discover_paths(self, dbx, path):
-        """Discover all paths in Dropbox account"""
-        try:
-            paths = []
-            try:
-                results = dbx.files_list_folder(path)
-            except Exception as e:
-                if self.debug: print(f"Error listing Dropbox path {path}: {e}")
-                return []
-            
-            for entry in results.entries:
-                if isinstance(entry, dropbox.files.FolderMetadata):
-                    folder_path = entry.path_display
-                    paths.append(folder_path)
-                    # Store in cache
-                    self._dir_cache[folder_path] = True
-                    
-                    # Get subfolders
-                    subpaths = self._discover_paths(dbx, folder_path)
-                    paths.extend(subpaths)
-            
-            return paths
-        except Exception as e:
-            if self.debug: print(f"Error discovering Dropbox paths for {path}: {e}")
-            return []
-    
-    def _scan_path(self, dbx, path):
-        """Scan a single Dropbox path for music files"""
-        try:
-            files = []
-            try:
-                results = dbx.files_list_folder(path)
-            except Exception as e:
-                if self.debug: print(f"Error listing Dropbox path {path}: {e}")
-                return []
-            
-            for entry in results.entries:
-                if isinstance(entry, dropbox.files.FileMetadata):
-                    # Fast check for music file extensions
-                    if any(entry.name.lower().endswith(ext) for ext in SUPPORTED_EXTS):
-                        files.append({
-                            "path": entry.path_display,
-                            "url": f"https://content.dropboxapi.com/2/files/download?authorization=Bearer {self.config['token']}&arg={{'path':'{entry.path_display}'}}"
-                        })
-            
-            return files
-        except Exception as e:
-            if self.debug: print(f"Error scanning Dropbox path {path}: {e}")
-            return []
 
-# Stubs for Google Drive, OneDrive
 # Dictionary mapping cloud types to their handler classes
 CLOUD_TYPES = {
     "webdav": WebDAVHandler

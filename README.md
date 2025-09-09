@@ -15,7 +15,7 @@ A powerful, modern music player with support for local and cloud-based music lib
 
 ✨ **Unified Music Library** - Access all your music in one place
 - 🎵 Local files and folders
-- ☁️ Cloud storage (WebDAV, Dropbox)
+- ☁️ Cloud storage via WebDAV (Nextcloud, OwnCloud, etc.)
 - 🔍 Powerful search across all sources
 
 🎧 **Playback Features**
@@ -59,7 +59,7 @@ source venv/bin/activate
 
 3. Install dependencies:
 ```bash
-pip install PySide6 webdavclient3 dropbox sounddevice soundfile flask flask-socketio python-socketio
+pip install PySide6 webdavclient3 sounddevice soundfile flask flask-socketio python-socketio
 ```
 
 4. Run the player:
@@ -96,10 +96,9 @@ HiCloud MP now includes a powerful web interface for remote control from any dev
 3. Choose whether to add to your library or directly to a playlist
 
 ### Adding Cloud Accounts
-1. Click "Add Cloud" to add a cloud storage account
-2. Select the cloud service type (WebDAV, Dropbox)
-3. Enter your credentials
-4. Click "Scan Cloud" to discover your music files
+1. Click "Add Cloud" to add a WebDAV storage account
+2. Enter your WebDAV server details (URL, username, password)
+3. Click "Scan Cloud" to discover your music files
 
 ### Creating Playlists
 1. Add tracks to the current queue

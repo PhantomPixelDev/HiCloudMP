@@ -1,20 +1,12 @@
 import os
+import io
 import json
-import tempfile
 import time
-import uuid
-import traceback
-import shutil
-from datetime import datetime
-import requests
-from concurrent.futures import ThreadPoolExecutor
-import glob
 import random
-import mutagen
-import mutagen.flac
-import mutagen.mp3
-import mutagen.oggvorbis
+import tempfile
+from urllib.parse import urlparse
 from platformdirs import user_data_dir, user_cache_dir
+from cover_extractor import CoverExtractor
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
@@ -24,6 +16,7 @@ from PySide6.QtWidgets import (
     QComboBox, QInputDialog, QListWidgetItem, QRadioButton, QDialogButtonBox, QProgressDialog,
     QCheckBox
 )
+from PySide6.QtGui import QPainter
 from PySide6.QtCore import Qt, QTimer, Signal, QObject, QThread, QUrl, QSize, QEvent, QSettings
 from PySide6.QtGui import QIcon, QAction, QKeySequence, QKeyEvent, QPalette, QColor, QPixmap
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput, QMediaFormat
@@ -37,11 +30,8 @@ from utils import (
 from cloud_handlers import CLOUD_TYPES
 from playlist import Playlist
 from dialogs import AddCloudDialog, EditCloudDialog
-from workers import DownloadWorker, ScanCloudWorker
-from media_keys import (
-    MediaKeyEventFilter, setup_windows_media_keys,
-    cleanup_windows_media_keys, create_win_proc_handler
-)
+from workers import DownloadWorker, ScanCloudWorker, CoverArtWorker
+
 from web_control import WebControlServer
 
 class CloudAccountsDialog(QDialog):
@@ -154,55 +144,8 @@ class SettingsDialog(QDialog):
             dlg = CloudAccountsDialog(self, self.parent.clouds)
             dlg.exec()
 
-class CoverArtWorker(QThread):
-    cover_ready = Signal(str, str)  # url, cover_path
-    def __init__(self, url, ext, auth=None, parent=None):
-        super().__init__(parent)
-        self.url = url
-        self.ext = ext
-        self.auth = auth
-        self.cover_path = None
-    def run(self):
-        try:
-            headers = {"Range": "bytes=0-524287"}  # 512KB
-            r = requests.get(self.url, headers=headers, stream=True, timeout=10, auth=self.auth)
-            r.raise_for_status()
-            with tempfile.NamedTemporaryFile(delete=False, suffix=self.ext) as tmp:
-                for chunk in r.iter_content(8192):
-                    tmp.write(chunk)
-                tmp_path = tmp.name
-            img_data = None
-            if self.ext == ".flac":
-                audio = mutagen.flac.FLAC(tmp_path)
-                if audio.pictures:
-                    img_data = audio.pictures[0].data
-            elif self.ext == ".mp3":
-                audio = mutagen.mp3.MP3(tmp_path)
-                for tag in audio.tags.values():
-                    if tag.FrameID == "APIC":
-                        img_data = tag.data
-                        break
-            elif self.ext == ".ogg":
-                audio = mutagen.oggvorbis.OggVorbis(tmp_path)
-                if "metadata_block_picture" in audio:
-                    import base64
-                    from mutagen.flac import Picture
-                    pic = Picture()
-                    pic_data = base64.b64decode(audio["metadata_block_picture"][0])
-                    pic.parse(pic_data)
-                    img_data = pic.data
-            if img_data:
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as img_tmp:
-                    img_tmp.write(img_data)
-                    img_path = img_tmp.name
-                self.cover_path = img_path
-            else:
-                self.cover_path = None
-            os.remove(tmp_path)
-        except Exception as e:
-            print(f"CoverArtWorker error: {e}")
-            self.cover_path = None
-        self.cover_ready.emit(self.url, self.cover_path or "")
+    pass
+
 
 class MusicPlayer(QMainWindow):
     cloud_file_downloaded = Signal(str)
@@ -260,7 +203,6 @@ class MusicPlayer(QMainWindow):
         self.player.positionChanged.connect(self.update_position)
         self.player.durationChanged.connect(self.update_duration)
         self.player.mediaStatusChanged.connect(self.on_media_status_changed)
-        self.player.metaDataChanged.connect(self.update_metadata_display)
         self.cloud_file_downloaded.connect(self.play_downloaded_file)
         
         # UI
@@ -271,26 +213,139 @@ class MusicPlayer(QMainWindow):
         self.load_clouds()
         self.load_playlists()
         
-        # Install media key event filter
-        self.media_key_filter = MediaKeyEventFilter(self)
-        QApplication.instance().installEventFilter(self.media_key_filter)
-        
-        # For Windows, set up win32 message handling for media keys
-        if HAS_WIN32:
-            setup_windows_media_keys(self)
-            
         self.web_server = None
         self.web_port = 5000
         
-        self.apply_settings()
+        # Async cover fetch state
+        self._cover_thread = None
+        self._cover_worker = None
+        self._pending_cover = None  # (source, is_url)
+        self._cover_inflight_source = None
+        self._last_cover_source = None
+        self._last_cover_time = 0.0
         
-        # Add settings action to menu
+    
+        
+        # Create menu bar
+        menubar = self.menuBar()
+        
+        # Add Web Panel action
+        web_panel_action = QAction("Web Panel", self)
+        web_panel_action.triggered.connect(self.open_web_panel)
+        menubar.addAction(web_panel_action)
+        
+        # Add Settings action
         settings_action = QAction("Settings", self)
         settings_action.triggered.connect(self.open_settings_dialog)
-        self.menuBar().addAction(settings_action)
+        menubar.addAction(settings_action)
         
-        self.cover_cache = {}  # url -> cover_path
-        self.cover_worker = None
+        
+    def set_dark_theme(self):
+        """Apply dark theme to the application"""
+        self.setStyleSheet("""
+            QMainWindow, QDialog {
+                background-color: #2b2b2b;
+                color: #ffffff;
+            }
+            QLabel, QPushButton, QCheckBox, QRadioButton, QLineEdit, QListWidget, QComboBox {
+                color: #ffffff;
+            }
+            QPushButton {
+                background-color: #3a3a3a;
+                border: 1px solid #555;
+                padding: 5px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #4a4a4a;
+            }
+            QPushButton:pressed {
+                background-color: #2a2a2a;
+            }
+            QListWidget, QLineEdit, QComboBox {
+                background-color: #3a3a3a;
+                border: 1px solid #555;
+                padding: 5px;
+                border-radius: 4px;
+            }
+            QScrollBar:vertical {
+                background: #3a3a3a;
+                width: 12px;
+                margin: 0px;
+            }
+            QScrollBar::handle:vertical {
+                background: #555;
+                min-height: 20px;
+                border-radius: 6px;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+        """)
+
+    def open_settings_dialog(self):
+        """Open the settings dialog and apply any changes"""
+        dialog = SettingsDialog(self)
+        if dialog.exec() == QDialog.Accepted:
+            dialog.save_settings()
+            # Apply theme
+            theme = dialog.settings.value("theme", "Dark")
+            if theme == "Dark":
+                self.set_dark_theme()
+            else:
+                # Reset to default light theme
+                self.setStyleSheet("")
+            # Apply volume
+            volume = dialog.settings.value("volume", 70, int)
+            self.audio_output.setVolume(volume / 100.0)
+            self.volume_slider.setValue(volume)
+            # Update web interface setting
+            if hasattr(self, 'web_server'):
+                if dialog.settings.value("web_interface", False, bool):
+                    self.start_web_interface()
+                else:
+                    self.stop_web_interface()
+
+    def start_web_interface(self):
+        """Start the web interface server"""
+        if hasattr(self, 'web_server') and self.web_server:
+            return  # Already running
+            
+        try:
+            from web_control import app
+            from threading import Thread
+            
+            # Configure the Flask app
+            app.config['PLAYER'] = self
+            
+            # Start the Flask server in a separate thread
+            def run_server():
+                from waitress import serve
+                serve(app, host='0.0.0.0', port=self.web_port)
+                
+            self.web_server = Thread(target=run_server, daemon=True)
+            self.web_server.start()
+            return True
+        except ImportError as e:
+            print(f"Failed to start web interface: {e}")
+            QMessageBox.warning(self, "Web Interface", 
+                             "Failed to start web interface. Make sure required packages are installed.")
+            return False
+    
+    def stop_web_interface(self):
+        """Stop the web interface server"""
+        if hasattr(self, 'web_server') and self.web_server:
+            # This is a simple implementation - in a real app, you'd want to properly shut down the server
+            self.web_server = None
+    
+    def open_web_panel(self):
+        """Open the web control panel in the default browser"""
+        import webbrowser
+        if hasattr(self, 'web_server') and self.web_server:
+            url = f"http://localhost:{self.web_port}"
+            webbrowser.open(url)
+        else:
+            QMessageBox.warning(self, "Web Panel", "Web interface is not enabled in settings.")
         
     def setup_system_media_controls(self):
         """Setup system-wide media controls (keyboard, taskbar, etc.)"""
@@ -465,27 +520,93 @@ class MusicPlayer(QMainWindow):
         self.playlist_widget.setSelectionMode(QListWidget.ExtendedSelection)
         player_layout.addWidget(self.playlist_widget)
         
-        # Album art and metadata display
-        cover_and_meta_layout = QHBoxLayout()
-        self.album_art_label = QLabel()
-        self.album_art_label.setFixedSize(120, 120)
-        self.album_art_label.setScaledContents(True)
-        self.album_art_label.setPixmap(QPixmap())
-        cover_and_meta_layout.addWidget(self.album_art_label)
-        meta_info_layout = QVBoxLayout()
+        # Cover art and metadata display
+        meta_container = QWidget()
+        meta_layout = QHBoxLayout(meta_container)
+        
+        # Cover art with frame
+        cover_frame = QFrame()
+        cover_frame.setFixedSize(220, 220)  # Slightly larger to accommodate the frame
+        cover_frame.setStyleSheet("""
+            QFrame {
+                background-color: #2d2d2d;
+                border: 2px solid #444;
+                border-radius: 8px;
+                padding: 10px;
+            }
+        """)
+        
+        # Create a layout for the cover art
+        cover_layout = QVBoxLayout(cover_frame)
+        cover_layout.setContentsMargins(0, 0, 0, 0)
+        cover_layout.setSpacing(0)
+        
+        # Cover art label
+        self.cover_art_label = QLabel()
+        self.cover_art_label.setFixedSize(200, 200)  # Fixed size for cover art
+        self.cover_art_label.setAlignment(Qt.AlignCenter)
+        self.cover_art_label.setStyleSheet("""
+            QLabel {
+                background-color: #1a1a1a;
+                border: 1px solid #333;
+                border-radius: 4px;
+            }
+        """)
+        
+        # Add cover art to its frame
+        cover_layout.addWidget(self.cover_art_label)
+        
+        # Debug: Print cover art label info
+        print("\n=== Cover Art Label Info ===")
+        print(f"Size: {self.cover_art_label.size().width()}x{self.cover_art_label.size().height()}")
+        print(f"Is visible: {self.cover_art_label.isVisible()}")
+        print(f"Is enabled: {self.cover_art_label.isEnabled()}")
+        
+        # Set default cover art
+        self.set_default_cover()
+        
+        # Metadata text
+        meta_text_layout = QVBoxLayout()
         self.track_title_label = QLabel("Title: -")
         self.track_artist_label = QLabel("Artist: -")
         self.track_album_label = QLabel("Album: -")
-        meta_info_layout.addWidget(self.track_title_label)
-        meta_info_layout.addWidget(self.track_artist_label)
-        meta_info_layout.addWidget(self.track_album_label)
-        meta_info_layout.addStretch(1)
-        cover_and_meta_layout.addLayout(meta_info_layout)
-        # Wrap in QWidget and set max height
-        cover_and_meta_widget = QWidget()
-        cover_and_meta_widget.setLayout(cover_and_meta_layout)
-        cover_and_meta_widget.setMaximumHeight(140)
-        player_layout.addWidget(cover_and_meta_widget)
+        
+        # Style metadata labels
+        for label in [self.track_title_label, self.track_artist_label, self.track_album_label]:
+            label.setStyleSheet("font-size: 12px; margin: 2px;")
+        
+        meta_text_layout.addWidget(self.track_title_label)
+        meta_text_layout.addWidget(self.track_artist_label)
+        meta_text_layout.addWidget(self.track_album_label)
+        meta_text_layout.addStretch(1)
+        
+        # Add widgets to layout with proper spacing and alignment
+        meta_layout.addWidget(cover_frame, 0, Qt.AlignTop | Qt.AlignLeft)  # Add the framed cover art
+        meta_layout.addLayout(meta_text_layout)
+        meta_layout.setStretch(0, 0)  # Don't stretch cover art
+        meta_layout.setStretch(1, 1)  # Stretch metadata text
+        meta_layout.setSpacing(20)  # Add some spacing between cover art and text
+        
+        # Force update the layout
+        meta_layout.update()
+        meta_layout.activate()
+        
+        # Debug: Print layout info
+        print("\n=== Cover Art Layout Info ===")
+        print(f"Cover art in layout: {meta_layout.itemAt(0).widget() is self.cover_art_label}")
+        print(f"Layout contents rect: {meta_layout.contentsRect()}")
+        
+        # Create a container widget for metadata
+        meta_widget = QWidget()
+        meta_widget.setLayout(meta_layout)
+        meta_widget.setMinimumHeight(240)  # Increased to fit the cover art
+        meta_widget.setMaximumHeight(240)  # Fixed height to prevent layout jumps
+        player_layout.addWidget(meta_widget)
+        
+        # Force a style refresh
+        meta_widget.style().unpolish(meta_widget)
+        meta_widget.style().polish(meta_widget)
+        meta_widget.update()
         
         # Playback controls
         controls_frame = QFrame()
@@ -497,7 +618,14 @@ class MusicPlayer(QMainWindow):
         self.position_label = QLabel("00:00")
         self.duration_label = QLabel("00:00")
         self.seek_slider = QSlider(Qt.Horizontal)
+        self.seek_slider.setTracking(True)  # Enable tracking for smooth updates
         self.seek_slider.sliderMoved.connect(self.seek_position)
+        self.seek_slider.sliderPressed.connect(self.on_slider_pressed)
+        self.seek_slider.sliderReleased.connect(self.on_slider_released)
+        self.seek_slider.mousePressEvent = self.seek_slider_mouse_press
+        self.seek_slider.mouseMoveEvent = self.seek_slider_mouse_move
+        self.seek_slider.setSingleStep(1000)  # 1 second step
+        self.seek_slider.setPageStep(10000)   # 10 second step
         
         seek_layout.addWidget(self.position_label)
         seek_layout.addWidget(self.seek_slider)
@@ -576,14 +704,10 @@ class MusicPlayer(QMainWindow):
         
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
-        self.progress_bar.setTextVisible(True)
         self.progress_bar.setFixedWidth(200)
         self.progress_bar.hide()
         
-        self.now_playing_label = QLabel("Ready")
-        
         self.status_bar.addPermanentWidget(self.progress_bar)
-        self.status_bar.addPermanentWidget(self.now_playing_label)
 
     # === Playback Controls ===
     def play(self):
@@ -596,17 +720,20 @@ class MusicPlayer(QMainWindow):
             self.play_cloud_file(cloud_idx, file_idx)
         else:
             path = self.playlist[self.current_index]
+            # Set up and play the media
             url = QUrl.fromLocalFile(os.path.abspath(path))
             self.player.setSource(url)
             self.player.play()
-            self.now_playing_label.setText(f"Playing: {os.path.basename(path)}")
+            
+            # Update UI elements
             self.playlist_widget.setCurrentRow(self.current_index)
-            # Scroll to the current playing track
             item = self.playlist_widget.item(self.current_index)
             if item:
                 self.playlist_widget.scrollToItem(item)
             self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
-        self.update_metadata_display()
+            
+            # Force an immediate metadata update
+            QTimer.singleShot(100, self.update_metadata_display)
         self.highlight_current_track()
     
     def play_selected(self, item):
@@ -645,6 +772,384 @@ class MusicPlayer(QMainWindow):
             self.current_index -= 1
             self.play()
     
+    def update_cover_art(self, item):
+        """Update the cover art display for the current track (non-blocking)"""
+        print("\n=== Updating Cover Art ===")
+        print(f"Item type: {type(item)}")
+        print(f"Item content: {item}")
+
+        if not hasattr(self, 'cover_art_label') or not self.cover_art_label:
+            print("Error: cover_art_label is not initialized!")
+            return
+
+        # Determine source and whether it's a URL
+        source = None
+        is_url = False
+
+        try:
+            if isinstance(item, dict) and (item.get("is_cloud", False) or item.get("type") == "cloud"):
+                url = item.get("url")
+                try:
+                    if (not url or "@" not in url) and "cloud_idx" in item and "file_idx" in item:
+                        cloud_idx = item.get("cloud_idx")
+                        file_idx = item.get("file_idx")
+                        if isinstance(cloud_idx, int) and 0 <= cloud_idx < len(self.clouds):
+                            cloud = self.clouds[cloud_idx]
+                            files = cloud.get("files", [])
+                            if isinstance(file_idx, int) and 0 <= file_idx < len(files):
+                                base_url = files[file_idx].get("url")
+                                if base_url:
+                                    cfg = cloud.get("config", {})
+                                    user = cfg.get("webdav_login", "")
+                                    pwd = cfg.get("webdav_password", "")
+                                    parsed = QUrl(base_url)
+                                    if user and pwd and not parsed.userName():
+                                        parsed.setUserName(user)
+                                        parsed.setPassword(pwd)
+                                    # Use fully encoded URL to avoid spaces/apostrophes issues
+                                    try:
+                                        url = parsed.toString(QUrl.UrlFormattingOption.FullyEncoded)
+                                    except Exception:
+                                        url = parsed.toString()
+                except Exception as e:
+                    print(f"Error constructing authenticated URL for cover: {e}")
+                if url:
+                    source = url
+                    is_url = True
+            elif isinstance(item, str) and os.path.exists(item):
+                source = item
+                is_url = False
+
+            # Start async fetch if we have a source (debounced)
+            if source:
+                try:
+                    import time as _time
+                    if self._last_cover_source == source and (_time.time() - self._last_cover_time) < 3.0:
+                        print("Debounced duplicate cover fetch for same source")
+                        return
+                    if self._cover_inflight_source == source:
+                        print("Cover fetch already inflight for this source; skipping")
+                        return
+                    self._last_cover_source = source
+                    self._last_cover_time = _time.time()
+                except Exception:
+                    pass
+                self._start_cover_art_fetch(source, is_url)
+            else:
+                print("No valid source for cover art; setting default cover")
+                self.set_default_cover()
+
+        except Exception as e:
+            print(f"Unexpected error in update_cover_art: {e}")
+            import traceback
+            traceback.print_exc()
+            self.set_default_cover()
+
+    def _start_cover_art_fetch(self, source, is_url):
+        """Start a background worker to fetch cover art without blocking UI."""
+        try:
+            # If a worker is already running, queue latest request and abort current
+            if self._cover_thread and self._cover_thread.isRunning():
+                self._pending_cover = (source, is_url)
+                try:
+                    if self._cover_worker:
+                        self._cover_worker.abort()
+                except Exception:
+                    pass
+                try:
+                    self._cover_thread.requestInterruption() if hasattr(self._cover_thread, 'requestInterruption') else None
+                    self._cover_thread.quit()
+                except Exception:
+                    pass
+                # Do not start a new worker now; it will be started when current finishes
+                return
+
+            self._cover_thread = QThread(self)
+            self._cover_worker = CoverArtWorker(source, is_url=is_url)
+            self._cover_worker.moveToThread(self._cover_thread)
+            self._cover_thread.started.connect(self._cover_worker.run)
+            # Ensure proper cleanup when thread finishes
+            def _cleanup_thread():
+                try:
+                    self._cover_worker.deleteLater()
+                except Exception:
+                    pass
+                try:
+                    self._cover_thread.deleteLater()
+                except Exception:
+                    pass
+                self._cover_thread = None
+                self._cover_worker = None
+                self._cover_inflight_source = None
+                # If a pending cover request exists, start it now
+                if self._pending_cover:
+                    src, pending_is_url = self._pending_cover
+                    self._pending_cover = None
+                    QTimer.singleShot(0, lambda: self._start_cover_art_fetch(src, pending_is_url))
+            self._cover_thread.finished.connect(_cleanup_thread)
+
+            def on_finished(png_bytes):
+                try:
+                    if png_bytes:
+                        pixmap = QPixmap()
+                        if pixmap.loadFromData(png_bytes):
+                            scaled_pixmap = pixmap.scaled(
+                                self.cover_art_label.size(),
+                                Qt.AspectRatioMode.KeepAspectRatio,
+                                Qt.TransformationMode.SmoothTransformation
+                            )
+                            self.cover_art_label.setPixmap(scaled_pixmap)
+                            self.cover_art_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                            print("Successfully set async cover art")
+                        else:
+                            print("Failed to load pixmap from bytes")
+                            self.set_default_cover()
+                    else:
+                        print("No cover bytes returned")
+                        self.set_default_cover()
+                finally:
+                    # Signal the worker thread to finish; cleanup occurs on finished
+                    try:
+                        self._cover_thread.quit()
+                    except Exception:
+                        pass
+                    self._cover_inflight_source = None
+
+            def on_error(msg):
+                print(f"Cover art worker error: {msg}")
+                self._cover_inflight_source = None
+
+            self._cover_worker.finished.connect(on_finished)
+            self._cover_worker.error.connect(on_error)
+            self._cover_inflight_source = source
+            self._cover_thread.start()
+        except Exception as e:
+            print(f"Failed to start cover art worker: {e}")
+            self.set_default_cover()
+
+    def closeEvent(self, event):
+        """Ensure background threads are stopped on app close."""
+        try:
+            if self._cover_thread and self._cover_thread.isRunning():
+                try:
+                    if self._cover_worker:
+                        self._cover_worker.abort()
+                except Exception:
+                    pass
+                try:
+                    self._cover_thread.quit()
+                except Exception:
+                    pass
+                # Give it a brief moment to exit without blocking long
+                try:
+                    self._cover_thread.wait(100)
+                except Exception:
+                    pass
+            self._pending_cover = None
+            self._cover_inflight_source = None
+        finally:
+            super().closeEvent(event)
+    
+    def set_default_cover(self):
+        """Set the default cover art"""
+        try:
+            print("\n=== Setting default cover ===")
+            # Create a fixed size pixmap
+            default_cover = QPixmap(200, 200)
+            
+            # Fill with dark gray
+            default_cover.fill(Qt.darkGray)
+            
+            # Create a painter for the pixmap
+            painter = QPainter(default_cover)
+            
+            # Set up pen and font
+            painter.setPen(Qt.white)
+            font = painter.font()
+            font.setBold(True)
+            font.setPointSize(12)
+            painter.setFont(font)
+            
+            # Draw the text
+            text = "No Cover"
+            text_rect = painter.boundingRect(default_cover.rect(), Qt.AlignCenter, text)
+            painter.drawText(text_rect, Qt.AlignCenter, text)
+            painter.end()
+            
+            # Set the pixmap to the label
+            self.cover_art_label.setPixmap(default_cover)
+            self.cover_art_label.setAlignment(Qt.AlignCenter)
+            print("Default cover set")
+            
+        except Exception as e:
+            print(f"Error in set_default_cover: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # Last resort: try a simple gray rectangle
+            try:
+                default_cover = QPixmap(200, 200)
+                default_cover.fill(Qt.darkGray)
+                self.cover_art_label.setPixmap(default_cover)
+                self.cover_art_label.setAlignment(Qt.AlignCenter)
+            except Exception as e:
+                print(f"Failed to set fallback cover: {e}")
+    
+    def update_metadata_display(self):
+        """Update the metadata display with information about the current track"""
+        try:
+            print("\n=== Updating Metadata Display ===")
+            
+            # Initialize default values
+            default_title = "Title: -"
+            default_artist = "Artist: -"
+            default_album = "Album: -"
+            
+            # Set default values first to clear any previous content
+            self.track_title_label.setText(default_title)
+            self.track_artist_label.setText(default_artist)
+            self.track_album_label.setText(default_album)
+            
+            if not hasattr(self, 'current_index') or self.current_index < 0 or self.current_index >= len(self.playlist):
+                print("Invalid current index, can't update metadata")
+                self.set_default_cover()
+                return
+                
+            current_item = self.playlist[self.current_index]
+            print(f"Current item type: {type(current_item)}")
+            print(f"Current item content: {current_item}")
+            
+            # Handle cloud files
+            if isinstance(current_item, dict):
+                print("Processing dictionary item...")
+                try:
+                    # Cloud item: use fast ffprobe metadata when possible
+                    is_cloud = current_item.get('is_cloud', False) or current_item.get('type') == 'cloud'
+                    title = current_item.get('title', '')
+                    artist = current_item.get('artist', '')
+                    album = current_item.get('album', '')
+
+                    if is_cloud:
+                        # Build authenticated URL if needed
+                        url = current_item.get('url')
+                        try:
+                            if (not url or "@" not in url) and "cloud_idx" in current_item and "file_idx" in current_item:
+                                cloud_idx = current_item.get('cloud_idx')
+                                file_idx = current_item.get('file_idx')
+                                if isinstance(cloud_idx, int) and 0 <= cloud_idx < len(self.clouds):
+                                    cloud = self.clouds[cloud_idx]
+                                    files = cloud.get('files', [])
+                                    if isinstance(file_idx, int) and 0 <= file_idx < len(files):
+                                        base_url = files[file_idx].get('url')
+                                        if base_url:
+                                            cfg = cloud.get('config', {})
+                                            user = cfg.get('webdav_login', '')
+                                            pwd = cfg.get('webdav_password', '')
+                                            parsed = QUrl(base_url)
+                                            if user and pwd and not parsed.userName():
+                                                parsed.setUserName(user)
+                                                parsed.setPassword(pwd)
+                                            try:
+                                                url = parsed.toString(QUrl.UrlFormattingOption.FullyEncoded)
+                                            except Exception:
+                                                url = parsed.toString()
+                        except Exception:
+                            pass
+
+                        # Extract tags quickly via ffprobe
+                        try:
+                            from cover_extractor import CoverExtractor as _CE
+                            md = _CE.extract_metadata(url or '', is_url=True)
+                            if md.get('title'):
+                                title = md['title']
+                            if md.get('artist'):
+                                artist = md['artist']
+                            if md.get('album'):
+                                album = md['album']
+                        except Exception as e:
+                            print(f"ffprobe metadata failed: {e}")
+
+                    if not title:
+                        if 'name' in current_item:
+                            title = os.path.splitext(str(current_item['name']))[0]
+                        elif 'path' in current_item:
+                            title = os.path.splitext(os.path.basename(str(current_item['path'])))[0]
+                        else:
+                            title = 'Unknown'
+                    if not artist:
+                        artist = 'Unknown Artist'
+                    if not album:
+                        album = 'Unknown Album'
+
+                    # Update UI
+                    self.track_title_label.setText(f"Title: {title}")
+                    self.track_artist_label.setText(f"Artist: {artist}")
+                    self.track_album_label.setText(f"Album: {album}")
+
+                    print(f"Metadata - Title: {title}, Artist: {artist}, Album: {album}")
+
+                    # Update cover art asynchronously
+                    self.update_cover_art(current_item)
+                    return
+
+                except Exception as e:
+                    print(f"Error processing dictionary item: {e}")
+                    import traceback
+                    traceback.print_exc()
+            
+            # Handle local files
+            elif isinstance(current_item, str) and os.path.exists(current_item):
+                print(f"Processing local file: {current_item}")
+                try:
+                    import mutagen
+                    audio = mutagen.File(current_item, easy=True)
+                    if audio:
+                        title = audio.get('title', [os.path.basename(current_item)])[0]
+                        artist = audio.get('artist', ['Unknown Artist'])[0]
+                        album = audio.get('album', ['Unknown Album'])[0]
+                        
+                        print(f"Local metadata - Title: {title}, Artist: {artist}, Album: {album}")
+                        self.track_title_label.setText(f"Title: {title}")
+                        self.track_artist_label.setText(f"Artist: {artist}")
+                        self.track_album_label.setText(f"Album: {album}")
+                        
+                        # Update cover art
+                        self.update_cover_art(current_item)
+                        return
+                    
+                except Exception as e:
+                    print(f"Error processing local file: {e}")
+                    import traceback
+                    traceback.print_exc()
+            
+            # Fallback for any other case
+            print("Using fallback metadata display")
+            self.track_title_label.setText(f"Title: {os.path.basename(str(current_item))}" if isinstance(current_item, str) else "Title: Unknown")
+            self.track_artist_label.setText("Artist: Unknown")
+            self.track_album_label.setText("Album: Unknown")
+            
+            # If we get here, something went wrong with the normal flow
+            print("Falling back to default cover art")
+            self.set_default_cover()
+            
+            # Force UI update
+            QApplication.processEvents()
+            print("Finished updating metadata display")
+            
+        except Exception as e:
+            print(f"Critical error in update_metadata_display: {e}")
+            import traceback
+            traceback.print_exc()
+            # Last resort: set default cover and clear metadata
+            try:
+                self.set_default_cover()
+                self.track_title_label.setText("Title: Error")
+                self.track_artist_label.setText("Artist: Error")
+                self.track_album_label.setText("Album: Error")
+            except Exception as e:
+                print(f"Failed to set error state: {e}")
+    
+            
     def update_position(self, position):
         self.seek_slider.blockSignals(True)
         self.seek_slider.setValue(position)
@@ -655,8 +1160,57 @@ class MusicPlayer(QMainWindow):
         self.seek_slider.setRange(0, duration)
         self.duration_label.setText(format_time(duration))
     
+    def on_slider_pressed(self):
+        # Store the current state to restore if needed
+        self.was_playing = self.player.playbackState() == QMediaPlayer.PlayingState
+        if self.was_playing:
+            self.player.pause()
+    
+    def on_slider_released(self):
+        # Restore playback state if it was playing
+        if hasattr(self, 'was_playing') and self.was_playing:
+            self.player.play()
+    
+    def seek_slider_mouse_press(self, event):
+        # Handle mouse press on the slider
+        if event.button() == Qt.LeftButton:
+            # Calculate the position based on the mouse click
+            pos = event.pos().x()
+            max_ = self.seek_slider.maximum()
+            min_ = self.seek_slider.minimum()
+            width = self.seek_slider.width()
+            value = min_ + ((max_ - min_) * pos) // width
+            self.seek_position(value)
+        # Call the original mouse press event
+        QSlider.mousePressEvent(self.seek_slider, event)
+    
+    def seek_slider_mouse_move(self, event):
+        # Handle mouse move with left button pressed (dragging)
+        if event.buttons() & Qt.LeftButton:
+            pos = event.pos().x()
+            max_ = self.seek_slider.maximum()
+            min_ = self.seek_slider.minimum()
+            width = self.seek_slider.width()
+            value = min_ + ((max_ - min_) * pos) // width
+            self.seek_position(value)
+        # Call the original mouse move event
+        QSlider.mouseMoveEvent(self.seek_slider, event)
+    
     def seek_position(self, position):
-        self.player.setPosition(position)
+        # Make sure position is within valid range
+        if position < 0:
+            position = 0
+        max_pos = self.player.duration()
+        if position > max_pos and max_pos > 0:
+            position = max_pos
+            
+        # Update the slider position
+        self.seek_slider.setValue(position)
+        
+        # Only update the player position if the change is significant
+        # (to avoid excessive updates during drag)
+        if abs(self.player.position() - position) > 100:  # 100ms threshold
+            self.player.setPosition(position)
     
     def set_volume(self, volume):
         self.audio_output.setVolume(volume / 100.0)
@@ -702,7 +1256,11 @@ class MusicPlayer(QMainWindow):
                     name = os.path.basename(current_item.get('path', 'Unknown'))
                 else:
                     name = os.path.basename(str(current_item))
-                self.now_playing_label.setText(f"Loaded: {name}")
+                # Update labels once media is ready
+                try:
+                    self.update_metadata_display()
+                except Exception as e:
+                    print(f"Metadata update on LoadedMedia failed: {e}")
             
         elif status == QMediaPlayer.MediaStatus.BufferedMedia:
             # Media is buffered and ready to play
@@ -713,7 +1271,11 @@ class MusicPlayer(QMainWindow):
                         name = os.path.basename(current_item.get('path', 'Unknown'))
                     else:
                         name = os.path.basename(str(current_item))
-                    self.now_playing_label.setText(f"Now Playing: {name}")
+                    # Ensure metadata labels are accurate when buffered
+                    try:
+                        self.update_metadata_display()
+                    except Exception as e:
+                        print(f"Metadata update on BufferedMedia failed: {e}")
         
         elif status == QMediaPlayer.MediaStatus.EndOfMedia:
             if self.repeat_btn.isChecked():
@@ -769,14 +1331,13 @@ class MusicPlayer(QMainWindow):
             if cloud_type == "webdav":
                 auth_user = cloud["config"].get("webdav_login", "")
                 auth_pass = cloud["config"].get("webdav_password", "")
-                if auth_user and auth_pass and "@" not in url:
-                    parsed_url = QUrl(url)
-                    auth_url = f"{parsed_url.scheme()}://{auth_user}:{auth_pass}@{parsed_url.host()}{parsed_url.path()}"
-                    if parsed_url.query():
-                        auth_url += f"?{parsed_url.query()}"
-                    url = auth_url
-            
-            media_url = QUrl(url)
+                media_url = QUrl(url)
+                # If credentials not present in URL, set via QUrl to safely encode
+                if auth_user and auth_pass and not media_url.userName():
+                    media_url.setUserName(auth_user)
+                    media_url.setPassword(auth_pass)
+            else:
+                media_url = QUrl(url)
             
             # Stop current playback asynchronously
             self.player.stop()
@@ -785,14 +1346,35 @@ class MusicPlayer(QMainWindow):
             
             # Set new source and start playback
             self.player.setSource(media_url)
-            self.now_playing_label.setText(f"Streaming: {file_name}")
+            
+            # Update UI with track information
+            base_name = os.path.splitext(file_name)[0]
+            self.track_title_label.setText(f"Title: {base_name}")
+            self.track_artist_label.setText("Artist: -")
+            self.track_album_label.setText("Album: -")
+            
+            
             self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
             
-            # Use a small delay to prevent race conditions
+            # Use a small delay to prevent race conditions; also update metadata right away
             QTimer.singleShot(100, self.player.play)
+            QTimer.singleShot(100, self.update_metadata_display)
             
             if hasattr(self, 'current_index') and 0 <= self.current_index < len(self.playlist):
                 self.playlist_widget.setCurrentRow(self.current_index)
+                
+                # Try to update metadata from the current playlist item
+                current_item = self.playlist[self.current_index]
+                if isinstance(current_item, dict):
+                    # If we have metadata in the playlist item, use it
+                    if 'title' in current_item:
+                        self.track_title_label.setText(f"Title: {current_item['title']}")
+                    if 'artist' in current_item:
+                        self.track_artist_label.setText(f"Artist: {current_item['artist']}")
+                    if 'album' in current_item:
+                        self.track_album_label.setText(f"Album: {current_item['album']}")
+                    # Also refresh cover art for this cloud item
+                    self.update_cover_art(current_item)
                 
         except Exception as e:
             error_msg = f"Failed to start streaming: {str(e)}"
@@ -862,98 +1444,67 @@ class MusicPlayer(QMainWindow):
             )
     
     def _play_stream(self, url, display_name):
-        """Play a stream from a direct URL"""
+        
         try:
-            self.status_bar.showMessage(f"Streaming: {display_name}")
-            QApplication.processEvents()
-            
-            # Stop any currently playing media
+            # Clear any existing media
             self.player.stop()
-            self.player.setSource(QUrl())
-            QApplication.processEvents()
             
-            # Set the streaming URL
-            self.player.setSource(QUrl(url))
+            # Set up the media content
+            media = QMediaContent(QUrl(url))
+            self.player.setSource(media)
             
-            # Update UI
-            self.now_playing_label.setText(f"Streaming: {display_name}")
-            self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+            # Set up error handling
+            def handle_error(error, error_string):
+                if error != QMediaPlayer.NoError:
+                    self.status_bar.showMessage(f"Playback error: {error_string}")
+                    # Try to reconnect after a short delay
+                    QTimer.singleShot(5000, lambda: self._play_stream(url, display_name))
             
-            # Start playback with a small delay to prevent race conditions
-            QTimer.singleShot(100, self.player.play)
+            # Connect error handling
+            self.player.errorOccurred.disconnect()
+            self.player.errorOccurred.connect(handle_error)
+            
+            # Set up buffering status handling
+            def handle_buffer_status(percent_filled):
+                self.status_bar.showMessage(f"Buffering... {percent_filled}%")
+                if percent_filled >= 100:
+                    self.status_bar.clearMessage()
+            
+            # Connect buffering status
+            if hasattr(self.player, 'bufferProgress'):
+                self.player.bufferProgress.connect(handle_buffer_status)
+            
+            # Set up media status changes
+            def handle_media_status(status):
+                if status == QMediaPlayer.MediaStatus.EndOfMedia:
+                    # If we reach the end, try to reconnect to the stream
+                    QTimer.singleShot(1000, lambda: self._play_stream(url, display_name))
+                elif status == QMediaPlayer.MediaStatus.InvalidMedia:
+                    self.status_bar.showMessage("Invalid media. Trying to reconnect...")
+                    QTimer.singleShot(5000, lambda: self._play_stream(url, display_name))
+            
+            # Connect media status changes
+            self.player.mediaStatusChanged.disconnect()
+            self.player.mediaStatusChanged.connect(handle_media_status)
+            
+            # Set network configuration for better streaming
+            network_config = QNetworkConfiguration()
+            network_config.setConnectTimeout(10000)  # 10 seconds timeout
+            network_config.setTransferTimeout(30000)  # 30 seconds transfer timeout
+            
+            # Set the network configuration on the player's network access manager
+            if hasattr(self.player, 'networkConfiguration'):
+                self.player.networkConfiguration().setConfiguration(network_config)
+            
+            # Start playback
+            self.player.play()
+            self.status_bar.showMessage(f"Playing stream: {display_name}")
             
         except Exception as e:
-            error_msg = f"Failed to start streaming: {str(e)}"
+            error_msg = f"Failed to start stream: {str(e)}"
             self.status_bar.showMessage(error_msg)
-            QMessageBox.critical(self, "Streaming Error", error_msg)
-    
-    def _download_and_play(self, url, cloud_type, config):
-        """Fallback method to download the file first, then play it"""
-        try:
-            # Create a temporary file in our cache directory
-            file_ext = os.path.splitext(url.split('?')[0])[1]  # Remove query params before getting extension
-            if not file_ext:
-                file_ext = ".mp3"  # Default extension if none found
-                
-            # Create a unique filename in our temp directory
-            temp_path = os.path.join(self.temp_dir, f"{uuid.uuid4()}{file_ext}")
-            self.temp_files_to_cleanup.add(temp_path)
-            
-            # Set up authentication if needed
-            auth = None
-            if cloud_type == "webdav" and config:
-                auth = (config.get("webdav_login", ""), config.get("webdav_password", ""))
-            
-            # Create and configure the download worker
-            self.download_thread = QThread()
-            self.download_worker = DownloadWorker(url, temp_path, auth)
-            
-            # Connect worker signals
-            self.download_worker.finished.connect(
-                lambda path: self.cloud_file_downloaded.emit(path)
-            )
-            self.download_worker.error.connect(
-                lambda msg: QMessageBox.critical(self, "Download Error", msg)
-            )
-            self.download_worker.progress.connect(
-                lambda p: self.status_bar.showMessage(f"Downloading... {p}%")
-            )
-            
-            # Clean up when done
-            self.download_worker.finished.connect(self.download_thread.quit)
-            self.download_worker.error.connect(self.download_thread.quit)
-            self.download_worker.moveToThread(self.download_thread)
-            
-            # Set up progress dialog
-            self.download_progress_dialog = QProgressDialog(
-                f"Downloading {os.path.basename(url)}...", 
-                "Cancel", 0, 100, self
-            )
-            self.download_progress_dialog.setWindowTitle("Downloading Media File")
-            self.download_progress_dialog.setWindowModality(Qt.WindowModal)
-            self.download_progress_dialog.setValue(0)
-            self.download_progress_dialog.canceled.connect(self.cancel_download)
-            
-            # Connect progress updates
-            self.download_worker.progress.connect(self.download_progress_dialog.setValue)
-            self.download_worker.finished.connect(self.download_progress_dialog.close)
-            self.download_worker.error.connect(self.download_progress_dialog.close)
-            
-            # Clean up thread and worker when done
-            self.download_thread.started.connect(self.download_worker.run)
-            self.download_thread.finished.connect(lambda: self.download_worker.deleteLater())
-            self.download_thread.finished.connect(self.download_thread.deleteLater)
-            
-            # Start the download
-            self.download_thread.start()
-            self.download_progress_dialog.show()
-            
-        except Exception as e:
-            QMessageBox.critical(
-                self, 
-                "Error", 
-                f"Failed to start download: {str(e)}"
-            )
+            QTimer.singleShot(5000, lambda: self._play_stream(url, display_name))
+
     def cancel_download(self):
         if hasattr(self, 'download_worker') and hasattr(self.download_worker, 'abort'):
             self.download_worker.abort()
@@ -989,7 +1540,6 @@ class MusicPlayer(QMainWindow):
                 self.player.setSource(url)
                 
                 # Update UI
-                self.now_playing_label.setText(f"Playing: {file_name}")
                 self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
                 
                 # Start playback with a small delay to prevent race conditions
@@ -1483,8 +2033,8 @@ class MusicPlayer(QMainWindow):
                     self.status_bar.showMessage(f"Added {len(files)} files to playlist: {playlist_name}")
     
     def add_cloud(self):
-        """Add a cloud storage account"""
-        dlg = AddCloudDialog(self)
+        """Add or manage cloud storage accounts"""
+        dlg = CloudAccountsDialog(self, self.clouds)
         if dlg.exec() == QDialog.Accepted:
             data = dlg.get_data()
             if data["type"] != "unknown":
@@ -1725,10 +2275,6 @@ class MusicPlayer(QMainWindow):
             QMessageBox.warning(self, "Error", f"Could not save playlists: {e}")
 
     def closeEvent(self, event):
-        # Clean up Windows media key registration
-        if HAS_WIN32:
-            cleanup_windows_media_keys(self)
-        # Stop playback
         self.player.stop()
         # Stop web server if running
         if self.web_server:
@@ -1751,10 +2297,6 @@ class MusicPlayer(QMainWindow):
         # Clean up web server if running
         if hasattr(self, 'web_server') and self.web_server:
             self.web_server.shutdown()
-        
-        # Clean up Windows message handler if on Windows
-        if hasattr(self, 'win_proc') and self.win_proc:
-            cleanup_windows_media_keys()
         
         # Clean up any remaining temp files in the temp directory
         try:
@@ -1901,42 +2443,102 @@ class MusicPlayer(QMainWindow):
             if len(self.playlist) == added and self.current_index < 0:
                 self.current_index = 0
     
-    def add_file_to_playlist(self, data):
-        """Add a single file to the current playlist"""
-        target_list = self.playlist
-        if self.active_playlist:
-            target_list = self.active_playlist.items
+    def _add_file_to_playlist_internal(self, data, target_list, update_ui=True):
+        """Internal method to add a file to a playlist
+        
+        Args:
+            data (dict): File data containing type and path/index information
+            target_list (list): The playlist to add the file to
+            update_ui (bool): Whether to update the UI (default: True)
+            
+        Returns:
+            str: The name of the file that was added, or None if failed
+        """
         if data["type"] == "local_file":
             path = data["path"]
             target_list.append(path)
-            self.playlist_widget.addItem(os.path.basename(path))
+            if update_ui:
+                self.playlist_widget.addItem(os.path.basename(path))
             if len(target_list) == 1 and self.current_index < 0:
                 self.current_index = 0
-            self.status_bar.showMessage(f"Added {os.path.basename(path)} to playlist")
+            return os.path.basename(path)
+            
         elif data["type"] == "cloud_file":
             cloud_idx = data["cloud_index"]
             file_idx = data["file_index"]
             if cloud_idx < 0 or cloud_idx >= len(self.clouds):
-                return
+                return None
+                
             cloud = self.clouds[cloud_idx]
             files = cloud.get("files", [])
             if file_idx < 0 or file_idx >= len(files):
-                return
+                return None
+                
             file_info = files[file_idx]
             file_name = os.path.basename(file_info["path"])
+            
             target_list.append({
                 "type": "cloud",
                 "cloud_idx": cloud_idx,
                 "file_idx": file_idx
             })
-            self.playlist_widget.addItem(f"{file_name} (Cloud)")
+            
+            if update_ui:
+                self.playlist_widget.addItem(f"{file_name} (Cloud)")
+                
             if len(target_list) == 1 and self.current_index < 0:
                 self.current_index = 0
+                
+            return file_name
+        
+        return None
+    def add_file_to_playlist(self, data):
+        """Add a single file to the current playlist
+        
+        Args:
+            data (dict): File data containing type and path/index information
+        """
+        target_list = self.playlist
+        if self.active_playlist:
+            target_list = self.active_playlist.items
+            
+        file_name = self._add_file_to_playlist_internal(data, target_list)
+        
+        if file_name:
             self.status_bar.showMessage(f"Added {file_name} to playlist")
+        
         if self.active_playlist:
             self.active_playlist.modified = datetime.now().isoformat()
             self.save_playlists()
-    
+            
+    def add_file_to_specific_playlist(self, playlist, data):
+        """Add a file to a specific playlist
+        
+        Args:
+            playlist: The playlist to add the file to
+            data (dict): File data containing type and path/index information
+        """
+        if not playlist or not hasattr(playlist, 'items'):
+            return
+            
+        # Create a temporary list to hold the file
+        temp_list = []
+        file_name = self._add_file_to_playlist_internal(data, temp_list, update_ui=False)
+        
+        if not file_name or not temp_list:
+            return
+            
+        # Add to the target playlist if not already present
+        if temp_list[0] not in playlist.items:
+            playlist.items.append(temp_list[0])
+            playlist.modified = datetime.now().isoformat()
+            self.save_playlists()
+            self.status_bar.showMessage(f"Added {file_name} to playlist: {playlist.name}")
+        else:
+            self.status_bar.showMessage(f"{file_name} is already in playlist: {playlist.name}")
+        
+        # Restore original playlist
+
     def add_folder_to_specific_playlist(self, playlist, data):
         """Add folder contents to a specific playlist"""
         original_playlist = self.playlist.copy()
@@ -1979,303 +2581,6 @@ class MusicPlayer(QMainWindow):
         self.save_playlists()
         
         # Restore original playlist
-        self.playlist = original_playlist
-        self.current_index = original_index
-        
-        self.status_bar.showMessage(f"Added file to playlist: {playlist.name}")
-
-    def open_settings_dialog(self):
-        dlg = SettingsDialog(self)
-        if dlg.exec() == QDialog.Accepted:
-            dlg.save_settings()
-            self.apply_settings()
-
-    def apply_settings(self):
-        # Apply volume
-        volume = self.settings.value("volume", 70, int)
-        self.audio_output.setVolume(volume / 100.0)
-        self.volume_slider.setValue(volume)
-        # Apply theme
-        theme = self.settings.value("theme", "Dark")
-        if theme == "Dark":
-            self.set_dark_theme()
-        else:
-            self.set_light_theme()
-        # Download folder is available as self.settings.value("download_folder")
-        # Web interface
-        enable_web = self.settings.value("web_interface", False, bool)
-        if enable_web:
-            if not self.web_server:
-                self.web_server = WebControlServer(self, port=self.web_port)
-                self.web_server.start()
-        else:
-            if self.web_server:
-                self.web_server.stop()
-                self.web_server = None
-
-    def set_dark_theme(self):
-        app = QApplication.instance()
-        app.setStyle("Fusion")
-        dark_palette = QPalette()
-        dark_palette.setColor(QPalette.Window, QColor(30, 30, 40))
-        dark_palette.setColor(QPalette.WindowText, QColor(240, 240, 255))
-        dark_palette.setColor(QPalette.Base, QColor(25, 25, 35))
-        dark_palette.setColor(QPalette.AlternateBase, QColor(35, 35, 45))
-        dark_palette.setColor(QPalette.ToolTipBase, QColor(40, 35, 60))
-        dark_palette.setColor(QPalette.ToolTipText, QColor(240, 240, 255))
-        dark_palette.setColor(QPalette.Text, QColor(240, 240, 255))
-        dark_palette.setColor(QPalette.Button, QColor(45, 40, 65))
-        dark_palette.setColor(QPalette.ButtonText, QColor(240, 240, 255))
-        dark_palette.setColor(QPalette.Link, QColor(120, 100, 255))
-        dark_palette.setColor(QPalette.Highlight, QColor(100, 80, 255))
-        dark_palette.setColor(QPalette.HighlightedText, QColor(255, 255, 255))
-        dark_palette.setColor(QPalette.Active, QPalette.Button, QColor(55, 50, 75))
-        dark_palette.setColor(QPalette.Disabled, QPalette.ButtonText, QColor(150, 150, 170))
-        dark_palette.setColor(QPalette.Disabled, QPalette.WindowText, QColor(150, 150, 170))
-        dark_palette.setColor(QPalette.Disabled, QPalette.Text, QColor(150, 150, 170))
-        app.setPalette(dark_palette)
-        app.setStyleSheet("""
-            QToolTip { color: #ffffff; background-color: #2a82da; border: 1px solid white; }
-            QTabBar::tab { background-color: #353535; color: white; padding: 6px; }
-            QTabBar::tab:selected { background-color: #2a82da; }
-            QHeaderView::section { background-color: #353535; color: white; padding: 4px; }
-            QTreeWidget { outline: none; }
-            QListWidget { outline: none; }
-            QPushButton { padding: 6px 12px; border-radius: 4px; background-color: #2a82da; color: white; }
-            QPushButton:hover { background-color: #3b93e6; }
-            QPushButton:pressed { background-color: #206cb9; }
-            QToolButton { border-radius: 4px; }
-            QToolButton:hover { background-color: #353535; }
-            QToolButton:checked { background-color: #2a82da; color: white; }
-        """)
-
-    def set_light_theme(self):
-        app = QApplication.instance()
-        app.setStyle("Fusion")
-        app.setPalette(QApplication.style().standardPalette())
-        app.setStyleSheet("") 
-
-    def update_metadata_display(self):
-        import mutagen
-        meta = self.player.metaData()
-        title = meta.stringValue(meta.Key.Title) if meta and meta.stringValue(meta.Key.Title) else "-"
-        # Try multiple keys for artist info
-        artist = "-"
-        if meta:
-            for key in [meta.Key.ContributingArtist, meta.Key.LeadPerformer, meta.Key.AlbumArtist, meta.Key.Author, meta.Key.Composer]:
-                val = meta.value(key)
-                if val:
-                    if isinstance(val, list):
-                        val = ", ".join(val)
-                    artist = str(val)
-                    break
-        album = meta.stringValue(meta.Key.AlbumTitle) if meta and meta.stringValue(meta.Key.AlbumTitle) else "-"
-        self.track_title_label.setText(f"Title: {title}")
-        self.track_artist_label.setText(f"Artist: {artist}")
-        self.track_album_label.setText(f"Album: {album}")
-        # --- More file info ---
-        file_info_lines = []
-        file_path = None
-        file_name = "-"
-        file_format = "-"
-        bitrate = "-"
-        samplerate = "-"
-        samplesize = "-"
-        duration = "-"
-        size = "-"
-        if self.current_index >= 0 and self.current_index < len(self.playlist):
-            item = self.playlist[self.current_index]
-            if isinstance(item, str):
-                file_path = item
-                file_name = os.path.basename(item)
-            elif isinstance(item, dict) and item.get("type") == "cloud":
-                cloud_idx = item.get("cloud_idx")
-                file_idx = item.get("file_idx")
-                if 0 <= cloud_idx < len(self.clouds):
-                    cloud = self.clouds[cloud_idx]
-                    files = cloud.get("files", [])
-                    if 0 <= file_idx < len(files):
-                        file_info = files[file_idx]
-                        file_path = file_info.get("path")
-                        file_name = os.path.basename(file_info.get("path", "-"))
-                        size = file_info.get("size", "-")
-        # Format, bitrate, samplerate, duration from QMediaPlayer
-        if meta:
-            file_format = meta.stringValue(meta.Key.FileFormat) if meta.stringValue(meta.Key.FileFormat) else file_format
-            br = meta.value(meta.Key.AudioBitRate)
-            if br:
-                bitrate = f"{int(br)//1000} kbps"
-            sr = meta.value(meta.Key.AudioSampleRate) if hasattr(meta.Key, 'AudioSampleRate') else None
-            if sr:
-                samplerate = f"{sr} Hz"
-            dur = meta.value(meta.Key.Duration)
-            if dur:
-                duration = format_time(dur)
-        # Fallback for duration
-        if duration == "-" and self.player.duration() > 0:
-            duration = format_time(self.player.duration())
-        # Fallback for file size
-        if size == "-" and file_path and os.path.exists(file_path):
-            try:
-                size = f"{os.path.getsize(file_path)//1024} KB"
-            except Exception:
-                pass
-        # Fallback to mutagen for local files if needed
-        if file_path and os.path.exists(file_path) and (bitrate == "-" or samplerate == "-" or samplesize == "-"):
-            try:
-                audio = mutagen.File(file_path, easy=False)
-                if audio:
-                    # Bitrate
-                    if bitrate == "-":
-                        if hasattr(audio.info, 'bitrate') and audio.info.bitrate:
-                            bitrate = f"{int(audio.info.bitrate)//1000} kbps"
-                    # Sample rate
-                    if samplerate == "-":
-                        if hasattr(audio.info, 'sample_rate') and audio.info.sample_rate:
-                            samplerate = f"{audio.info.sample_rate} Hz"
-                    # Sample size
-                    if samplesize == "-":
-                        if hasattr(audio.info, 'bits_per_sample') and audio.info.bits_per_sample:
-                            samplesize = f"{audio.info.bits_per_sample} bit"
-                        elif hasattr(audio.info, 'sample_width') and audio.info.sample_width:
-                            samplesize = f"{audio.info.sample_width*8} bit"
-            except Exception:
-                pass
-        # For cloud files, only show size if present
-        if samplesize == "-":
-            samplesize = "?"
-        file_info_lines.append(f"File: {file_name}")
-        file_info_lines.append(f"Format: {file_format}")
-        file_info_lines.append(f"Bitrate: {bitrate}")
-        file_info_lines.append(f"Sample Rate: {samplerate}")
-        file_info_lines.append(f"Sample Size: {samplesize}")
-        file_info_lines.append(f"Duration: {duration}")
-        file_info_lines.append(f"Size: {size}")
-        # Add or update a label for file info
-        if not hasattr(self, 'file_info_label'):
-            self.file_info_label = QLabel()
-            self.file_info_label.setStyleSheet("font-size: 10px; color: #aaa;")
-            self.file_info_label.setWordWrap(True)
-            parent_layout = self.track_album_label.parentWidget().layout()
-            if parent_layout is not None:
-                parent_layout.addWidget(self.file_info_label)
-        self.file_info_label.setText("<br>".join(file_info_lines))
-        # --- Cover art logic unchanged below ---
-        pixmap = None
-        cover_names = ["cover.jpg", "folder.jpg", "cover.png", "folder.png", "front.jpg", "front.png"]
-        # 1. Try embedded art from QMediaPlayer
-        if meta and meta.value(meta.Key.CoverArtImage):
-            image = meta.value(meta.Key.CoverArtImage)
-            if hasattr(image, 'toImage'):
-                pixmap = QPixmap.fromImage(image.toImage())
-        # 2. Try to find cover in same folder (local or cloud)
-        if not pixmap and self.current_index >= 0 and self.current_index < len(self.playlist):
-            item = self.playlist[self.current_index]
-            # Local file
-            if isinstance(item, str) and os.path.exists(item):
-                folder = os.path.dirname(item)
-                for name in cover_names:
-                    cover_path = os.path.join(folder, name)
-                    if os.path.exists(cover_path):
-                        pixmap = QPixmap(cover_path)
-                        break
-                if not pixmap:
-                    for ext in ("*.jpg", "*.png"):
-                        files = glob.glob(os.path.join(folder, ext))
-                        for f in files:
-                            if "cover" in f.lower() or "folder" in f.lower() or "front" in f.lower():
-                                pixmap = QPixmap(f)
-                                break
-                        if pixmap:
-                            break
-            # Cloud file
-            elif isinstance(item, dict) and item.get("type") == "cloud":
-                cloud_idx = item.get("cloud_idx")
-                file_idx = item.get("file_idx")
-                if 0 <= cloud_idx < len(self.clouds):
-                    cloud = self.clouds[cloud_idx]
-                    files = cloud.get("files", [])
-                    if 0 <= file_idx < len(files):
-                        file_info = files[file_idx]
-                        file_path = file_info["path"]
-                        folder = os.path.dirname(file_path).replace("\\", "/")
-                        cover_file = None
-                        for f in files:
-                            f_folder = os.path.dirname(f["path"]).replace("\\", "/")
-                            f_name = os.path.basename(f["path"])
-                            if f_folder == folder and f_name.lower() in cover_names:
-                                cover_file = f
-                                break
-                        if cover_file:
-                            try:
-                                url = cover_file["url"]
-                                ext = os.path.splitext(cover_file["path"])[1]
-                                if url.startswith("http://") or url.startswith("https://"):
-                                    with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
-                                        r = requests.get(url, stream=True, timeout=10)
-                                        r.raise_for_status()
-                                        for chunk in r.iter_content(8192):
-                                            tmp.write(chunk)
-                                        tmp_path = tmp.name
-                                    pixmap = QPixmap(tmp_path)
-                                    self.temp_files_to_cleanup.add(tmp_path)
-                                else:
-                                    pixmap = QPixmap(url)
-                            except Exception as e:
-                                print(f"Failed to fetch cloud cover art: {e}")
-                        # --- NEW: Try to extract embedded cover from stream if still no pixmap ---
-                        if not pixmap:
-                            url = file_info.get("url")
-                            ext = os.path.splitext(file_info["path"])[1].lower()
-                            cloud_type = cloud.get("type", "")
-                            auth = None
-                            if cloud_type == "webdav":
-                                auth_user = cloud["config"].get("webdav_login", "")
-                                auth_pass = cloud["config"].get("webdav_password", "")
-                                if auth_user and auth_pass:
-                                    auth = (auth_user, auth_pass)
-                            # --- Caching logic ---
-                            if url and ext in [".flac", ".mp3", ".ogg"]:
-                                if url in self.cover_cache:
-                                    cover_path = self.cover_cache[url]
-                                    if cover_path and os.path.exists(cover_path):
-                                        pixmap = QPixmap(cover_path)
-                                else:
-                                    # Show default cover immediately
-                                    fallback_path = os.path.join(os.path.dirname(__file__), "cover.png")
-                                    if os.path.exists(fallback_path):
-                                        self.album_art_label.setPixmap(QPixmap(fallback_path).scaled(120, 120, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-                                    else:
-                                        self.album_art_label.setPixmap(QPixmap())
-                                    # Start background extraction
-                                    if self.cover_worker and self.cover_worker.isRunning():
-                                        self.cover_worker.terminate()
-                                    self.cover_worker = CoverArtWorker(url, ext, auth)
-                                    self.cover_worker.cover_ready.connect(self._on_cover_ready)
-                                    self.cover_worker.start()
-                                    return  # Don't set pixmap now, will update when ready
-        # 3. Fallback: use local cover.png in UI dir
-        if not pixmap:
-            fallback_path = os.path.join(os.path.dirname(__file__), "cover.png")
-            if os.path.exists(fallback_path):
-                pixmap = QPixmap(fallback_path)
-        if pixmap:
-            self.album_art_label.setPixmap(pixmap.scaled(120, 120, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        else:
-            self.album_art_label.setPixmap(QPixmap())
-
-    def _on_cover_ready(self, url, cover_path):
-        if cover_path and os.path.exists(cover_path):
-            self.cover_cache[url] = cover_path
-            pixmap = QPixmap(cover_path)
-            self.album_art_label.setPixmap(pixmap.scaled(120, 120, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        else:
-            # fallback
-            fallback_path = os.path.join(os.path.dirname(__file__), "cover.png")
-            if os.path.exists(fallback_path):
-                self.album_art_label.setPixmap(QPixmap(fallback_path).scaled(120, 120, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-            else:
-                self.album_art_label.setPixmap(QPixmap())
 
     def highlight_current_track(self):
         for i in range(self.playlist_widget.count()):
@@ -2331,6 +2636,7 @@ class MusicPlayer(QMainWindow):
         else:
             self.playlist = new_playlist
 
+    
     def _check_all_scans_complete(self):
         all_done = all(not thread.isRunning() for thread in getattr(self, 'scan_threads', []))
         if all_done:
@@ -2348,10 +2654,3 @@ class MusicPlayer(QMainWindow):
         for p in self.playlists:
             playlists.append({'id': getattr(p, 'id', ''), 'name': getattr(p, 'name', 'Unnamed')})
         return playlists
-
-    def remove_media_folder(self, folder_path):
-        """Remove a media folder from the library"""
-        if folder_path in self.media_folders:
-            self.media_folders.remove(folder_path)
-            self.save_media_folders()
-            self.update_library_tree()

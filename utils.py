@@ -4,10 +4,17 @@ import sys
 # Supported file extensions
 SUPPORTED_EXTS = [".mp3", ".flac", ".wav", ".ogg"]
 
+from platformdirs import user_data_dir
+
+# Get application data directory
+app_name = "HiCloudMP"
+app_author = "HiCloudMP"
+data_dir = user_data_dir(app_name, app_author, ensure_exists=True)
+
 # File paths for configuration
-MEDIA_FOLDERS_FILE = "mediafolders.json"
-CLOUD_FILES_FILE = "cloudfiles.json"
-PLAYLISTS_FILE = "playlists.json"
+MEDIA_FOLDERS_FILE = os.path.join(data_dir, "mediafolders.json")
+CLOUD_FILES_FILE = os.path.join(data_dir, "cloudfiles.json")
+PLAYLISTS_FILE = os.path.join(data_dir, "playlists.json")
 
 # Import for Windows-specific media key handling
 if sys.platform == 'win32':

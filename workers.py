@@ -3,6 +3,9 @@ import threading
 import concurrent.futures
 import requests
 from PySide6.QtCore import QObject, Signal, QThread
+from io import BytesIO
+from urllib.parse import urlparse
+from cover_extractor import CoverExtractor
 from cloud_handlers import CLOUD_TYPES
 
 class DownloadWorker(QObject):
@@ -46,6 +49,46 @@ class DownloadWorker(QObject):
 
     def abort(self):
         self._abort = True
+
+
+class CoverArtWorker(QObject):
+    """Worker to extract cover art in the background.
+    Emits finished with PNG bytes or None on error.
+    """
+    finished = Signal(object)  # bytes or None
+    error = Signal(str)
+
+    def __init__(self, source, is_url=False):
+        super().__init__()
+        self.source = source
+        self.is_url = is_url
+        self._abort = False
+
+    def run(self):
+        try:
+            if self._abort:
+                return
+            img = CoverExtractor.extract_cover(self.source, is_url=self.is_url)
+            if img is None:
+                self.finished.emit(None)
+                return
+            # Convert PIL Image to PNG bytes
+            try:
+                if hasattr(img, 'mode') and img.mode != 'RGB':
+                    img = img.convert('RGB')
+                bio = BytesIO()
+                img.save(bio, format='PNG')
+                self.finished.emit(bio.getvalue())
+            except Exception as e:
+                self.error.emit(str(e))
+                self.finished.emit(None)
+        except Exception as e:
+            self.error.emit(str(e))
+            self.finished.emit(None)
+
+    def abort(self):
+        self._abort = True
+
 
 class ScanCloudWorker(QObject):
     """Worker for scanning cloud storages in background"""
