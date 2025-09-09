@@ -7,6 +7,7 @@ import tempfile
 from urllib.parse import urlparse
 from platformdirs import user_data_dir, user_cache_dir
 from cover_extractor import CoverExtractor
+import subprocess
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
@@ -14,7 +15,7 @@ from PySide6.QtWidgets import (
     QTreeWidgetItem, QSplitter, QLineEdit, QDialog, QFormLayout, QTabWidget, 
     QToolButton, QStatusBar, QStyle, QFrame, QMenu, QProgressBar, QSystemTrayIcon,
     QComboBox, QInputDialog, QListWidgetItem, QRadioButton, QDialogButtonBox, QProgressDialog,
-    QCheckBox
+    QCheckBox, QWidgetAction
 )
 from PySide6.QtGui import QPainter
 from PySide6.QtCore import Qt, QTimer, Signal, QObject, QThread, QUrl, QSize, QEvent, QSettings
@@ -393,31 +394,143 @@ class MusicPlayer(QMainWindow):
         """Setup system tray icon with media controls"""
         self.tray_icon = QSystemTrayIcon(self)
         self.tray_icon.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
-        self.tray_icon.setToolTip("HGC Music Player")
-        
-        # Create tray menu
+        self.tray_icon.setToolTip("HiCloud MP")
+
         tray_menu = QMenu()
-        
-        # Add media controls to tray
-        play_action = tray_menu.addAction("Play/Pause")
-        play_action.triggered.connect(self.toggle_play)
-        
-        stop_action = tray_menu.addAction("Stop")
-        stop_action.triggered.connect(self.stop)
-        
-        prev_action = tray_menu.addAction("Previous")
-        prev_action.triggered.connect(self.prev_track)
-        
-        next_action = tray_menu.addAction("Next")
-        next_action.triggered.connect(self.next_track)
-        
+
+        # Now Playing (disabled informational action)
+        self.tray_now_playing = tray_menu.addAction("Now Playing: -")
+        self.tray_now_playing.setEnabled(False)
+
         tray_menu.addSeparator()
-        
+
+        # Window actions
+        show_action = tray_menu.addAction("Show Window")
+        show_action.triggered.connect(self.showNormal)
+        hide_action = tray_menu.addAction("Hide Window")
+        hide_action.triggered.connect(self.hide)
+
+        tray_menu.addSeparator()
+
+        # Media controls
+        self.tray_play_action = tray_menu.addAction("Play/Pause")
+        self.tray_play_action.triggered.connect(self.toggle_play)
+
+        self.tray_prev_action = tray_menu.addAction("Previous")
+        self.tray_prev_action.triggered.connect(self.prev_track)
+
+        self.tray_next_action = tray_menu.addAction("Next")
+        self.tray_next_action.triggered.connect(self.next_track)
+
+        self.tray_stop_action = tray_menu.addAction("Stop")
+        self.tray_stop_action.triggered.connect(self.stop)
+
+        # Seek controls
+        seek_back_action = tray_menu.addAction("Seek -10s")
+        seek_back_action.triggered.connect(lambda: self.seek_position(max(0, self.player.position() - 10000)))
+        seek_fwd_action = tray_menu.addAction("Seek +10s")
+        seek_fwd_action.triggered.connect(lambda: self.seek_position(self.player.position() + 10000))
+
+        # Toggles
+        tray_menu.addSeparator()
+        self.tray_shuffle_action = tray_menu.addAction("Shuffle")
+        self.tray_shuffle_action.setCheckable(True)
+        self.tray_shuffle_action.toggled.connect(self.toggle_shuffle)
+
+        self.tray_repeat_action = tray_menu.addAction("Repeat")
+        self.tray_repeat_action.setCheckable(True)
+        self.tray_repeat_action.toggled.connect(self.toggle_repeat)
+
+        # Volume controls
+        tray_menu.addSeparator()
+        self.tray_mute_action = tray_menu.addAction("Mute")
+        self.tray_mute_action.setCheckable(True)
+        self.tray_mute_action.toggled.connect(lambda m: self.audio_output.setMuted(m))
+
+        # Inline volume slider
+        vol_widget_action = QWidgetAction(tray_menu)
+        vol_slider = QSlider(Qt.Horizontal)
+        vol_slider.setRange(0, 100)
+        try:
+            vol_slider.setValue(int(self.audio_output.volume() * 100))
+        except Exception:
+            vol_slider.setValue(self.volume_slider.value())
+        vol_slider.valueChanged.connect(self.set_volume)
+        vol_widget_action.setDefaultWidget(vol_slider)
+        tray_menu.addAction(vol_widget_action)
+
+        # App shortcuts
+        tray_menu.addSeparator()
+        open_web_action = tray_menu.addAction("Open Web Panel")
+        open_web_action.triggered.connect(self.open_web_panel)
+
+        open_loc_action = tray_menu.addAction("Open Current Location")
+        open_loc_action.triggered.connect(self.open_current_location)
+
+        settings_action = tray_menu.addAction("Settings")
+        settings_action.triggered.connect(self.open_settings_dialog)
+
+        tray_menu.addSeparator()
         quit_action = tray_menu.addAction("Quit")
         quit_action.triggered.connect(self.close)
-        
+
         self.tray_icon.setContextMenu(tray_menu)
+        # Click on tray icon toggles Play/Pause
+        self.tray_icon.activated.connect(lambda reason: self.toggle_play() if reason == QSystemTrayIcon.Trigger else None)
         self.tray_icon.show()
+        # Update initial tray state
+        self.update_tray_ui()
+
+    def update_tray_ui(self):
+        """Refresh tray icon, tooltip, and action states based on playback and selection."""
+        # Icon based on playing/paused
+        try:
+            state = self.player.playbackState()
+        except Exception:
+            state = QMediaPlayer.PlaybackState.StoppedState
+        if state == QMediaPlayer.PlaybackState.PlayingState:
+            self.tray_icon.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+        elif state == QMediaPlayer.PlaybackState.PausedState:
+            self.tray_icon.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+        else:
+            self.tray_icon.setIcon(self.style().standardIcon(QStyle.SP_MediaStop))
+
+        # Now Playing text and tooltip
+        title = "-"
+        try:
+            if hasattr(self, 'track_title_label') and self.track_title_label.text():
+                t = self.track_title_label.text()
+                if ":" in t:
+                    title = t.split(":", 1)[1].strip() or title
+        except Exception:
+            pass
+        artist = "-"
+        try:
+            if hasattr(self, 'track_artist_label') and self.track_artist_label.text():
+                a = self.track_artist_label.text()
+                if ":" in a:
+                    artist = a.split(":", 1)[1].strip() or artist
+        except Exception:
+            pass
+        self.tray_now_playing.setText(f"Now Playing: {title} — {artist}")
+        self.tray_icon.setToolTip(f"HiCloud MP\n{title} — {artist}")
+
+        # Toggle states
+        if hasattr(self, 'shuffle_btn'):
+            self.tray_shuffle_action.blockSignals(True)
+            self.tray_shuffle_action.setChecked(self.shuffle_btn.isChecked())
+            self.tray_shuffle_action.blockSignals(False)
+        if hasattr(self, 'repeat_btn'):
+            self.tray_repeat_action.blockSignals(True)
+            self.tray_repeat_action.setChecked(self.repeat_btn.isChecked())
+            self.tray_repeat_action.blockSignals(False)
+        # Mute state
+        try:
+            self.tray_mute_action.blockSignals(True)
+            self.tray_mute_action.setChecked(self.audio_output.isMuted())
+            self.tray_mute_action.blockSignals(False)
+        except Exception:
+            pass
     
     def setup_ui(self):
         """Set up the user interface"""
@@ -748,6 +861,9 @@ class MusicPlayer(QMainWindow):
             # Force an immediate metadata update
             QTimer.singleShot(100, self.update_metadata_display)
         self.highlight_current_track()
+        # Update tray UI
+        if hasattr(self, 'update_tray_ui'):
+            self.update_tray_ui()
     
     def play_selected(self, item):
         self.current_index = self.playlist_widget.row(item)
@@ -763,10 +879,16 @@ class MusicPlayer(QMainWindow):
             else:
                 self.player.play()
                 self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+        # Update tray UI
+        if hasattr(self, 'update_tray_ui'):
+            self.update_tray_ui()
     
     def stop(self):
         self.player.stop()
         self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+        # Update tray UI
+        if hasattr(self, 'update_tray_ui'):
+            self.update_tray_ui()
     
     def next_track(self):
         if self.shuffle_btn.isChecked() and len(self.playlist) > 1:
@@ -779,11 +901,17 @@ class MusicPlayer(QMainWindow):
         elif self.current_index < len(self.playlist) - 1:
             self.current_index += 1
             self.play()
+        # Update tray UI
+        if hasattr(self, 'update_tray_ui'):
+            self.update_tray_ui()
     
     def prev_track(self):
         if self.current_index > 0:
             self.current_index -= 1
             self.play()
+        # Update tray UI
+        if hasattr(self, 'update_tray_ui'):
+            self.update_tray_ui()
     
     def update_cover_art(self, item):
         """Update the cover art display for the current track (non-blocking)"""
@@ -1104,6 +1232,14 @@ class MusicPlayer(QMainWindow):
 
                     # Update cover art asynchronously
                     self.update_cover_art(current_item)
+                    # Refresh tray and notify
+                    if hasattr(self, 'update_tray_ui'):
+                        self.update_tray_ui()
+                    try:
+                        if hasattr(self, 'tray_icon') and self.tray_icon:
+                            self.tray_icon.showMessage("Now Playing", f"{title} — {artist}", QSystemTrayIcon.Information, 3000)
+                    except Exception:
+                        pass
                     return
 
                 except Exception as e:
@@ -1129,6 +1265,14 @@ class MusicPlayer(QMainWindow):
                         
                         # Update cover art
                         self.update_cover_art(current_item)
+                        # Refresh tray and notify
+                        if hasattr(self, 'update_tray_ui'):
+                            self.update_tray_ui()
+                        try:
+                            if hasattr(self, 'tray_icon') and self.tray_icon:
+                                self.tray_icon.showMessage("Now Playing", f"{title} — {artist}", QSystemTrayIcon.Information, 3000)
+                        except Exception:
+                            pass
                         return
                     
                 except Exception as e:
@@ -1149,6 +1293,9 @@ class MusicPlayer(QMainWindow):
             # Force UI update
             QApplication.processEvents()
             print("Finished updating metadata display")
+            # Update tray UI
+            if hasattr(self, 'update_tray_ui'):
+                self.update_tray_ui()
             
         except Exception as e:
             print(f"Critical error in update_metadata_display: {e}")
@@ -1162,6 +1309,28 @@ class MusicPlayer(QMainWindow):
                 self.track_album_label.setText("Album: Error")
             except Exception as e:
                 print(f"Failed to set error state: {e}")
+
+    def open_current_location(self):
+        """Open the folder of the currently selected track (local files)."""
+        try:
+            if not self.playlist or self.current_index < 0 or self.current_index >= len(self.playlist):
+                return
+            item = self.playlist[self.current_index]
+            path = None
+            if isinstance(item, str):
+                path = os.path.abspath(item)
+            elif isinstance(item, dict):
+                # Try local path field if present
+                if 'path' in item and isinstance(item['path'], str) and os.path.exists(item['path']):
+                    path = os.path.abspath(item['path'])
+            if path and os.path.exists(path):
+                folder = os.path.dirname(path)
+                try:
+                    subprocess.Popen(["xdg-open", folder])
+                except Exception:
+                    pass
+        except Exception:
+            pass
     
             
     def update_position(self, position):
