@@ -9,7 +9,40 @@
       // Tailwind config: enable dark mode with class
       tailwind.config = { darkMode: 'class' };
     </script>
-     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <!-- Early theme boot: apply saved or system theme (Auto/Light/Dark) before CSS to avoid FOUC -->
+    <script>
+      (function() {
+        try {
+          // Back-compat: migrate legacy hicloudmp_theme (light/dark) to mode key
+          var legacy = localStorage.getItem('hicloudmp_theme');
+          if (legacy && !localStorage.getItem('hicloudmp_theme_mode')) {
+            localStorage.setItem('hicloudmp_theme_mode', legacy === 'dark' ? 'dark' : 'light');
+            localStorage.removeItem('hicloudmp_theme');
+          }
+          var mode = localStorage.getItem('hicloudmp_theme_mode') || 'auto';
+          var systemDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var effective = (mode === 'auto') ? (systemDark ? 'dark' : 'light') : mode;
+          document.documentElement.classList.toggle('dark', effective === 'dark');
+          document.addEventListener('DOMContentLoaded', function(){
+            document.body.classList.toggle('dark', effective === 'dark');
+            // Strong fallback inline colors so user always sees a change
+            document.body.style.backgroundColor = (effective === 'dark') ? '#0f172a' : '#f8fafc';
+            document.body.style.color = (effective === 'dark') ? '#e5e7eb' : '#0f172a';
+          });
+          document.addEventListener('DOMContentLoaded', function(){
+            document.body.setAttribute('data-theme', effective);
+            // Ensure toggle label matches initial theme if the toggle exists
+            var t = document.getElementById('theme-toggle');
+            if (t) {
+              var label = (mode === 'auto') ? 'Auto' : (effective === 'dark' ? 'Dark' : 'Light');
+              var icon = (mode === 'auto') ? 'ri-magic-line' : (effective === 'dark' ? 'ri-moon-line' : 'ri-sun-line');
+              t.innerHTML = '<i class="'+icon+'"></i><span class="ml-2">'+label+'</span>';
+            }
+          });
+        } catch(e) { /* noop */ }
+      })();
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
     <!-- Remix Icons for crisp, lightweight icons -->
     <link href="https://cdn.jsdelivr.net/npm/remixicon@4.3.0/fonts/remixicon.css" rel="stylesheet">
@@ -20,25 +53,19 @@
         .container { @apply max-w-5xl; }
         .layout { @apply grid gap-3 md:gap-4 grid-cols-1 md:grid-cols-2; }
         .sticky { @apply sticky top-0 z-20; }
-        .sticky-progress { @apply sticky bottom-0 bg-transparent px-2 py-1 border-t border-white/10; }
         .playlist-panel { @apply flex flex-col min-h-0; }
         .playlist-scroll { @apply overflow-auto max-h-[65vh] md:max-h-[70vh]; }
         .col-left { @apply flex flex-col items-center text-center; }
         #track { @apply text-lg font-semibold; }
         #artist, #album { @apply opacity-90; }
-        #cover-art { @apply w-80 h-80 object-cover rounded-lg shadow; display: none; }
+        #cover-art { @apply w-64 h-64 md:w-80 md:h-80 object-cover rounded-lg shadow; display: none; }
 
-        /* Window */
+        /* Window & Cards */
         .retro-window { @apply mx-auto my-4 px-4 py-3 container; }
-        .retro-titlebar { @apply flex items-center gap-2 mb-2; }
-        .retro-title { @apply text-2xl font-bold; }
-        .retro-window-content { @apply px-2 py-2; }
-        .retro-toolbar { @apply flex justify-between items-center mb-3 px-2 py-1 bg-white/5 rounded-md backdrop-blur; }
-
-        /* Cards */
-        .retro-card { @apply w-full bg-white/5 dark:bg-white/5 rounded-xl border border-white/10 shadow; }
-        .retro-card-header { @apply px-3 py-2 font-semibold border-b border-white/10; }
+        .retro-card { @apply w-full rounded-xl border shadow bg-white dark:bg-white/5 border-slate-200 dark:border-white/10; }
+        .retro-card-header { @apply px-3 py-2 font-semibold border-b border-slate-200 dark:border-white/10; }
         .retro-card-content { @apply p-3; }
+        .retro-toolbar { @apply flex flex-wrap justify-between items-center mb-3 px-2 py-1 bg-white/5 rounded-md backdrop-blur; }
 
         /* Buttons */
         .retro-btn { @apply inline-flex items-center justify-center rounded-md px-3 py-2 text-sm font-medium transition-colors; }
@@ -47,83 +74,84 @@
         .retro-btn-danger { @apply bg-rose-600 hover:bg-rose-500 text-white; }
         .retro-btn-warning { @apply bg-amber-600 hover:bg-amber-500 text-white; }
         .retro-btn-info { @apply bg-sky-600 hover:bg-sky-500 text-white; }
-        .retro-btn-secondary { @apply bg-white/10 hover:bg-white/20 text-white; }
+        .retro-btn-secondary { 
+          @apply text-slate-900 bg-slate-200 hover:bg-slate-300 border border-slate-300 
+                 dark:text-white dark:bg-white/10 dark:hover:bg-white/20 dark:border-white/10; 
+        }
         .controls { @apply flex flex-wrap gap-3 justify-center; }
-        #play { @apply text-lg px-4 py-2; }
-        .retro-btn .ri { @apply text-[1.25rem] leading-none; }
-        #play .ri { @apply text-[1.75rem]; }
-        .toggle-btn.active { @apply ring-2 ring-white/40; }
-        /* Circular, larger control buttons */
+        .toggle-btn.active { @apply ring-2 ring-slate-400 dark:ring-white/40; }
         .retro-btn-circle { @apply rounded-full w-16 h-16 md:w-20 md:h-20; }
-        .retro-btn-circle .ri { @apply text-[1.5rem] md:text-[1.75rem]; }
         #play.retro-btn-circle { @apply w-24 h-24 md:w-28 md:h-28; }
-        #play.retro-btn-circle .ri { @apply text-[2.25rem] md:text-[2.5rem]; }
-        .retro-btn .ri { @apply text-[1.25rem] leading-none; }
-        #play .ri { @apply text-[1.5rem]; }
-        .toggle-btn.active { @apply ring-2 ring-white/40; }
 
-        /* Inputs */
-        .retro-select { @apply bg-white/10 border border-white/10 rounded-md px-2 py-1 outline-none focus:ring-2 focus:ring-blue-500; }
-        .retro-input { @apply w-full bg-white/10 border border-white/10 rounded-md px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500; }
-        .retro-label { @apply text-sm; }
-        .retro-range { @apply w-full accent-blue-500; }
-        /* Enhanced slider styling */
-        .retro-range { appearance: none; height: 0.5rem; background: linear-gradient(to right, rgb(59 130 246) 0%, rgb(59 130 246) 0%, rgba(255,255,255,0.2) 0%); border-radius: 9999px; }
-        .retro-range:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(59,130,246,0.35); }
-        /* WebKit */
-        .retro-range::-webkit-slider-runnable-track { height: 0.5rem; background: transparent; border-radius: 9999px; }
-        .retro-range::-webkit-slider-thumb { appearance: none; width: 1rem; height: 1rem; background: #fff; border: 2px solid rgb(59 130 246); border-radius: 9999px; margin-top: -0.25rem; box-shadow: 0 1px 2px rgba(0,0,0,0.3); transition: transform .12s ease; }
-        .dark .retro-range::-webkit-slider-thumb { background: rgb(15 23 42); border-color: rgb(59 130 246); }
-        .retro-range:active::-webkit-slider-thumb { transform: scale(1.05); }
-        /* Firefox */
-        .retro-range::-moz-range-track { height: 0.5rem; background: transparent; border-radius: 9999px; }
-        .retro-range::-moz-range-progress { height: 0.5rem; background: transparent; border-radius: 9999px; }
-        .retro-range::-moz-range-thumb { width: 1rem; height: 1rem; background: #fff; border: 2px solid rgb(59 130 246); border-radius: 9999px; box-shadow: 0 1px 2px rgba(0,0,0,0.3); transition: transform .12s ease; }
-        .dark .retro-range::-moz-range-thumb { background: rgb(15 23 42); border-color: rgb(59 130 246); }
-        .retro-range:active::-moz-range-thumb { transform: scale(1.05); }
+        /* Inputs & Sliders */
+        .retro-input, .retro-select { 
+          @apply w-full bg-white border border-slate-300 dark:bg-white/10 dark:border-white/10 
+                 rounded-md px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500; 
+        }
+        .retro-range { 
+          @apply w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-full appearance-none;
+          background: linear-gradient(to right, rgb(59 130 246) 0%, rgb(59 130 246) 0%, rgba(255,255,255,0.2) 0%);
+        }
+        .retro-range::-webkit-slider-thumb {
+          @apply w-4 h-4 bg-white dark:bg-white border-2 border-blue-500 rounded-full 
+                 shadow-md transition-transform;
+          -webkit-appearance: none;
+        }
+        .retro-range:active::-webkit-slider-thumb { 
+          @apply scale-110; 
+        }
 
         /* Lists */
-        .retro-list { @apply divide-y divide-white/10 rounded-md border border-white/10 bg-white/5; }
-        .retro-list-item { @apply px-2 py-2; line-height: 1.2; }
-        .retro-list-hover .retro-list-item:hover { @apply bg-white/10; }
-        .retro-list-bordered { /* already handled with border */ }
-        .retro-active { @apply bg-white/10; }
-        .retro-text-bold { @apply font-semibold; }
-        .retro-badge { @apply ml-2 inline-flex items-center rounded-full px-2 py-0.5 text-xs bg-blue-600 text-white; }
-        .retro-text-xs { @apply text-xs; }
-        .retro-text-italic { @apply italic; }
-        .retro-text-muted { @apply text-white/60; }
+        .retro-list { 
+          @apply divide-y rounded-md border bg-white divide-slate-200 border-slate-200 
+                 dark:divide-white/10 dark:border-white/10 dark:bg-white/5; 
+        }
+        .retro-list-item { 
+          @apply px-3 py-2 hover:bg-slate-100 dark:hover:bg-white/10 cursor-pointer 
+                 transition-colors flex justify-between items-center;
+        }
+        .retro-list-item.active { 
+          @apply bg-blue-50 dark:bg-blue-900/30 font-medium; 
+        }
 
-        /* Statusbar */
-        .retro-statusbar { @apply mt-2 px-2 py-1 text-sm bg-white/5 rounded-md border border-white/10; }
+        /* Status & Alerts */
+        .retro-statusbar { 
+          @apply mt-2 px-3 py-2 text-sm rounded-md bg-white/50 dark:bg-black/20 
+                 border border-slate-200 dark:border-white/10; 
+        }
         .retro-alert { @apply border; }
         .retro-alert-info { @apply border-sky-500/60; }
         .retro-alert-warning { @apply border-amber-500/60; }
         .retro-alert-danger { @apply border-rose-500/60; }
         .retro-alert-success { @apply border-emerald-500/60; }
-      }
 
-      /* Density tweaks */
-      body[data-density="compact"] .controls .retro-btn { @apply min-h-9; }
-      body[data-density="compact"] #play { font-size: 1rem; padding: 6px 12px; }
-      body[data-density="compact"] #playlist .retro-list-item { padding-top: 4px; padding-bottom: 4px; }
-      body[data-density="compact"] .retro-window-content { padding-top: 6px; padding-bottom: 6px; }
-
-      /* Responsive */
-      @media (max-width: 799px) {
-        .controls .retro-btn { flex: 1 1 calc(25% - 6px); min-height: 48px; font-size: 1.1rem; }
-        .retro-toolbar { flex-wrap: wrap; gap: 8px; }
-        #playlist-search { width: 100%; }
-        .playlist-scroll { max-height: 50vh; }
-        #cover-art { width: 160px; height: 160px; }
+        /* Responsive */
+        @media (max-width: 799px) {
+          .controls .retro-btn { 
+            @apply flex-1 min-h-12 text-sm;
+            min-width: 0;
+          }
+          .retro-btn-circle { 
+            @apply w-14 h-14;
+          }
+          #play.retro-btn-circle { 
+            @apply w-20 h-20;
+          }
+          .playlist-scroll { 
+            @apply max-h-[50vh]; 
+          }
+        }
       }
     </style>
+    <!-- Hint browsers we support both color schemes -->
+    <meta name="color-scheme" content="dark light">
+    <meta id="meta-theme-color" name="theme-color" content="#0f172a">
 </head>
-<body data-theme="dark" class="retro-body bg-slate-50 text-slate-900 dark:bg-slate-900 dark:text-slate-100">
+<body data-theme="light" class="retro-body bg-slate-50 text-slate-900 dark:bg-slate-900 dark:text-slate-100">
     <div class="retro-window mx-auto my-4 px-4 py-3 container">
         <div class="retro-titlebar retro-flex retro-align-center retro-gap-2 mb-2">
             <h1 class="retro-title">HiCloudMP Web Control - 
-                <button id="theme-toggle" class="retro-btn retro-btn-secondary"><i class="ri-moon-line"></i><span class="ml-2">Dark</span></button>
+                <button id="theme-toggle" class="retro-btn retro-btn-secondary" title="Theme mode: Auto/Light/Dark"><i class="ri-magic-line"></i><span class="ml-2">Auto</span></button>
                 <button id="density-toggle" class="retro-btn retro-btn-secondary" title="Toggle density">Comfortable</button>
             </h1>
         </div>
@@ -183,141 +211,202 @@
         <div class="retro-statusbar mt-2 px-2 py-1" id="statusbar">Ready.</div>
     </div>
     <script>
-        // Theme switcher
+        // Theme Management
         const themeToggle = document.getElementById('theme-toggle');
-        function setTheme(theme) {
-            document.body.setAttribute('data-theme', theme);
-            // Toggle Tailwind dark mode class
-            const root = document.documentElement; // use <html> for broader scope
-            if (theme === 'dark') {
-                root.classList.add('dark');
-            } else {
-                root.classList.remove('dark');
-            }
-            themeToggle.innerHTML = theme === 'dark'
-              ? '<i class="ri-moon-line"></i><span class="ml-2">Dark</span>'
-              : '<i class="ri-sun-line"></i><span class="ml-2">Light</span>';
-            localStorage.setItem('hicloudmp_theme', theme);
+        const root = document.documentElement;
+        const meta = document.getElementById('meta-theme-color');
+        const systemDarkMQ = window.matchMedia('(prefers-color-scheme: dark)');
+
+        function applyTheme(effective) {
+            const isDark = effective === 'dark';
+            document.body.setAttribute('data-theme', effective);
+            root.classList.toggle('dark', isDark);
+            document.body.classList.toggle('dark', isDark);
+            if (meta) meta.setAttribute('content', isDark ? '#0f172a' : '#f8fafc');
+            document.body.style.backgroundColor = isDark ? '#0f172a' : '#f8fafc';
+            document.body.style.color = isDark ? '#e5e7eb' : '#0f172a';
         }
-        themeToggle.onclick = function() {
-            setTheme(document.body.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+
+        function setThemeMode(mode) {
+            localStorage.setItem('hicloudmp_theme_mode', mode);
+            const isDark = systemDarkMQ.matches;
+            const effective = mode === 'auto' ? (isDark ? 'dark' : 'light') : mode;
+            
+            applyTheme(effective);
+            
+            const icon = mode === 'auto' ? 'ri-magic-line' : 
+                        effective === 'dark' ? 'ri-moon-line' : 'ri-sun-line';
+            const label = mode === 'auto' ? 'Auto' : 
+                         effective === 'dark' ? 'Dark' : 'Light';
+            
+            themeToggle.innerHTML = `<i class="${icon}"></i><span class="ml-2">${label}</span>`;
+        }
+
+        themeToggle.onclick = () => {
+            const current = localStorage.getItem('hicloudmp_theme_mode') || 'auto';
+            const next = current === 'auto' ? 'light' : 
+                        current === 'light' ? 'dark' : 'auto';
+            setThemeMode(next);
         };
-        // Density toggle
+
+        systemDarkMQ.addEventListener('change', (e) => {
+            const mode = localStorage.getItem('hicloudmp_theme_mode') || 'auto';
+            if (mode === 'auto') {
+                applyTheme(e.matches ? 'dark' : 'light');
+                themeToggle.innerHTML = '<i class="ri-magic-line"></i><span class="ml-2">Auto</span>';
+            }
+        });
+
+        // Initialize theme
+        (() => {
+            const mode = localStorage.getItem('hicloudmp_theme_mode') || 'auto';
+            setThemeMode(mode);
+        })();
+
+        // Density Toggle
         const densityToggle = document.getElementById('density-toggle');
         function setDensity(density) {
             document.body.setAttribute('data-density', density);
-            densityToggle.innerText = density === 'compact' ? 'Compact' : 'Comfortable';
+            densityToggle.textContent = density === 'compact' ? 'Comfortable' : 'Compact';
             localStorage.setItem('hicloudmp_density', density);
         }
-        densityToggle.onclick = function() {
+        
+        densityToggle.onclick = () => {
             const current = document.body.getAttribute('data-density') || 'comfortable';
             setDensity(current === 'compact' ? 'comfortable' : 'compact');
         };
-        // Load theme/density from storage
-        (function() {
-            const saved = localStorage.getItem('hicloudmp_theme');
-            if (saved) setTheme(saved);
+        
+        // Load density from storage
+        (() => {
             const savedDensity = localStorage.getItem('hicloudmp_density');
-            if (savedDensity) setDensity(savedDensity); else setDensity('comfortable');
+            setDensity(savedDensity || 'comfortable');
         })();
 
-        // SocketIO logic
+        // Player Controls
         const socket = io();
-        let userChangingVolume = false;
-        let userSeeking = false;
+        const statusbar = document.getElementById('statusbar');
         const volumeSlider = document.getElementById('volume');
         const seekSlider = document.getElementById('seek');
-        const statusbar = document.getElementById('statusbar');
-        // Paint slider background to show progress fill
-        function setSliderBG(el, color) {
-            const max = parseFloat(el.max || 100);
-            const val = parseFloat(el.value || 0);
-            const pct = Math.max(0, Math.min(100, (val / (max || 1)) * 100));
-            const track = 'rgba(255,255,255,0.2)';
-            el.style.background = `linear-gradient(to right, ${color} 0%, ${color} ${pct}%, ${track} ${pct}%)`;
-        }
-        function showStatus(msg, type) {
-            statusbar.textContent = msg;
-            statusbar.className = 'retro-statusbar' + (type ? ' retro-alert retro-alert-' + type : '');
+        let userChangingVolume = false;
+
+        function showStatus(message, type = '') {
+            statusbar.textContent = message;
+            statusbar.className = `retro-statusbar ${type ? 'retro-alert retro-alert-' + type : ''}`;
             setTimeout(() => {
                 statusbar.className = 'retro-statusbar';
                 statusbar.textContent = 'Ready.';
             }, 2500);
         }
-        volumeSlider.addEventListener('input', function() {
+
+        function setSliderProgress(el, value, max = 100, color) {
+            const percentage = Math.max(0, Math.min(100, (value / max) * 100));
+            el.style.background = `linear-gradient(to right, ${color} 0%, ${color} ${percentage}%, rgba(255,255,255,0.2) ${percentage}%)`;
+        }
+
+        // Volume Control
+        volumeSlider.addEventListener('input', (e) => {
             userChangingVolume = true;
-            document.getElementById('volval').innerText = this.value;
-            socket.emit('set_volume', {volume: this.value});
-            showStatus('Volume: ' + this.value, 'info');
-            setSliderBG(volumeSlider, 'rgb(16 185 129)');
+            const value = e.target.value;
+            document.getElementById('volval').textContent = value;
+            socket.emit('set_volume', { volume: value });
+            setSliderProgress(volumeSlider, value, 100, 'rgb(16 185 129)');
+            showStatus(`Volume: ${value}`, 'info');
         });
-        // Swipe gestures (mobile)
-        (function(){
-            let startX=0, startY=0, startTime=0;
+
+        // Seek Control
+        seekSlider.addEventListener('input', (e) => {
+            const value = e.target.value;
+            setSliderProgress(seekSlider, value, 100, 'rgb(59 130 246)');
+        });
+
+        // Mobile Swipe Gestures
+        (() => {
+            let startX = 0, startY = 0, startTime = 0;
+            const SWIPE_THRESHOLD = 60;
             const area = document.querySelector('.col-left') || document.body;
-            area.addEventListener('touchstart', function(e){
-                const t = e.changedTouches[0];
-                startX = t.clientX; startY = t.clientY; startTime = Date.now();
-            }, {passive: true});
-            area.addEventListener('touchend', function(e){
-                const t = e.changedTouches[0];
-                const dx = t.clientX - startX; const dy = t.clientY - startY; const dt = Date.now() - startTime;
-                if (dt < 800 && Math.abs(dx) > 60 && Math.abs(dy) < 40) {
-                    if (dx < 0) { socket.emit('next'); showStatus('Next track', 'info'); }
-                    else { socket.emit('prev'); showStatus('Previous track', 'info'); }
+            
+            area.addEventListener('touchstart', (e) => {
+                const touch = e.changedTouches[0];
+                startX = touch.clientX;
+                startY = touch.clientY;
+                startTime = Date.now();
+            }, { passive: true });
+            
+            area.addEventListener('touchend', (e) => {
+                const touch = e.changedTouches[0];
+                const dx = touch.clientX - startX;
+                const dy = touch.clientY - startY;
+                const dt = Date.now() - startTime;
+                
+                if (dt < 800 && Math.abs(dx) > SWIPE_THRESHOLD && Math.abs(dy) < 40) {
+                    const action = dx < 0 ? 'next' : 'prev';
+                    socket.emit(action);
+                    showStatus(action === 'next' ? 'Next track' : 'Previous track', 'info');
                 }
-            }, {passive: true});
+            }, { passive: true });
         })();
-        volumeSlider.addEventListener('mousedown', function() { userChangingVolume = true; });
-        volumeSlider.addEventListener('touchstart', function() { userChangingVolume = true; });
-        volumeSlider.addEventListener('mouseup', function() { userChangingVolume = false; });
-        volumeSlider.addEventListener('touchend', function() { userChangingVolume = false; });
-        volumeSlider.addEventListener('change', function() { userChangingVolume = false; });
-        // Initial paint for sliders
-        setSliderBG(volumeSlider, 'rgb(16 185 129)');
-        setSliderBG(seekSlider, 'rgb(59 130 246)');
-        document.getElementById('play').setAttribute('aria-label', 'Play or pause');
-        document.getElementById('stop').setAttribute('aria-label', 'Stop');
-        document.getElementById('next').setAttribute('aria-label', 'Next track');
-        document.getElementById('prev').setAttribute('aria-label', 'Previous track');
-        document.getElementById('shuffle').setAttribute('aria-label', 'Toggle shuffle');
-        document.getElementById('repeat').setAttribute('aria-label', 'Toggle repeat');
-        document.getElementById('play').onclick = function() { socket.emit('play'); showStatus('Play', 'success'); };
-        document.getElementById('stop').onclick = function() { socket.emit('stop'); showStatus('Stop', 'danger'); };
-        document.getElementById('next').onclick = function() { socket.emit('next'); showStatus('Next track', 'info'); };
-        document.getElementById('prev').onclick = function() { socket.emit('prev'); showStatus('Previous track', 'info'); };
-        document.getElementById('shuffle').onclick = function() { socket.emit('toggle_shuffle'); showStatus('Shuffle toggled', 'warning'); };
-        document.getElementById('repeat').onclick = function() { socket.emit('toggle_repeat'); showStatus('Repeat toggled', 'info'); };
-        // Playlist
+
+        // Player Controls Setup
+        const controls = {
+            play: { action: 'play', status: 'Play', type: 'success' },
+            stop: { action: 'stop', status: 'Stop', type: 'danger' },
+            next: { action: 'next', status: 'Next track', type: 'info' },
+            prev: { action: 'prev', status: 'Previous track', type: 'info' },
+            shuffle: { action: 'toggle_shuffle', status: 'Shuffle toggled', type: 'warning' },
+            repeat: { action: 'toggle_repeat', status: 'Repeat toggled', type: 'info' }
+        };
+
+        // Initialize control buttons
+        Object.entries(controls).forEach(([id, { action, status, type }]) => {
+            const btn = document.getElementById(id);
+            if (btn) {
+                btn.addEventListener('click', () => {
+                    socket.emit(action);
+                    showStatus(status, type);
+                });
+            }
+        });
+
+        // Playlist Management
         let playlistFilter = '';
+        
         function renderPlaylist(list, current) {
             const pl = document.getElementById('playlist');
+            if (!pl) return;
+            
             pl.innerHTML = '';
             let filtered = list;
+            
             if (playlistFilter) {
                 const q = playlistFilter.toLowerCase();
-                filtered = list.filter(track =>
+                filtered = list.filter(track => 
                     (track.name && track.name.toLowerCase().includes(q)) ||
                     (track.artist && track.artist.toLowerCase().includes(q))
                 );
             }
-            filtered.forEach(function(track, idx) {
-                // Find the original index for play_index
+            
+            filtered.forEach((track, idx) => {
                 const origIdx = list.indexOf(track);
                 const li = document.createElement('li');
-                li.className = 'retro-list-item track retro-flex retro-align-center retro-justify-content-between px-2 py-2' + (origIdx === current ? ' active retro-active retro-text-bold' : '');
+                li.className = `retro-list-item ${origIdx === current ? 'active' : ''}`;
                 li.tabIndex = 0;
                 li.setAttribute('role', 'option');
                 li.setAttribute('aria-selected', (origIdx === current).toString());
-                // Main track name and badge
+                
                 const left = document.createElement('span');
-                left.innerText = (origIdx+1) + '. ' + track.name;
-                if (origIdx === current) {
-                    const badge = document.createElement('span');
-                    badge.className = 'retro-badge retro-badge-primary ml-2';
-                    badge.innerText = 'Now';
-                    left.appendChild(badge);
+                left.textContent = `${origIdx + 1}. ${track.name || 'Unknown Track'}`;
+                
+                const right = document.createElement('span');
+                right.className = 'text-sm opacity-70';
+                right.textContent = track.artist || 'Unknown Artist';
+                
+                if (track.duration) {
+                    const duration = document.createElement('span');
+                    duration.className = 'ml-2 text-xs opacity-50';
+                    duration.textContent = formatTime(track.duration);
+                    right.appendChild(duration);
                 }
+                
                 li.appendChild(left);
                 // Optional: show artist as subtitle if available
                 if (track.artist) {

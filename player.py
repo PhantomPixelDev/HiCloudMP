@@ -8,6 +8,10 @@ from urllib.parse import urlparse
 from platformdirs import user_data_dir, user_cache_dir
 from cover_extractor import CoverExtractor
 import subprocess
+from tray import TrayController
+from metadata import MetadataController
+from playlists_manager import PlaylistsManager
+from library_view import LibraryView
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
@@ -193,6 +197,8 @@ class MusicPlayer(QMainWindow):
         self.audio_output = QAudioOutput()
         self.player.setAudioOutput(self.audio_output)
         self.audio_output.setVolume(0.7)  # 70% volume default
+        # Metadata/Cover controller
+        self.meta = MetadataController(self)
         
         # Set up Windows message handler for media keys
         if HAS_WIN32:
@@ -216,16 +222,33 @@ class MusicPlayer(QMainWindow):
         self.load_clouds()
         self.load_playlists()
         
+        # Playlists manager (delegate playlist operations)
+        try:
+            self.playlists_mgr = PlaylistsManager(self)
+            # Rebind common playlist APIs to manager to gradually slim this class
+            self.add_current_to_named_playlist = self.playlists_mgr.add_current_to_named_playlist
+            self.new_playlist = self.playlists_mgr.new_playlist
+            self.save_current_playlist = self.playlists_mgr.save_current_playlist
+            self.delete_current_playlist = self.playlists_mgr.delete_current_playlist
+            self.load_playlist = self.playlists_mgr.load_playlist
+            self.load_playlist_by_id = self.playlists_mgr.load_playlist_by_id
+            self.delete_playlist = self.playlists_mgr.delete_playlist
+        except Exception as e:
+            print(f"Warning: PlaylistsManager init failed: {e}")
+        
+        # Library view (delegate library tree and search)
+        try:
+            self.library_mgr = LibraryView(self)
+            self.update_library_tree = self.library_mgr.update_library_tree
+            self.on_library_item_clicked = self.library_mgr.on_library_item_clicked
+            self.search_music = self.library_mgr.search_music
+        except Exception as e:
+            print(f"Warning: LibraryView init failed: {e}")
+        
         self.web_server = None
         self.web_port = 5000
         
-        # Async cover fetch state
-        self._cover_thread = None
-        self._cover_worker = None
-        self._pending_cover = None  # (source, is_url)
-        self._cover_inflight_source = None
-        self._last_cover_source = None
-        self._last_cover_time = 0.0
+        # Async cover fetch state now handled by MetadataController
         
         # Auto-start web interface if enabled in settings
         if self.settings.value("web_interface", False, bool):
@@ -385,146 +408,32 @@ class MusicPlayer(QMainWindow):
             
             # Create system tray icon if supported
             if QSystemTrayIcon.isSystemTrayAvailable():
-                self.setup_system_tray()
+                # Initialize external tray controller (modularized)
+                try:
+                    self.tray = TrayController(self)
+                    self.tray.init_tray()
+                except Exception as e:
+                    print(f"Warning: Tray init failed: {e}")
                 
         except Exception as e:
             print(f"Warning: Could not set up system media controls: {e}")
     
     def setup_system_tray(self):
-        """Setup system tray icon with media controls"""
-        self.tray_icon = QSystemTrayIcon(self)
-        self.tray_icon.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
-        self.tray_icon.setToolTip("HiCloud MP")
-
-        tray_menu = QMenu()
-
-        # Now Playing (disabled informational action)
-        self.tray_now_playing = tray_menu.addAction("Now Playing: -")
-        self.tray_now_playing.setEnabled(False)
-
-        tray_menu.addSeparator()
-
-        # Window actions
-        show_action = tray_menu.addAction("Show Window")
-        show_action.triggered.connect(self.showNormal)
-        hide_action = tray_menu.addAction("Hide Window")
-        hide_action.triggered.connect(self.hide)
-
-        tray_menu.addSeparator()
-
-        # Media controls
-        self.tray_play_action = tray_menu.addAction("Play/Pause")
-        self.tray_play_action.triggered.connect(self.toggle_play)
-
-        self.tray_prev_action = tray_menu.addAction("Previous")
-        self.tray_prev_action.triggered.connect(self.prev_track)
-
-        self.tray_next_action = tray_menu.addAction("Next")
-        self.tray_next_action.triggered.connect(self.next_track)
-
-        self.tray_stop_action = tray_menu.addAction("Stop")
-        self.tray_stop_action.triggered.connect(self.stop)
-
-        # Seek controls
-        seek_back_action = tray_menu.addAction("Seek -10s")
-        seek_back_action.triggered.connect(lambda: self.seek_position(max(0, self.player.position() - 10000)))
-        seek_fwd_action = tray_menu.addAction("Seek +10s")
-        seek_fwd_action.triggered.connect(lambda: self.seek_position(self.player.position() + 10000))
-
-        # Toggles
-        tray_menu.addSeparator()
-        self.tray_shuffle_action = tray_menu.addAction("Shuffle")
-        self.tray_shuffle_action.setCheckable(True)
-        self.tray_shuffle_action.toggled.connect(self.toggle_shuffle)
-
-        self.tray_repeat_action = tray_menu.addAction("Repeat")
-        self.tray_repeat_action.setCheckable(True)
-        self.tray_repeat_action.toggled.connect(self.toggle_repeat)
-
-        # Volume controls
-        tray_menu.addSeparator()
-        self.tray_mute_action = tray_menu.addAction("Mute")
-        self.tray_mute_action.setCheckable(True)
-        self.tray_mute_action.toggled.connect(lambda m: self.audio_output.setMuted(m))
-
-        # Inline volume slider
-        vol_widget_action = QWidgetAction(tray_menu)
-        vol_slider = QSlider(Qt.Horizontal)
-        vol_slider.setRange(0, 100)
+        """Deprecated: Use TrayController. Kept for backward compatibility."""
         try:
-            vol_slider.setValue(int(self.audio_output.volume() * 100))
-        except Exception:
-            vol_slider.setValue(self.volume_slider.value())
-        vol_slider.valueChanged.connect(self.set_volume)
-        vol_widget_action.setDefaultWidget(vol_slider)
-        tray_menu.addAction(vol_widget_action)
-
-        # App shortcuts
-        tray_menu.addSeparator()
-        open_web_action = tray_menu.addAction("Open Web Panel")
-        open_web_action.triggered.connect(self.open_web_panel)
-
-        # Add to Playlist submenu (dynamic)
-        self.tray_add_menu = tray_menu.addMenu("Add Current to Playlist")
-        # Placeholder; items will be populated when the menu opens
-        self.tray_add_menu.addAction("No saved playlists").setEnabled(False)
-
-        # When tray menu opens, rebuild the playlist submenu to reflect latest lists
-        def _rebuild_menu():
-            self._rebuild_tray_playlist_menu()
-        tray_menu.aboutToShow.connect(_rebuild_menu)
-
-        open_loc_action = tray_menu.addAction("Open Current Location")
-        open_loc_action.triggered.connect(self.open_current_location)
-
-        settings_action = tray_menu.addAction("Settings")
-        settings_action.triggered.connect(self.open_settings_dialog)
-
-        tray_menu.addSeparator()
-        quit_action = tray_menu.addAction("Quit")
-        quit_action.triggered.connect(self.close)
-
-        self.tray_icon.setContextMenu(tray_menu)
-        # Click on tray icon toggles Play/Pause
-        self.tray_icon.activated.connect(lambda reason: self.toggle_play() if reason == QSystemTrayIcon.Trigger else None)
-        self.tray_icon.show()
-        # Update initial tray state
-        self.update_tray_ui()
+            if not hasattr(self, 'tray'):
+                self.tray = TrayController(self)
+            self.tray.init_tray()
+        except Exception as e:
+            print(f"Warning: setup_system_tray proxy failed: {e}")
 
     def _rebuild_tray_playlist_menu(self):
-        """Rebuild the 'Add Current to Playlist' submenu dynamically."""
-        if not hasattr(self, 'tray_add_menu') or self.tray_add_menu is None:
-            return
-        self.tray_add_menu.clear()
-        # Action: Add to Active Playlist (if any)
-        if getattr(self, 'active_playlist', None):
-            act = self.tray_add_menu.addAction(f"Add to Active: {self.active_playlist.name}")
-            act.triggered.connect(lambda checked=False, n=self.active_playlist.name: self.add_current_to_named_playlist(n))
-            self.tray_add_menu.addSeparator()
-        # List saved playlists
-        if self.playlists:
-            for pl in self.playlists:
-                act = self.tray_add_menu.addAction(pl.name)
-                act.triggered.connect(lambda checked=False, n=pl.name: self.add_current_to_named_playlist(n))
-        else:
-            self.tray_add_menu.addAction("No saved playlists").setEnabled(False)
-        # Also allow creating a new playlist with the current track
-        self.tray_add_menu.addSeparator()
-        new_pl_act = self.tray_add_menu.addAction("New Playlist with Current Track…")
-        def _new_with_current():
-            name, ok = QInputDialog.getText(self, "New Playlist", "Playlist name:")
-            if ok and name:
-                from playlist import Playlist as _P
-                pl = _P(name)
-                item = self._get_current_item()
-                if item is not None:
-                    pl.items.append(item)
-                self.playlists.append(pl)
-                self.active_playlist = pl
-                self.save_playlists()
-                self.update_playlist_selector()
-                self.status_bar.showMessage(f"Created playlist '{name}' and added current track")
-        new_pl_act.triggered.connect(_new_with_current)
+        """Proxy to TrayController implementation."""
+        try:
+            if hasattr(self, 'tray'):
+                self.tray._rebuild_tray_playlist_menu()
+        except Exception:
+            pass
 
     def _get_current_item(self):
         """Return the currently playing/selected item (str path or dict for cloud), or None."""
@@ -582,53 +491,10 @@ class MusicPlayer(QMainWindow):
         self.status_bar.showMessage(f"Added current track to playlist: {name}")
 
     def update_tray_ui(self):
-        """Refresh tray icon, tooltip, and action states based on playback and selection."""
-        # Icon based on playing/paused
+        """Proxy to TrayController implementation."""
         try:
-            state = self.player.playbackState()
-        except Exception:
-            state = QMediaPlayer.PlaybackState.StoppedState
-        if state == QMediaPlayer.PlaybackState.PlayingState:
-            self.tray_icon.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
-        elif state == QMediaPlayer.PlaybackState.PausedState:
-            self.tray_icon.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
-        else:
-            self.tray_icon.setIcon(self.style().standardIcon(QStyle.SP_MediaStop))
-
-        # Now Playing text and tooltip
-        title = "-"
-        try:
-            if hasattr(self, 'track_title_label') and self.track_title_label.text():
-                t = self.track_title_label.text()
-                if ":" in t:
-                    title = t.split(":", 1)[1].strip() or title
-        except Exception:
-            pass
-        artist = "-"
-        try:
-            if hasattr(self, 'track_artist_label') and self.track_artist_label.text():
-                a = self.track_artist_label.text()
-                if ":" in a:
-                    artist = a.split(":", 1)[1].strip() or artist
-        except Exception:
-            pass
-        self.tray_now_playing.setText(f"Now Playing: {title} — {artist}")
-        self.tray_icon.setToolTip(f"HiCloud MP\n{title} — {artist}")
-
-        # Toggle states
-        if hasattr(self, 'shuffle_btn'):
-            self.tray_shuffle_action.blockSignals(True)
-            self.tray_shuffle_action.setChecked(self.shuffle_btn.isChecked())
-            self.tray_shuffle_action.blockSignals(False)
-        if hasattr(self, 'repeat_btn'):
-            self.tray_repeat_action.blockSignals(True)
-            self.tray_repeat_action.setChecked(self.repeat_btn.isChecked())
-            self.tray_repeat_action.blockSignals(False)
-        # Mute state
-        try:
-            self.tray_mute_action.blockSignals(True)
-            self.tray_mute_action.setChecked(self.audio_output.isMuted())
-            self.tray_mute_action.blockSignals(False)
+            if hasattr(self, 'tray'):
+                self.tray.update_tray_ui()
         except Exception:
             pass
     
@@ -1013,403 +879,24 @@ class MusicPlayer(QMainWindow):
         if hasattr(self, 'update_tray_ui'):
             self.update_tray_ui()
     
+    # --- Metadata/Cover delegation wrappers ---
+    def set_default_cover(self):
+        """Set the default cover art (delegated to MetadataController)."""
+        return self.meta.set_default_cover()
+
     def update_cover_art(self, item):
-        """Update the cover art display for the current track (non-blocking)"""
-        print("\n=== Updating Cover Art ===")
-        print(f"Item type: {type(item)}")
-        print(f"Item content: {item}")
+        """Update the cover art display for the current track (delegated)."""
+        return self.meta.update_cover_art(item)
 
-        if not hasattr(self, 'cover_art_label') or not self.cover_art_label:
-            print("Error: cover_art_label is not initialized!")
-            return
-
-        # Determine source and whether it's a URL
-        source = None
-        is_url = False
-
-        try:
-            if isinstance(item, dict) and (item.get("is_cloud", False) or item.get("type") == "cloud"):
-                url = item.get("url")
-                try:
-                    if (not url or "@" not in url) and "cloud_idx" in item and "file_idx" in item:
-                        cloud_idx = item.get("cloud_idx")
-                        file_idx = item.get("file_idx")
-                        if isinstance(cloud_idx, int) and 0 <= cloud_idx < len(self.clouds):
-                            cloud = self.clouds[cloud_idx]
-                            files = cloud.get("files", [])
-                            if isinstance(file_idx, int) and 0 <= file_idx < len(files):
-                                base_url = files[file_idx].get("url")
-                                if base_url:
-                                    cfg = cloud.get("config", {})
-                                    user = cfg.get("webdav_login", "")
-                                    pwd = cfg.get("webdav_password", "")
-                                    parsed = QUrl(base_url)
-                                    if user and pwd and not parsed.userName():
-                                        parsed.setUserName(user)
-                                        parsed.setPassword(pwd)
-                                    # Use fully encoded URL to avoid spaces/apostrophes issues
-                                    try:
-                                        url = parsed.toString(QUrl.UrlFormattingOption.FullyEncoded)
-                                    except Exception:
-                                        url = parsed.toString()
-                except Exception as e:
-                    print(f"Error constructing authenticated URL for cover: {e}")
-                if url:
-                    source = url
-                    is_url = True
-            elif isinstance(item, str) and os.path.exists(item):
-                source = item
-                is_url = False
-
-            # Start async fetch if we have a source (debounced)
-            if source:
-                try:
-                    import time as _time
-                    if self._last_cover_source == source and (_time.time() - self._last_cover_time) < 3.0:
-                        print("Debounced duplicate cover fetch for same source")
-                        return
-                    if self._cover_inflight_source == source:
-                        print("Cover fetch already inflight for this source; skipping")
-                        return
-                    self._last_cover_source = source
-                    self._last_cover_time = _time.time()
-                except Exception:
-                    pass
-                self._start_cover_art_fetch(source, is_url)
-            else:
-                print("No valid source for cover art; setting default cover")
-                self.set_default_cover()
-
-        except Exception as e:
-            print(f"Unexpected error in update_cover_art: {e}")
-            import traceback
-            traceback.print_exc()
-            self.set_default_cover()
+    def update_metadata_display(self):
+        """Update the metadata display (delegated)."""
+        return self.meta.update_metadata_display()
 
     def _start_cover_art_fetch(self, source, is_url):
-        """Start a background worker to fetch cover art without blocking UI."""
-        try:
-            # If a worker is already running, queue latest request and abort current
-            if self._cover_thread and self._cover_thread.isRunning():
-                self._pending_cover = (source, is_url)
-                try:
-                    if self._cover_worker:
-                        self._cover_worker.abort()
-                except Exception:
-                    pass
-                try:
-                    self._cover_thread.requestInterruption() if hasattr(self._cover_thread, 'requestInterruption') else None
-                    self._cover_thread.quit()
-                except Exception:
-                    pass
-                # Do not start a new worker now; it will be started when current finishes
-                return
+        """Compatibility wrapper (delegates to MetadataController)."""
+        return self.meta._start_cover_art_fetch(source, is_url)
 
-            self._cover_thread = QThread(self)
-            self._cover_worker = CoverArtWorker(source, is_url=is_url)
-            self._cover_worker.moveToThread(self._cover_thread)
-            self._cover_thread.started.connect(self._cover_worker.run)
-            # Ensure proper cleanup when thread finishes
-            def _cleanup_thread():
-                try:
-                    self._cover_worker.deleteLater()
-                except Exception:
-                    pass
-                try:
-                    self._cover_thread.deleteLater()
-                except Exception:
-                    pass
-                self._cover_thread = None
-                self._cover_worker = None
-                self._cover_inflight_source = None
-                # If a pending cover request exists, start it now
-                if self._pending_cover:
-                    src, pending_is_url = self._pending_cover
-                    self._pending_cover = None
-                    QTimer.singleShot(0, lambda: self._start_cover_art_fetch(src, pending_is_url))
-            self._cover_thread.finished.connect(_cleanup_thread)
-
-            def on_finished(png_bytes):
-                try:
-                    if png_bytes:
-                        pixmap = QPixmap()
-                        if pixmap.loadFromData(png_bytes):
-                            scaled_pixmap = pixmap.scaled(
-                                self.cover_art_label.size(),
-                                Qt.AspectRatioMode.KeepAspectRatio,
-                                Qt.TransformationMode.SmoothTransformation
-                            )
-                            self.cover_art_label.setPixmap(scaled_pixmap)
-                            self.cover_art_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                            print("Successfully set async cover art")
-                        else:
-                            print("Failed to load pixmap from bytes")
-                            self.set_default_cover()
-                    else:
-                        print("No cover bytes returned")
-                        self.set_default_cover()
-                finally:
-                    # Cleanup will be handled by thread.finished -> _cleanup_thread
-                    self._cover_inflight_source = None
-
-            def on_error(msg):
-                print(f"Cover art worker error: {msg}")
-                self._cover_inflight_source = None
-
-            # When worker finishes, quit the thread (no manual quit from on_finished)
-            try:
-                self._cover_worker.finished.connect(self._cover_thread.quit)
-            except Exception:
-                pass
-            self._cover_worker.finished.connect(on_finished)
-            self._cover_worker.error.connect(on_error)
-            self._cover_inflight_source = source
-            self._cover_thread.start()
-        except Exception as e:
-            print(f"Failed to start cover art worker: {e}")
-            self.set_default_cover()
-
-    def closeEvent(self, event):
-        """Ensure background threads are stopped on app close."""
-        try:
-            if self._cover_thread and self._cover_thread.isRunning():
-                try:
-                    if self._cover_worker:
-                        self._cover_worker.abort()
-                except Exception:
-                    pass
-                try:
-                    self._cover_thread.quit()
-                except Exception:
-                    pass
-                # Give it a brief moment to exit without blocking long
-                try:
-                    self._cover_thread.wait(100)
-                except Exception:
-                    pass
-            self._pending_cover = None
-            self._cover_inflight_source = None
-        finally:
-            super().closeEvent(event)
-    
-    def set_default_cover(self):
-        """Set the default cover art"""
-        try:
-            print("\n=== Setting default cover ===")
-            # Create a fixed size pixmap
-            default_cover = QPixmap(200, 200)
-            
-            # Fill with dark gray
-            default_cover.fill(Qt.darkGray)
-            
-            # Create a painter for the pixmap
-            painter = QPainter(default_cover)
-            
-            # Set up pen and font
-            painter.setPen(Qt.white)
-            font = painter.font()
-            font.setBold(True)
-            font.setPointSize(12)
-            painter.setFont(font)
-            
-            # Draw the text
-            text = "No Cover"
-            text_rect = painter.boundingRect(default_cover.rect(), Qt.AlignCenter, text)
-            painter.drawText(text_rect, Qt.AlignCenter, text)
-            painter.end()
-            
-            # Set the pixmap to the label
-            self.cover_art_label.setPixmap(default_cover)
-            self.cover_art_label.setAlignment(Qt.AlignCenter)
-            print("Default cover set")
-            
-        except Exception as e:
-            print(f"Error in set_default_cover: {e}")
-            import traceback
-            traceback.print_exc()
-            
-            # Last resort: try a simple gray rectangle
-            try:
-                default_cover = QPixmap(200, 200)
-                default_cover.fill(Qt.darkGray)
-                self.cover_art_label.setPixmap(default_cover)
-                self.cover_art_label.setAlignment(Qt.AlignCenter)
-            except Exception as e:
-                print(f"Failed to set fallback cover: {e}")
-    
-    def update_metadata_display(self):
-        """Update the metadata display with information about the current track"""
-        try:
-            print("\n=== Updating Metadata Display ===")
-            
-            # Initialize default values
-            default_title = "Title: -"
-            default_artist = "Artist: -"
-            default_album = "Album: -"
-            
-            # Set default values first to clear any previous content
-            self.track_title_label.setText(default_title)
-            self.track_artist_label.setText(default_artist)
-            self.track_album_label.setText(default_album)
-            
-            if not hasattr(self, 'current_index') or self.current_index < 0 or self.current_index >= len(self.playlist):
-                print("Invalid current index, can't update metadata")
-                self.set_default_cover()
-                return
-                
-            current_item = self.playlist[self.current_index]
-            print(f"Current item type: {type(current_item)}")
-            print(f"Current item content: {current_item}")
-            
-            # Handle cloud files
-            if isinstance(current_item, dict):
-                print("Processing dictionary item...")
-                try:
-                    # Cloud item: use fast ffprobe metadata when possible
-                    is_cloud = current_item.get('is_cloud', False) or current_item.get('type') == 'cloud'
-                    title = current_item.get('title', '')
-                    artist = current_item.get('artist', '')
-                    album = current_item.get('album', '')
-
-                    if is_cloud:
-                        # Build authenticated URL if needed
-                        url = current_item.get('url')
-                        try:
-                            if (not url or "@" not in url) and "cloud_idx" in current_item and "file_idx" in current_item:
-                                cloud_idx = current_item.get('cloud_idx')
-                                file_idx = current_item.get('file_idx')
-                                if isinstance(cloud_idx, int) and 0 <= cloud_idx < len(self.clouds):
-                                    cloud = self.clouds[cloud_idx]
-                                    files = cloud.get('files', [])
-                                    if isinstance(file_idx, int) and 0 <= file_idx < len(files):
-                                        base_url = files[file_idx].get('url')
-                                        if base_url:
-                                            cfg = cloud.get('config', {})
-                                            user = cfg.get('webdav_login', '')
-                                            pwd = cfg.get('webdav_password', '')
-                                            parsed = QUrl(base_url)
-                                            if user and pwd and not parsed.userName():
-                                                parsed.setUserName(user)
-                                                parsed.setPassword(pwd)
-                                            try:
-                                                url = parsed.toString(QUrl.UrlFormattingOption.FullyEncoded)
-                                            except Exception:
-                                                url = parsed.toString()
-                        except Exception:
-                            pass
-
-                        # Extract tags quickly via ffprobe
-                        try:
-                            from cover_extractor import CoverExtractor as _CE
-                            md = _CE.extract_metadata(url or '', is_url=True)
-                            if md.get('title'):
-                                title = md['title']
-                            if md.get('artist'):
-                                artist = md['artist']
-                            if md.get('album'):
-                                album = md['album']
-                        except Exception as e:
-                            print(f"ffprobe metadata failed: {e}")
-
-                    if not title:
-                        if 'name' in current_item:
-                            title = os.path.splitext(str(current_item['name']))[0]
-                        elif 'path' in current_item:
-                            title = os.path.splitext(os.path.basename(str(current_item['path'])))[0]
-                        else:
-                            title = 'Unknown'
-                    if not artist:
-                        artist = 'Unknown Artist'
-                    if not album:
-                        album = 'Unknown Album'
-
-                    # Update UI
-                    self.track_title_label.setText(f"Title: {title}")
-                    self.track_artist_label.setText(f"Artist: {artist}")
-                    self.track_album_label.setText(f"Album: {album}")
-
-                    print(f"Metadata - Title: {title}, Artist: {artist}, Album: {album}")
-
-                    # Update cover art asynchronously
-                    self.update_cover_art(current_item)
-                    # Refresh tray and notify
-                    if hasattr(self, 'update_tray_ui'):
-                        self.update_tray_ui()
-                    try:
-                        if hasattr(self, 'tray_icon') and self.tray_icon:
-                            self.tray_icon.showMessage("Now Playing", f"{title} — {artist}", QSystemTrayIcon.Information, 3000)
-                    except Exception:
-                        pass
-                    return
-
-                except Exception as e:
-                    print(f"Error processing dictionary item: {e}")
-                    import traceback
-                    traceback.print_exc()
-            
-            # Handle local files
-            elif isinstance(current_item, str) and os.path.exists(current_item):
-                print(f"Processing local file: {current_item}")
-                try:
-                    import mutagen
-                    audio = mutagen.File(current_item, easy=True)
-                    if audio:
-                        title = audio.get('title', [os.path.basename(current_item)])[0]
-                        artist = audio.get('artist', ['Unknown Artist'])[0]
-                        album = audio.get('album', ['Unknown Album'])[0]
-                        
-                        print(f"Local metadata - Title: {title}, Artist: {artist}, Album: {album}")
-                        self.track_title_label.setText(f"Title: {title}")
-                        self.track_artist_label.setText(f"Artist: {artist}")
-                        self.track_album_label.setText(f"Album: {album}")
-                        
-                        # Update cover art
-                        self.update_cover_art(current_item)
-                        # Refresh tray and notify
-                        if hasattr(self, 'update_tray_ui'):
-                            self.update_tray_ui()
-                        try:
-                            if hasattr(self, 'tray_icon') and self.tray_icon:
-                                self.tray_icon.showMessage("Now Playing", f"{title} — {artist}", QSystemTrayIcon.Information, 3000)
-                        except Exception:
-                            pass
-                        return
-                    
-                except Exception as e:
-                    print(f"Error processing local file: {e}")
-                    import traceback
-                    traceback.print_exc()
-            
-            # Fallback for any other case
-            print("Using fallback metadata display")
-            self.track_title_label.setText(f"Title: {os.path.basename(str(current_item))}" if isinstance(current_item, str) else "Title: Unknown")
-            self.track_artist_label.setText("Artist: Unknown")
-            self.track_album_label.setText("Album: Unknown")
-            
-            # If we get here, something went wrong with the normal flow
-            print("Falling back to default cover art")
-            self.set_default_cover()
-            
-            # Force UI update
-            QApplication.processEvents()
-            print("Finished updating metadata display")
-            # Update tray UI
-            if hasattr(self, 'update_tray_ui'):
-                self.update_tray_ui()
-            
-        except Exception as e:
-            print(f"Critical error in update_metadata_display: {e}")
-            import traceback
-            traceback.print_exc()
-            # Last resort: set default cover and clear metadata
-            try:
-                self.set_default_cover()
-                self.track_title_label.setText("Title: Error")
-                self.track_artist_label.setText("Artist: Error")
-                self.track_album_label.setText("Album: Error")
-            except Exception as e:
-                print(f"Failed to set error state: {e}")
-
+    # --- Convenience ---
     def open_current_location(self):
         """Open the folder of the currently selected track (local files)."""
         try:
@@ -1431,7 +918,7 @@ class MusicPlayer(QMainWindow):
                     pass
         except Exception:
             pass
-    
+
             
     def update_position(self, position):
         self.seek_slider.blockSignals(True)
@@ -1523,8 +1010,13 @@ class MusicPlayer(QMainWindow):
             QMediaPlayer.MediaStatus.BufferingMedia: "Buffering...",
             QMediaPlayer.MediaStatus.BufferedMedia: "Ready to play",
             QMediaPlayer.MediaStatus.EndOfMedia: "End of media",
-            QMediaPlayer.MediaStatus.InvalidMedia: "Invalid media"
+            QMediaPlayer.MediaStatus.InvalidMedia: "Error: Invalid or corrupted media"
         }
+        
+        # Track the last media status for error recovery
+        if not hasattr(self, '_last_media_status'):
+            self._last_media_status = None
+        self._last_media_status = status
         
         # Show status message if we have one for this status
         if status in status_messages:
@@ -1579,9 +1071,21 @@ class MusicPlayer(QMainWindow):
                 self.next_track()
                 
         elif status == QMediaPlayer.MediaStatus.InvalidMedia:
-            error_msg = "Error: Could not play media (invalid or unsupported format)"
-            self.status_bar.showMessage(error_msg, 5000)
-            QMessageBox.critical(self, "Playback Error", error_msg)
+            current_item = self.playlist[self.current_index] if self.playlist and 0 <= self.current_index < len(self.playlist) else None
+            
+            # Check if this is a network-related error
+            is_network_issue = False
+            if isinstance(current_item, dict) and 'url' in current_item:
+                is_network_issue = True
+                error_msg = f"Network error playing {os.path.basename(current_item.get('path', 'media'))}. Retrying..."
+                self.status_bar.showMessage(error_msg, 5000)
+                
+                # Retry playing the current item after a short delay
+                QTimer.singleShot(2000, self.retry_current_playback)
+            else:
+                error_msg = "Error: Could not play media (invalid or unsupported format)"
+                self.status_bar.showMessage(error_msg, 5000)
+                QMessageBox.critical(self, "Playback Error", error_msg)
             
         # Update play/pause button based on playback state
         if status in [QMediaPlayer.MediaStatus.LoadedMedia, 
@@ -1592,6 +1096,43 @@ class MusicPlayer(QMainWindow):
                 else QStyle.SP_MediaPlay
             ))
 
+    def retry_current_playback(self):
+        """Retry playing the current track, with a maximum number of retries."""
+        if not hasattr(self, '_playback_retry_count'):
+            self._playback_retry_count = 0
+        
+        max_retries = 3
+        
+        if self._playback_retry_count < max_retries and self.playlist and 0 <= self.current_index < len(self.playlist):
+            current_item = self.playlist[self.current_index]
+            if isinstance(current_item, dict) and 'url' in current_item:
+                self._playback_retry_count += 1
+                self.status_bar.showMessage(
+                    f"Retry {self._playback_retry_count}/{max_retries} for {os.path.basename(current_item.get('path', 'media'))}"
+                )
+                # Reset the player before retrying
+                self.player.stop()
+                self.player.setSource(QUrl())
+                
+                # Small delay before retry to allow network recovery
+                QTimer.singleShot(1000, lambda: self.play_item_at_index(self.current_index))
+            else:
+                self._playback_retry_count = 0
+        else:
+            # Max retries reached, try playing next track
+            self._playback_retry_count = 0
+            if self.playlist and 0 <= self.current_index < len(self.playlist):
+                current_item = self.playlist[self.current_index]
+                error_msg = f"Failed to play {os.path.basename(current_item.get('path', 'media'))} after {max_retries} attempts. Moving to next track..."
+                self.status_bar.showMessage(error_msg, 5000)
+                
+                # Try to play next track if available
+                if self.current_index < len(self.playlist) - 1:
+                    QTimer.singleShot(1500, self.next_track)
+                else:
+                    # If this was the last track, just stop
+                    self.stop()
+    
     # === Cloud Methods ===
     def play_cloud_file(self, cloud_idx, file_idx):
         try:
@@ -2601,6 +2142,9 @@ class MusicPlayer(QMainWindow):
                 return
     
     def play_item_at_index(self, index):
+        # Reset retry counter when starting a new track
+        if hasattr(self, '_playback_retry_count'):
+            self._playback_retry_count = 0
         """Play a specific item from the playlist"""
         if 0 <= index < len(self.playlist):
             self.current_index = index
