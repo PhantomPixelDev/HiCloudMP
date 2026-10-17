@@ -220,6 +220,9 @@ class MusicPlayer(QMainWindow):
         self.audio_output.setVolume(0.7)  # 70% volume default
         # Metadata/Cover controller
         self.meta = MetadataController(self)
+        # Stream-specific retry handlers (see _play_stream/_disconnect_stream_handlers)
+        self._stream_status_handler = None
+        self._stream_error_handler = None
         
         # Enable system media control (media keys)
         self.setup_system_media_controls()
@@ -1398,21 +1401,14 @@ class MusicPlayer(QMainWindow):
             if not hasattr(self, '_stream_retry'):
                 self._reset_stream_retry()
 
-            # Clear any existing media and handlers
-            try:
-                self.player.errorOccurred.disconnect()
-            except Exception:
-                pass
-            try:
-                self.player.mediaStatusChanged.disconnect()
-            except Exception:
-                pass
-
             # Stop and reset source first to avoid race conditions
             self.player.stop()
             self.player.setSource(QUrl())
 
-            # Set up the media content correctly for Qt6
+            # Disconnect ONLY our stream-specific handlers, then install fresh
+            # ones. The app-wide on_media_status_changed subscription (auto
+            # advance / shuffle / repeat) must keep working afterwards.
+            self._disconnect_stream_handlers()
             self.player.setSource(QUrl(url))
 
             # Error handling with retry
@@ -1429,9 +1425,10 @@ class MusicPlayer(QMainWindow):
             try:
                 # Connect with the two-arg signature if available; PySide will adapt as needed
                 self.player.errorOccurred.connect(handle_error)
+                self._stream_error_handler = handle_error
             except Exception:
                 # Fallback: if signature mismatch, still attempt reconnect on media status
-                pass
+                self._stream_error_handler = None
 
             # Media status handling for stalled/invalid/end
             def handle_media_status(status):
@@ -1451,6 +1448,7 @@ class MusicPlayer(QMainWindow):
                     self._schedule_stream_retry(url, display_name, immediate=True)
 
             self.player.mediaStatusChanged.connect(handle_media_status)
+            self._stream_status_handler = handle_media_status
 
             # Start playback
             self.player.play()
@@ -1461,6 +1459,22 @@ class MusicPlayer(QMainWindow):
             self.status_bar.showMessage(error_msg)
             # Try again with backoff
             self._schedule_stream_retry(url, display_name)
+
+    def _disconnect_stream_handlers(self):
+        """Disconnect only the stream-specific slots installed by _play_stream,
+        never the app-wide on_media_status_changed subscription."""
+        handlers = [
+            ('_stream_error_handler', self.player.errorOccurred),
+            ('_stream_status_handler', self.player.mediaStatusChanged),
+        ]
+        for attr, signal in handlers:
+            handler = getattr(self, attr, None)
+            if handler is not None:
+                try:
+                    signal.disconnect(handler)
+                except Exception:
+                    pass
+            setattr(self, attr, None)
 
     def cancel_download(self):
         if hasattr(self, 'download_worker') and hasattr(self.download_worker, 'abort'):
