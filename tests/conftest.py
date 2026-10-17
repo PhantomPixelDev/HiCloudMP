@@ -1,8 +1,10 @@
 import os
 import sys
-import tempfile
 import types
+import tempfile
 from pathlib import Path
+
+import pytest
 
 # Make the repo root importable (tests are executed from the repo root,
 # but this also supports running pytest from an IDE with another CWD).
@@ -49,6 +51,17 @@ os.environ["APPDATA"] = str(_session_appdata)
 def session_appdata() -> Path:
     """The isolated APPDATA-equivalent directory tests must run against."""
     return _session_appdata
+
+
+@pytest.fixture()
+def music_player(qtbot, monkeypatch):
+    """Fully isolated MusicPlayer: offscreen Qt, stubbed user dirs, no registry writes."""
+    import player as player_mod
+
+    monkeypatch.setattr(player_mod, "QSettings", isolated_qsettings_factory(monkeypatch))
+    mp = player_mod.MusicPlayer()
+    qtbot.addWidget(mp)
+    return mp
 
 
 def isolated_qsettings_factory(monkeypatch):

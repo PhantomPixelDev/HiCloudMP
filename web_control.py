@@ -203,6 +203,13 @@ class WebControlServer:
         self._thread.start()
 
     def stop(self):
-        # Flask does not provide a built-in way to stop, so this is a placeholder
+        """Best-effort shutdown of the web server (idempotent, safe from any thread)."""
         self._running = False
-        # In production, use a more robust server or signal 
+        try:
+            # flask_socketio.SocketIO has no shutdown(); the underlying
+            # socketio.Server does (python-socketio >= 5.10).
+            self.socketio.server.shutdown()
+        except Exception:
+            pass  # shutdown support varies by async server mode
+        if self._thread and self._thread.is_alive() and self._thread is not threading.current_thread():
+            self._thread.join(timeout=2) 

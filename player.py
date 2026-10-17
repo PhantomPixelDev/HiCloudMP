@@ -2222,10 +2222,6 @@ class MusicPlayer(QMainWindow):
         self.save_clouds()
         self.save_playlists()
         
-        # Clean up web server if running
-        if hasattr(self, 'web_server') and self.web_server:
-            self.web_server.shutdown()
-        
         # Clean up any remaining temp files in the temp directory
         try:
             if os.path.exists(self.temp_dir):
