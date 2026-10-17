@@ -4,6 +4,7 @@ import json
 import time
 import random
 import tempfile
+from datetime import datetime
 from urllib.parse import urlparse
 from platformdirs import user_data_dir, user_cache_dir
 from cover_extractor import CoverExtractor
@@ -2306,7 +2307,7 @@ class MusicPlayer(QMainWindow):
                 for playlist in self.playlists:
                     playlist_action = add_to_menu.addAction(playlist.name)
                     playlist_action.triggered.connect(
-                        lambda checked, p=playlist, d=data: self.add_file_to_playlist(p, d)
+                        lambda checked, p=playlist, d=data: self.add_file_to_specific_playlist(p, d)
                     )
         if not context_menu.isEmpty():
             context_menu.exec(self.library_tree.viewport().mapToGlobal(position))
@@ -2487,25 +2488,6 @@ class MusicPlayer(QMainWindow):
         
         self.status_bar.showMessage(f"Added folder to playlist: {playlist.name}")
     
-    def add_file_to_specific_playlist(self, playlist, data):
-        """Add a file to a specific playlist"""
-        original_playlist = self.playlist.copy()
-        original_index = self.current_index
-        
-        # Temporarily clear playlist to collect the file
-        self.playlist = []
-        self.add_file_to_playlist(data)
-        
-        # Add the file to the specific playlist
-        if self.playlist and self.playlist[0] not in playlist.items:
-            playlist.items.append(self.playlist[0])
-        
-        # Save playlists
-        playlist.modified = datetime.now().isoformat()
-        self.save_playlists()
-        
-        # Restore original playlist
-
     def highlight_current_track(self):
         for i in range(self.playlist_widget.count()):
             item = self.playlist_widget.item(i)
