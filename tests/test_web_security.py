@@ -1,36 +1,18 @@
 import pytest
 
 
+import pytest
+
+
 @pytest.fixture()
 def web_server(music_player, monkeypatch):
-    """Real WebControlServer against an isolated MusicPlayer, explicit token."""
+    """Real WebControlServer against an isolated MusicPlayer, explicit token.
+    (Implementation shared via tests/conftest.py)"""
     import player as player_mod
 
     server = player_mod.WebControlServer(music_player, host="127.0.0.1", port=5000, token="testtoken123")
     yield server
     server.stop()
-
-
-@pytest.fixture()
-def http_client(web_server):
-    return web_server.app.test_client()
-
-
-@pytest.fixture()
-def sio_client(web_server):
-    """Authenticated client; the status burst is available to the test (not pre-drained)."""
-    client = web_server.socketio.test_client(web_server.app, auth={"token": "testtoken123"})
-    yield client
-    try:
-        client.disconnect()
-    except Exception:
-        pass
-
-
-@pytest.fixture()
-def sio_client_drained(sio_client):
-    sio_client.get_received()
-    return sio_client
 
 
 def test_default_host_is_loopback(music_player):

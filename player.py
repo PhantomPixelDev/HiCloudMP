@@ -405,7 +405,8 @@ class MusicPlayer(QMainWindow):
             # If setting is enabled, try to start it automatically
             if self.settings.value("web_interface", False, bool):
                 if self.start_web_interface():
-                    url = f"http://localhost:{self.web_port}"
+                    token = getattr(self.web_server, 'token', '') or self.ensure_web_token()
+                    url = f"http://localhost:{self.web_port}/?token={token}"
                     webbrowser.open(url)
                     return
             QMessageBox.warning(self, "Web Panel", "Web interface is not enabled in settings.")
@@ -845,6 +846,10 @@ class MusicPlayer(QMainWindow):
             self.play_cloud_file(cloud_idx, file_idx)
         else:
             path = self.playlist[self.current_index]
+            # Local playback: detach stream-retry handlers installed by a
+            # previous cloud-stream attempt so their closures cannot hijack
+            # this track's media signals (EndOfMedia auto-advance, etc.)
+            self._disconnect_stream_handlers()
             # Set up and play the media
             url = QUrl.fromLocalFile(os.path.abspath(path))
             self.player.setSource(url)
@@ -2005,11 +2010,22 @@ class MusicPlayer(QMainWindow):
     
     def add_cloud(self):
         """Add or manage cloud storage accounts"""
+        # Snapshot BEFORE constructing the dialog: AddCloudDialog.__init__ can
+        # (and, for prefilled edits, does) mutate the shared list even before exec().
+        try:
+            import json as _json
+            snapshot = _json.dumps(self.clouds, sort_keys=True, default=str)
+        except Exception:
+            snapshot = sorted((c.get("name", ""), c.get("type", "")) for c in self.clouds)
         dlg = CloudAccountsDialog(self, self.clouds)
-        snapshot = sorted((c.get("name", ""), c.get("type", "")) for c in self.clouds)
         dlg.exec()
-        # The dialog edits the shared clouds list in place; persist on change.
-        if sorted((c.get("name", ""), c.get("type", "")) for c in self.clouds) != snapshot:
+        # The dialog edits the shared clouds list in place (add/edit/remove,
+        # including config-credential edits); persist on any change.
+        try:
+            changed = _json.dumps(self.clouds, sort_keys=True, default=str) != snapshot
+        except Exception:
+            changed = True
+        if changed:
             self.save_clouds()
             self.update_library_tree()
             self.status_bar.showMessage(f"Cloud accounts updated ({len(self.clouds)})")

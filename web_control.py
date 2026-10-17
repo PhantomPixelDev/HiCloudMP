@@ -117,19 +117,6 @@ class WebControlServer:
         def handle_stop():
             self.player.run_on_ui.emit(lambda: (self.player.stop(), self._broadcast_status(), self._broadcast_progress()))
 
-        @self.socketio.on('play')
-        def handle_play():
-            def _do():
-                # If no current index, default to first track
-                if (not hasattr(self.player, 'playlist') or not self.player.playlist):
-                    return
-                if not hasattr(self.player, 'current_index') or self.player.current_index < 0 or self.player.current_index >= len(self.player.playlist):
-                    self.player.current_index = 0
-                self.player.play()
-                self._broadcast_status()
-                self._broadcast_progress()
-            self.player.run_on_ui.emit(_do)
-
         @self.socketio.on('set_volume')
         def handle_set_volume(data):
             if not isinstance(data, dict):
@@ -201,6 +188,8 @@ class WebControlServer:
 
         @self.socketio.on('switch_playlist')
         def handle_switch_playlist(data):
+            if not isinstance(data, dict):
+                return
             pid = data.get('playlist_id')
             def _do():
                 if pid == '__queue__':
@@ -287,6 +276,6 @@ class WebControlServer:
             # socketio.Server does (python-socketio >= 5.10).
             self.socketio.server.shutdown()
         except Exception:
-            pass  # shutdown support varies by async server mode
-        if self._thread and self._thread.is_alive() and self._thread is not threading.current_thread():
-            self._thread.join(timeout=2) 
+            pass  # no controlled shutdown handle in threading mode — the daemon
+        # server thread dies with the process; joining it would only add a
+        # multi-second close delay when the server ignores the shutdown signal. 

@@ -64,22 +64,57 @@ def music_player(qtbot, monkeypatch):
     return mp
 
 
+# ---- shared web-server fixtures (usable from any test module) ----
+
+@pytest.fixture()
+def web_server(music_player, monkeypatch):
+    """Real WebControlServer against an isolated MusicPlayer, explicit token."""
+    import player as player_mod
+
+    server = player_mod.WebControlServer(music_player, host="127.0.0.1", port=5000, token="testtoken123")
+    yield server
+    server.stop()
+
+
+@pytest.fixture()
+def http_client(web_server):
+    return web_server.app.test_client()
+
+
+@pytest.fixture()
+def sio_client(web_server):
+    """Authenticated client; the status burst is available to the test (not pre-drained)."""
+    client = web_server.socketio.test_client(web_server.app, auth={"token": "testtoken123"})
+    yield client
+    try:
+        client.disconnect()
+    except Exception:
+        pass
+
+
+@pytest.fixture()
+def sio_client_drained(sio_client):
+    sio_client.get_received()
+    return sio_client
+
+
 def isolated_qsettings_factory(monkeypatch):
     """Return a factory usable as monkeypatch.setattr(player_mod, "QSettings", factory).
 
     The app constructs QSettings("HiCloudMP", "HiCloudMP"), which on Windows targets
-    HKCU\\Software (the native format). For tests every QSettings instance is forced
-    to IniFormat under the session temp dir, so tests neither read nor write the
-    user's real registry configuration (e.g. the saved web_interface flag).
+    HKCU\\Software (the native format). For tests every QSettings instance is redirected
+    to a FRESH IniFormat file under the session dir, so tests neither read nor write the
+    user's real registry configuration, and settings set in one test cannot leak into
+    the next music_player construction (e.g. the saved web_interface autostart flag).
     """
+    import uuid
+
     from PySide6.QtCore import QSettings as _QSettings
 
     # PySide6 6.10 removed QSettings.setFormat/setPath (deprecated in Qt 6.9).
-    # Equivalent isolation: redirect every construction to a file-backed
-    # IniFormat instance under the session dir, so nothing touches the registry.
-    # The app only ever constructs QSettings("HiCloudMP", "HiCloudMP"), so one
-    # shared ini file per session is faithful to production behavior.
-    root = _session_appdata / "settings"
+    # Equivalent isolation: rewrite every construction to a file-backed
+    # IniFormat instance unique to this factory call.
+    root = _session_appdata / "settings" / uuid.uuid4().hex
     root.mkdir(parents=True, exist_ok=True)
     ini_file = str(root / "HiCloudMP.ini")
 
