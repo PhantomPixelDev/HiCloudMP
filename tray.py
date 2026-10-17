@@ -1,8 +1,10 @@
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QMenu, QSystemTrayIcon, QWidgetAction, QSlider
+from PySide6.QtWidgets import QMenu, QSystemTrayIcon, QWidgetAction, QSlider, QInputDialog
 from PySide6.QtWidgets import QStyle
 import os
 import subprocess
+
+from utils import open_folder
 
 
 class TrayController:
@@ -183,7 +185,7 @@ class TrayController:
         self.tray_add_menu.addSeparator()
         new_pl_act = self.tray_add_menu.addAction("New Playlist with Current Track…")
         def _new_with_current():
-            name, ok = self.app.QInputDialog.getText(self.app, "New Playlist", "Playlist name:")
+            name, ok = QInputDialog.getText(self.app, "New Playlist", "Playlist name:")
             if ok and name:
                 from playlist import Playlist as _P
                 pl = _P(name)
@@ -217,9 +219,6 @@ class TrayController:
                 path = os.path.abspath(item['path'])
             if path and os.path.exists(path):
                 folder = os.path.dirname(path)
-                try:
-                    subprocess.Popen(["xdg-open", folder])
-                except Exception:
-                    pass
+                open_folder(folder)
         except Exception:
             pass

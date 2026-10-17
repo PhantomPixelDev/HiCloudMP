@@ -1,5 +1,6 @@
 import os
 import sys
+import subprocess
 
 # Supported file extensions
 SUPPORTED_EXTS = [".mp3", ".flac", ".wav", ".ogg"]
@@ -38,4 +39,18 @@ def format_time(ms):
     total_seconds = round(ms / 1000)
     minutes = total_seconds // 60
     seconds = total_seconds % 60
-    return f"{minutes:02d}:{seconds:02d}" 
+    return f"{minutes:02d}:{seconds:02d}"
+
+
+def open_folder(path):
+    """Open a folder in the OS file manager. Never raises.
+    Windows explorer.exe (os.startfile), macOS Finder (open), else xdg-open."""
+    try:
+        if sys.platform == "win32" and hasattr(os, "startfile"):
+            os.startfile(str(path))
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(path)])
+        else:
+            subprocess.Popen(["xdg-open", str(path)])
+    except Exception as e:
+        print(f"Warning: could not open folder {path}: {e}") 

@@ -30,7 +30,8 @@ from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput, QMediaFormat
 # Import custom modules
 from utils import (
     is_music_file, scan_music_files, format_time, 
-    MEDIA_FOLDERS_FILE, CLOUD_FILES_FILE, PLAYLISTS_FILE
+    MEDIA_FOLDERS_FILE, CLOUD_FILES_FILE, PLAYLISTS_FILE,
+    open_folder
 )
 from cloud_handlers import CLOUD_TYPES
 from playlist import Playlist
@@ -914,10 +915,7 @@ class MusicPlayer(QMainWindow):
                     path = os.path.abspath(item['path'])
             if path and os.path.exists(path):
                 folder = os.path.dirname(path)
-                try:
-                    subprocess.Popen(["xdg-open", folder])
-                except Exception:
-                    pass
+                open_folder(folder)
         except Exception:
             pass
 
