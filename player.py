@@ -29,8 +29,7 @@ from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput, QMediaFormat
 # Import custom modules
 from utils import (
     is_music_file, scan_music_files, format_time, 
-    MEDIA_FOLDERS_FILE, CLOUD_FILES_FILE, PLAYLISTS_FILE,
-    HAS_WIN32
+    MEDIA_FOLDERS_FILE, CLOUD_FILES_FILE, PLAYLISTS_FILE
 )
 from cloud_handlers import CLOUD_TYPES
 from playlist import Playlist
@@ -200,10 +199,6 @@ class MusicPlayer(QMainWindow):
         # Metadata/Cover controller
         self.meta = MetadataController(self)
         
-        # Set up Windows message handler for media keys
-        if HAS_WIN32:
-            self.win_proc = create_win_proc_handler(self)
-            
         # Enable system media control (media keys)
         self.setup_system_media_controls()
         

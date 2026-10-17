@@ -16,20 +16,9 @@ MEDIA_FOLDERS_FILE = os.path.join(data_dir, "mediafolders.json")
 CLOUD_FILES_FILE = os.path.join(data_dir, "cloudfiles.json")
 PLAYLISTS_FILE = os.path.join(data_dir, "playlists.json")
 
-# Import for Windows-specific media key handling
-if sys.platform == 'win32':
-    try:
-        import win32con
-        import win32gui
-        import win32api
-        import ctypes
-        from ctypes import wintypes
-        HAS_WIN32 = True
-    except ImportError:
-        HAS_WIN32 = False
-        print("Warning: win32api not available. Media keys may not work. Try 'pip install pywin32'")
-else:
-    HAS_WIN32 = False
+# Windows platform flag (pywin32 removed along with the dead media-key
+# handler it fed — nothing imports pywin32 anymore)
+HAS_WIN32 = (sys.platform == 'win32')
 
 def is_music_file(path):
     """Check if a file is a supported music file based on extension"""

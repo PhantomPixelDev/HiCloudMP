@@ -30,6 +30,15 @@ def _stub_user_data_dir(app_name=None, app_author=None, ensure_exists=True, **_i
 
 
 _platformdirs_stub.user_data_dir = _stub_user_data_dir
+
+
+def _stub_user_cache_dir(*_args, **_kwargs):
+    cache = _session_appdata / "cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    return str(cache)
+
+
+_platformdirs_stub.user_cache_dir = _stub_user_cache_dir
 sys.modules["platformdirs"] = _platformdirs_stub
 
 # QSettings still targets the registry on Windows; APPDATA redirect keeps any
@@ -40,3 +49,29 @@ os.environ["APPDATA"] = str(_session_appdata)
 def session_appdata() -> Path:
     """The isolated APPDATA-equivalent directory tests must run against."""
     return _session_appdata
+
+
+def isolated_qsettings_factory(monkeypatch):
+    """Return a factory usable as monkeypatch.setattr(player_mod, "QSettings", factory).
+
+    The app constructs QSettings("HiCloudMP", "HiCloudMP"), which on Windows targets
+    HKCU\\Software (the native format). For tests every QSettings instance is forced
+    to IniFormat under the session temp dir, so tests neither read nor write the
+    user's real registry configuration (e.g. the saved web_interface flag).
+    """
+    from PySide6.QtCore import QSettings as _QSettings
+
+    # PySide6 6.10 removed QSettings.setFormat/setPath (deprecated in Qt 6.9).
+    # Equivalent isolation: redirect every construction to a file-backed
+    # IniFormat instance under the session dir, so nothing touches the registry.
+    # The app only ever constructs QSettings("HiCloudMP", "HiCloudMP"), so one
+    # shared ini file per session is faithful to production behavior.
+    root = _session_appdata / "settings"
+    root.mkdir(parents=True, exist_ok=True)
+    ini_file = str(root / "HiCloudMP.ini")
+
+    def _factory(*args, **kwargs):
+        return _QSettings(ini_file, _QSettings.IniFormat)
+
+    return _factory
+
