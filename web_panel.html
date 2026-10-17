@@ -283,7 +283,28 @@
         })();
 
         // Player Controls
-        const socket = io();
+        // Auth: the desktop app's "Open Web Panel" appends ?token=...; the token is
+        // moved into sessionStorage and stripped from the URL so it does not leak
+        // via history/shared links. socket.io connects with auth={"token": ...}.
+        let webPanelToken = null;
+        (() => {
+            const params = new URLSearchParams(window.location.search);
+            const fromUrl = params.get('token');
+            if (fromUrl) {
+                sessionStorage.setItem('hicloudmp_web_token', fromUrl);
+                params.delete('token');
+                const rest = params.toString();
+                window.history.replaceState({}, document.title,
+                    window.location.pathname + (rest ? '?' + rest : '') + window.location.hash);
+            }
+            webPanelToken = sessionStorage.getItem('hicloudmp_web_token');
+        })();
+        const socket = io({ auth: { token: webPanelToken } });
+        socket.on('connect_error', (err) => {
+            if (String(err && err.message || err).includes('auth')) {
+                showStatus('Access denied: invalid or missing token.', 'error');
+            }
+        });
         const statusbar = document.getElementById('statusbar');
         const volumeSlider = document.getElementById('volume');
         const seekSlider = document.getElementById('seek');

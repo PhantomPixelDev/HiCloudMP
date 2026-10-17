@@ -137,6 +137,19 @@ class SettingsDialog(QDialog):
         self.web_checkbox = QCheckBox("Enable Web Interface (LAN control)")
         self.web_checkbox.setChecked(self.settings.value("web_interface", False, bool))
         layout.addWidget(self.web_checkbox)
+        # Expose on LAN opt-in (0.0.0.0); default stays loopback-only
+        self.lan_checkbox = QCheckBox("Expose on LAN (token still required)")
+        self.lan_checkbox.setChecked(self.settings.value("web/host", "127.0.0.1") == "0.0.0.0")
+        layout.addWidget(self.lan_checkbox)
+        # Access token display: read-only, selectable for copying
+        if self.parent is not None and hasattr(self.parent, "ensure_web_token"):
+            token = self.parent.ensure_web_token()
+        else:
+            token = self.settings.value("web/token", "")
+        layout.addWidget(QLabel("Web Panel Access Token (Bearer / ?token=...)"))
+        self.web_token_edit = QLineEdit(token)
+        self.web_token_edit.setReadOnly(True)
+        layout.addWidget(self.web_token_edit)
         btn_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         btn_box.accepted.connect(self.accept)
         btn_box.rejected.connect(self.reject)
@@ -151,6 +164,7 @@ class SettingsDialog(QDialog):
         self.settings.setValue("theme", self.theme_combo.currentText())
         self.settings.setValue("download_folder", self.download_folder_edit.text())
         self.settings.setValue("web_interface", self.web_checkbox.isChecked())
+        self.settings.setValue("web/host", "0.0.0.0" if self.lan_checkbox.isChecked() else "127.0.0.1")
     def open_cloud_accounts(self):
         if self.parent:
             dlg = CloudAccountsDialog(self, self.parent.clouds)
@@ -344,9 +358,12 @@ class MusicPlayer(QMainWindow):
             return True  # Already running
         try:
             from web_control import WebControlServer
-            self.web_server = WebControlServer(self, host='0.0.0.0', port=self.web_port)
+            token = self.ensure_web_token()
+            host = self.settings.value("web/host", "127.0.0.1")
+            self.web_server = WebControlServer(self, host=host, port=self.web_port, token=token)
             self.web_server.start()
-            self.status_bar.showMessage(f"Web interface started on http://localhost:{self.web_port}")
+            summary = f"http://localhost:{self.web_port}" if host != "0.0.0.0" else f"http://<your-ip>:{self.web_port}"
+            self.status_bar.showMessage(f"Web interface started on {summary} (token required)")
             return True
         except Exception as e:
             print(f"Failed to start web interface: {e}")
@@ -354,6 +371,15 @@ class MusicPlayer(QMainWindow):
                                 "Failed to start web interface. Make sure Flask and Flask-SocketIO are installed.")
             self.web_server = None
             return False
+
+    def ensure_web_token(self):
+        """Return the web panel access token, generating one on first use."""
+        token = self.settings.value("web/token", "")
+        if not token:
+            import secrets
+            token = secrets.token_hex(16)
+            self.settings.setValue("web/token", token)
+        return token
     
     def stop_web_interface(self):
         """Stop the web interface server"""
@@ -369,7 +395,8 @@ class MusicPlayer(QMainWindow):
         """Open the web control panel in the default browser"""
         import webbrowser
         if getattr(self, 'web_server', None):
-            url = f"http://localhost:{self.web_port}"
+            token = getattr(self.web_server, 'token', '') or self.ensure_web_token()
+            url = f"http://localhost:{self.web_port}/?token={token}"
             webbrowser.open(url)
         else:
             # If setting is enabled, try to start it automatically
