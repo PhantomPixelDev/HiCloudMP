@@ -1,0 +1,6 @@
+# Development / test-only dependencies (not needed to run the player).
+pytest>=9.1.1
+pytest-qt>=4.5.0
+# Windows only: enables regression coverage for the pywin32-present startup path.
+# (The player no longer imports pywin32 itself; it is optional for media keys.)
+pywin32; sys_platform == "win32"

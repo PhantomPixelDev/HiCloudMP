@@ -36,9 +36,9 @@ A powerful, modern music player with support for local and cloud-based music lib
 ## Installation
 
 ### Requirements
-- Python 3.x
-- PySide6
-- Additional libraries (see below)
+- Python 3.12+ (3.14 supported; the PySide6 pin adapts automatically)
+- System media library (`python-vlc` is not used — playback is Qt `QMediaPlayer`)
+- Linux only: see `requirements-linux.txt` for the MPRIS/media-key extras
 
 ### Setup
 
@@ -60,6 +60,8 @@ source venv/bin/activate
 3. Install Python dependencies:
 ```bash
 pip install -r requirements.txt
+# Linux desktops with MPRIS/media keys:
+pip install -r requirements-linux.txt
 ```
 
 4. Linux desktop (for MPRIS/media keys): install system packages if missing
@@ -79,7 +81,12 @@ python main.py
 
 ## Web Interface (LAN Remote Control)
 
-HiCloud MP now includes a powerful web interface for remote control from any device on your local network!
+HiCloud MP includes a web interface for remote control from any device on your network.
+
+> **Security:** the panel is protected by an access **token**. It binds to
+> `127.0.0.1` by default; enabling **Expose on LAN** in Settings binds to
+> `0.0.0.0` and the token stays mandatory for every route and socket.
+> Any HTTP/WSS client without the token gets rejected.
 
 ### Features
 - 🎛️ **Full playback control** (play, pause, next, previous, stop)
@@ -92,11 +99,11 @@ HiCloud MP now includes a powerful web interface for remote control from any dev
 
 ### How to use
 1. Open HiCloud MP and go to **Settings**
-2. Enable **Web Interface (LAN control)**
-3. On any device/browser in your LAN, go to:  
-   `http://<your-pc-ip>:5000`  
-   (replace `<your-pc-ip>` with your computer's local IP address)
-4. Enjoy full remote control of your music player!
+2. Enable **Web Interface (LAN control)** and expose on LAN if desired
+3. The update loop shows a short-lived token path: the built-in **Web Panel** menu action opens the panel URL with its token pre-attached (copied automatically to the browser session); from other devices open
+   `http://<desktop-ip>:5000/?token=<token>`
+   (the token is shown read-only in Settings)
+4. The page moves the token into browser session storage and strips it from the visible URL automatically.
 
 ## Usage
 
@@ -180,3 +187,17 @@ MIT License
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+Run the test suite before opening a PR:
+```bash
+pip install -r requirements-dev.txt
+pytest tests/
+```
+
+## Project status & roadmap
+
+A full codebase review (verified crash list, security findings, deferred roadmap) lives at
+[`docs/superpowers/specs/2026-10-17-codebase-review.md`](docs/superpowers/specs/2026-10-17-codebase-review.md).
+Known deferred items include: theme centralization, model/view library, native Windows media keys
+(regression tests exist for the removed win32 handler), streaming credentials not embedded in URLs,
+and a full `MusicPlayer` decomposition.

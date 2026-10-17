@@ -1,0 +1,8 @@
+# Linux-only extras for MPRIS (system media keys) support.
+# Install alongside requirements.txt on Linux desktops:
+#   pip install -r requirements.txt -r requirements-linux.txt
+# (PyGObject/dbus-python build from source and need the system GTK/dbus dev
+#  packages: python3-gi gir1.2-glib-2.0 libdbus-1-dev libdbus-glib-1-dev.)
+PyGObject>=3.54.0
+pycairo>=1.28.0
+dbus-python>=1.4.0
