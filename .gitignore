@@ -4,3 +4,4 @@ venv/
 .vscode/
 playlists.json
 __pycache__/
+.superpowers/
