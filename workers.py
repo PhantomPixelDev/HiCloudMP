@@ -23,7 +23,7 @@ class DownloadWorker(QObject):
 
     def run(self):
         try:
-            with requests.get(self.url, stream=True, auth=self.auth) as r:
+            with requests.get(self.url, stream=True, auth=self.auth, timeout=(10, 30)) as r:
                 r.raise_for_status()
                 total_size = int(r.headers.get('content-length', 0))
                 downloaded = 0

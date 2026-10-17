@@ -31,7 +31,7 @@ from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput, QMediaFormat
 from utils import (
     is_music_file, scan_music_files, format_time, 
     MEDIA_FOLDERS_FILE, CLOUD_FILES_FILE, PLAYLISTS_FILE,
-    open_folder
+    open_folder, atomic_write_text
 )
 from cloud_handlers import CLOUD_TYPES
 from playlist import Playlist
@@ -2179,16 +2179,14 @@ class MusicPlayer(QMainWindow):
     def save_media_folders(self):
         """Save media folders to file"""
         try:
-            with open(MEDIA_FOLDERS_FILE, "w") as f:
-                json.dump(self.media_folders, f)
+            atomic_write_text(MEDIA_FOLDERS_FILE, json.dumps(self.media_folders))
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Could not save media folders: {e}")
     
     def save_clouds(self):
         """Save cloud accounts to file"""
         try:
-            with open(CLOUD_FILES_FILE, "w") as f:
-                json.dump(self.clouds, f)
+            atomic_write_text(CLOUD_FILES_FILE, json.dumps(self.clouds))
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Could not save cloud accounts: {e}")
     
@@ -2196,8 +2194,7 @@ class MusicPlayer(QMainWindow):
         """Save all playlists to file"""
         try:
             playlists_data = [p.to_dict() for p in self.playlists]
-            with open(PLAYLISTS_FILE, "w") as f:
-                json.dump(playlists_data, f)
+            atomic_write_text(PLAYLISTS_FILE, json.dumps(playlists_data))
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Could not save playlists: {e}")
 

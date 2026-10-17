@@ -42,6 +42,24 @@ def format_time(ms):
     return f"{minutes:02d}:{seconds:02d}"
 
 
+def atomic_write_text(path, text):
+    """Write text to path atomically: write a .tmp sibling, then os.replace
+    over the target. A crash mid-write can never corrupt the previous file,
+    and the temp file is cleaned up on any failure."""
+    tmp = str(path) + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, str(path))
+    except Exception:
+        try:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+        except Exception:
+            pass
+        raise
+
+
 def open_folder(path):
     """Open a folder in the OS file manager. Never raises.
     Windows explorer.exe (os.startfile), macOS Finder (open), else xdg-open."""
