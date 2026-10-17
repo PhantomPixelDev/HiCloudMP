@@ -59,6 +59,12 @@ class CloudAccountsDialog(QDialog):
         btn_layout.addWidget(edit_btn)
         btn_layout.addWidget(remove_btn)
         layout.addLayout(btn_layout)
+        # Close with QDialog.Accepted so the caller persists changes; without
+        # this the dialog can only ever reject, making edits hard to save.
+        self.button_box = QDialogButtonBox(QDialogButtonBox.Ok)
+        self.button_box.button(QDialogButtonBox.Ok).setText("Done")
+        self.button_box.accepted.connect(self.accept)
+        layout.addWidget(self.button_box)
     def refresh_list(self):
         self.list_widget.clear()
         for cloud in self.clouds:
@@ -1960,19 +1966,13 @@ class MusicPlayer(QMainWindow):
     def add_cloud(self):
         """Add or manage cloud storage accounts"""
         dlg = CloudAccountsDialog(self, self.clouds)
-        if dlg.exec() == QDialog.Accepted:
-            data = dlg.get_data()
-            if data["type"] != "unknown":
-                self.clouds.append({
-                    "type": data["type"], 
-                    "name": data["name"], 
-                    "config": data["config"], 
-                    "files": [],
-                    "last_sync": "Never"
-                })
-                self.save_clouds()
-                self.update_library_tree()
-                self.status_bar.showMessage(f"Added {data['type']} account: {data['name']}")
+        snapshot = sorted((c.get("name", ""), c.get("type", "")) for c in self.clouds)
+        dlg.exec()
+        # The dialog edits the shared clouds list in place; persist on change.
+        if sorted((c.get("name", ""), c.get("type", "")) for c in self.clouds) != snapshot:
+            self.save_clouds()
+            self.update_library_tree()
+            self.status_bar.showMessage(f"Cloud accounts updated ({len(self.clouds)})")
     
     def scan_clouds(self):
         if not self.clouds:
