@@ -309,6 +309,7 @@
         const volumeSlider = document.getElementById('volume');
         const seekSlider = document.getElementById('seek');
         let userChangingVolume = false;
+        let userSeeking = false;
 
         function showStatus(message, type = '') {
             statusbar.textContent = message;
@@ -322,6 +323,12 @@
         function setSliderProgress(el, value, max = 100, color) {
             const percentage = Math.max(0, Math.min(100, (value / max) * 100));
             el.style.background = `linear-gradient(to right, ${color} 0%, ${color} ${percentage}%, rgba(255,255,255,0.2) ${percentage}%)`;
+        }
+
+        // Adapter for the historical call sites: paints the fill from the
+        // slider's current value/max. Defined before any caller runs.
+        function setSliderBG(el, color) {
+            setSliderProgress(el, el.value, el.max || 100, color);
         }
 
         // Volume Control
@@ -490,7 +497,7 @@
                 document.getElementById('volval').innerText = data.volume;
                 volumeSlider.value = data.volume;
                 // Repaint volume slider background when updated from server
-                if (typeof setSliderBG === 'function') setSliderBG(volumeSlider, 'rgb(16 185 129)');
+                setSliderBG(volumeSlider, 'rgb(16 185 129)');
             }
             document.getElementById('shuffle').classList.toggle('active', !!data.shuffle);
             document.getElementById('repeat').classList.toggle('active', !!data.repeat);
