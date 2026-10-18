@@ -55,6 +55,14 @@ from web_control import WebControlServer
 # MusicPlayer._retire_qthread() and dropped on the thread's finished signal.
 _ORPHAN_QTHREADS = []
 
+# 0xC0000409 fix, part 2: interpreter finalization would clear this list
+# while a retired thread still runs, dropping the pair's last reference
+# (-> ~QThread -> qFatal). The exit guard runs before those globals are
+# cleared; see thread_teardown.
+from thread_teardown import register_exit_guard as _register_exit_guard  # noqa: E402
+
+_register_exit_guard(lambda: list(_ORPHAN_QTHREADS))
+
 
 class MusicPlayer(QMainWindow, PlaybackEngineMixin):
     cloud_file_downloaded = Signal(str)
@@ -1506,11 +1514,30 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
             _ORPHAN_QTHREADS.append(pair)
 
         def _done(pair=pair):
-            for lst in (retired, _ORPHAN_QTHREADS):
+            # Delivered queued on finished (verified on PySide6 6.10.3) but
+            # mirror metadata._release anyway: the release must be deferred
+            # and isRunning-guarded so it stays safe even if a future Qt
+            # build emits finished while the thread is still tearing down -
+            # dropping references synchronously there would call ~QThread on
+            # a running thread and qFatal (0xC0000409).
+            def _release(pair=pair):
                 try:
-                    lst.remove(pair)
-                except ValueError:
+                    if pair[0].isRunning():
+                        # Final teardown in progress; retry on a later step.
+                        QTimer.singleShot(50, lambda p=pair: _release(p))
+                        return
+                except RuntimeError:
+                    pass  # underlying C++ object already gone
+                for lst in (retired, _ORPHAN_QTHREADS):
+                    try:
+                        lst.remove(pair)
+                    except ValueError:
+                        pass
+                try:
+                    pair[0].finished.disconnect()
+                except Exception:
                     pass
+            QTimer.singleShot(0, _release)
         try:
             thread.finished.connect(_done)
         except Exception:
@@ -1550,6 +1577,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
             # THEIR OWN thread/worker: a late completion from a replaced
             # download must never touch the newer download's thread.
             self.download_thread = dl_thread = QThread()
+            dl_thread.setObjectName("download")  # fatal forensics
             self.download_worker = dl_worker = DownloadWorker(url, temp_path, auth=auth)
             dl_worker.moveToThread(dl_thread)
 
@@ -2226,6 +2254,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         self.status_bar.showMessage(f"Starting cloud scan ({len(self.clouds)} accounts)…")
         for idx, cloud in enumerate(self.clouds):
             thread = QThread()
+            thread.setObjectName(f"scan-cloud-{idx}")  # fatal forensics
             worker = ScanCloudWorker(idx, cloud)
             self.scan_workers.append(worker)
             worker.progress_updated.connect(self.update_scan_progress)

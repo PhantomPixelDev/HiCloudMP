@@ -11,6 +11,13 @@ from cover_extractor import CoverExtractor
 # process with 0xC0000409.
 _ORPHAN_THREADS = []
 
+# Same fatal has a second, subtler trigger at PROCESS EXIT: interpreter
+# finalization clears this list while a retired thread still runs. The exit
+# guard runs before module globals are cleared; see thread_teardown.
+from thread_teardown import register_exit_guard as _register_exit_guard  # noqa: E402
+
+_register_exit_guard(lambda: list(_ORPHAN_THREADS))
+
 
 class CoverArtWorker(QThread):
     finished = Signal(bytes)  # PNG-encoded image payload (may be empty)
@@ -312,7 +319,9 @@ class MetadataController:
                     pass
                 return
             self._cover_thread = thread = QThread(self.app)
+            thread.setObjectName("cover-art")  # fatal forensics
             self._cover_worker = worker = CoverArtWorker(source, is_url=is_url)
+            worker.setObjectName("cover-art-worker")  # fatal forensics
             worker.moveToThread(thread)
             thread.started.connect(worker.run)
             def _cleanup(thread=thread, worker=worker):

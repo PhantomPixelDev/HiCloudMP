@@ -159,6 +159,29 @@ def test_download_replace_while_running_survives_subprocess():
     assert "SURVIVED" in out, out
 
 
+def test_retired_running_thread_survives_interpreter_teardown():
+    """The 0xC0000409 fatal AT PROCESS EXIT: interpreter finalization clears
+    the module-global retention lists (_ORPHAN_THREADS / _ORPHAN_QTHREADS)
+    while a retired, uninterruptibly-blocked thread still runs; the pair's
+    last reference drops -> C++ ~QThread -> qFatal -> fastfail. Pinned
+    contract: a registered exit guard (runs before module globals are
+    cleared) lets near-finished threads complete and hard-exits 0 while any
+    retained thread still runs, so teardown can never destroy a live QThread."""
+    child = Path(__file__).parent / "_qthread_teardown_child.py"
+    env = dict(os.environ)
+    env["QT_QPA_PLATFORM"] = "offscreen"
+    proc = subprocess.run(
+        [sys.executable, str(child)],
+        capture_output=True, text=True, timeout=240, env=env, cwd=str(ROOT),
+    )
+    out = (proc.stdout or "") + "\n" + (proc.stderr or "")
+    assert proc.returncode == 0, (
+        "child died: exit={} (0x{:08X})\n{}".format(
+            proc.returncode, proc.returncode & 0xFFFFFFFF, out)
+    )
+    assert "orphans=1" in out, out
+
+
 # ---------------------------------------------------------------------------
 # in-process lifecycle contract
 # ---------------------------------------------------------------------------
