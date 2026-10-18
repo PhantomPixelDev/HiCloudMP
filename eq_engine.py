@@ -203,11 +203,26 @@ class EQEngine(QObject):
         self._skip_done = False
         self._base_ms = ms
         if self._sink is not None:
+            # Qt6 semantics: reset()/stop() leave the sink StoppedState and
+            # close the push-mode QIODevice - later writes hit bytesFree()==0
+            # and silently no-op (playback dies, position freezes at the
+            # target). Flush by RESTARTING the push stream immediately.
+            was_suspended = False
             try:
-                self._sink.reset()          # drop buffered old audio: honest jump
-                self._prof_us_base = self._sink.processedUSecs()
+                from PySide6.QtMultimedia import QtAudio
+                st = self._sink.state()
+                was_suspended = st == QtAudio.State.SuspendedState
             except Exception:
                 pass
+            try:
+                self._sink.stop()
+                self._io = self._sink.start()
+                self._prof_us_base = 0     # processedUSecs() runs from 0 again
+                if was_suspended:
+                    self._sink.suspend()   # scrub space: stay silenced
+            except Exception as e:
+                self._report_error(f"seek: sink restart failed: {e}")
+                return
         try:
             url = self._decoder.source()
             self._decoder.stop()
