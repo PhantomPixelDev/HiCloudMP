@@ -37,7 +37,6 @@ jobs:
           --output-filename=HiCloudMP.exe
           --include-data-file=web_panel.html=web_panel.html
           --include-data-file=icon.ico=icon.ico
-          --include-data-dir=static=static
           main.py
 
       - name: Bundle ffmpeg for cover extraction
