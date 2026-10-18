@@ -26,3 +26,12 @@ def test_slider_background_helper_defined_once():
     src_txt = _panel_source()
     assert re.search(r"function\s+setSliderBG\s*\(", src_txt), "setSliderBG helper missing"
     assert re.search(r"\b(let|var|const)\s+userSeeking\b", src_txt), "userSeeking must be declared"
+
+
+def test_ping_pill_present_and_wired():
+    """Connection indicator: ids exist, polls /api/ping, shows latency."""
+    src_txt = _panel_source()
+    for needle in ("ping-pill", "ping-dot", "ping-text", "api/ping"):
+        assert needle in src_txt, needle
+    assert "Offline" in src_txt, "broken connection must read Offline, not blank"
+    assert "Connected" in src_txt, "healthy connection shows ms latency"

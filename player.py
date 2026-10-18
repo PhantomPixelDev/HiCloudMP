@@ -701,13 +701,16 @@ class MusicPlayer(QMainWindow):
         if getattr(self, 'web_server', None):
             return True  # Already running
         try:
-            from web_control import WebControlServer
+            from web_control import WebControlServer, panel_url, lan_ip
             token = self.ensure_web_token()
             host = self.settings.value("web/host", "127.0.0.1")
             self.web_server = WebControlServer(self, host=host, port=self.web_port, token=token)
             self.web_server.start()
-            summary = f"http://localhost:{self.web_port}" if host != "0.0.0.0" else f"http://<your-ip>:{self.web_port}"
-            self.status_bar.showMessage(f"Web interface started on {summary} (token required)")
+            visible_ip = lan_ip() if host == "0.0.0.0" else None
+            url = panel_url(self.web_port, token, lan_ip=visible_ip)
+            self.status_bar.showMessage(
+                f"Web remote ready: {url} — open this link from any "
+                f"device on the same network.")
             return True
         except Exception as e:
             print(f"Failed to start web interface: {e}")

@@ -1,10 +1,39 @@
 import threading
 import os
 import secrets
+import time
 from flask import Flask, request, render_template_string, send_from_directory, jsonify
 from flask_socketio import SocketIO, emit
 
 DEFAULT_HOST = "127.0.0.1"
+
+
+def lan_ip():
+    """Best-effort LAN address for user-facing remote links (never raises).
+    Falls back to 127.0.0.1 when the machine is offline/isolated."""
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("192.168.255.255", 9))
+            ip = s.getsockname()[0]
+        finally:
+            s.close()
+        if ip and ip not in ("127.0.0.1", "0.0.0.0"):
+            return str(ip)
+    except Exception:
+        pass
+    try:
+        return str(socket.gethostbyname(socket.gethostname()))
+    except Exception:
+        return "127.0.0.1"
+
+
+def panel_url(port=5000, token="", lan_ip=None):
+    """Full ready-to-open remote link. The access key is embedded — people
+    copy this one link; nothing to configure."""
+    host = lan_ip or "127.0.0.1"
+    return f"http://{host}:{port}" + (f"/?token={token}" if token else "")
 
 
 class WebControlServer:
@@ -65,6 +94,14 @@ class WebControlServer:
         @self.app.route('/health')
         def health():
             return {'status': 'ok'}
+
+        @self.app.route('/api/ping')
+        def ping():
+            """Public liveness probe for the panel's connection indicator.
+            Deliberately exposes nothing about the player — same contract as
+            /health plus a clock so the browser can show latency."""
+            return {'ok': True, 'app': 'HiCloudMP',
+                    'server_ms': int(time.time() * 1000)}
 
     def _setup_socketio(self):
         @self.socketio.on('connect')
