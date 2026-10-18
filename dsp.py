@@ -35,6 +35,28 @@ def _linear_gains(n_bins, sample_rate, gains_db, frame=4096):
     return (10.0 ** (db / 20.0)).astype(np.float32)
 
 
+def _soft_limit_over(x):
+    """Soft-knee limiter for EQ output: only samples ABOVE 0 dBFS (would
+    hard-clip at the int16 rails) are compressed smoothly toward a
+    sub-rail ceiling; everything at or below +-32767 is returned
+    untouched bit-exact (keeps the EQ-off/flat transparency contract)."""
+    x = np.asarray(x, dtype=np.float32)
+    absx = np.abs(x)
+    over = absx > 32767.0
+    if not np.any(over):
+        return x
+    e = absx[over] - 32767.0
+    shaped = 32767.0 - _OVER_KNEE * (e / (e + _OVER_KNEE))
+    res = x.copy()
+    res[over] = np.sign(x[over]) * shaped
+    return res
+
+
+# Soft-limit ceiling depth beyond 0 dBFS (0.1 FS): asymptotically limits
+# would-be clipping peaks to ~-0.2 dBFS instead of slamming the rails.
+_OVER_KNEE = 3277.0
+
+
 class EQProcessor:
     """Streaming 10-band EQ overlap-add processor (multichannel aware)."""
 
@@ -116,4 +138,4 @@ class EQProcessor:
     def _drain(self):
         out = self._outbuf
         self._outbuf = np.zeros((0, self.channels), dtype=np.float32)
-        return np.clip(out, -32768, 32767).astype(np.int16)
+        return _soft_limit_over(out).astype(np.int16)
