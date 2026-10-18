@@ -33,10 +33,23 @@ def test_player_has_modern_structural_widgets(music_player):
     assert music_player.cover_art_label.minimumSize().width() >= 256
 
 
-def test_no_legacy_menubar(music_player):
-    from PySide6.QtWidgets import QMenuBar
-    assert music_player.findChild(QMenuBar) is None, "legacy menu bar must be gone"
+def test_no_sidebar_footer_buttons_and_no_brand_sub(music_player):
+    names = _attr_names(music_player)
+    assert "web_panel_btn" not in names, "footer buttons must move into a real top menu"
+    assert "settings_btn" not in names
 
+
+def test_top_menu_bar_present_with_actions(music_player, qtbot):
+    from PySide6.QtWidgets import QMenuBar
+    bar = music_player.findChild(QMenuBar)
+    assert bar is not None, "top menu bar must exist"
+    # menus must survive a GC cycle (PySide ownership trap)
+    import gc
+    gc.collect()
+    tools_menu = next(a.menu() for a in bar.actions() if a.text() == "Tools")
+    texts = {x.text() for x in tools_menu.actions()}
+    assert {"Web Panel", "Settings"} <= texts, texts
+    assert {"File", "Playback", "Tools"} <= {a.text() for a in bar.actions()}
 
 def test_stream_handler_slots_reset(music_player):
     """Sanity pin for stream handler slots (Task 11 contract keeps holding)."""

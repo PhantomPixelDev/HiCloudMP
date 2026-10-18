@@ -296,9 +296,69 @@ class MusicPlayer(QMainWindow):
         if self.settings.value("web_interface", False, bool):
             self.start_web_interface()
 
-        # Web Panel / Settings live in the sidebar footer (setup_ui) — no
-        # legacy menu bar.
+        # Real top menu bar (moved here from the old sidebar footer buttons)
+        self._create_menubar()
         
+    def _create_menubar(self):
+        """Standard top menu bar: File / Playback / Tools / Help."""
+        mb = self.menuBar()
+        # Widget-backed bar: native bars on Windows are handled out-of-process,
+        # which makes Python-side wrappers transient and hides QSS styling.
+        mb.setNativeMenuBar(False)
+
+        # --- File ---
+        file_menu = QMenu(self)
+        file_menu.setTitle("File")
+        file_menu.addAction("Add Folder", self.add_folder)
+        file_menu.addAction("Add Files", self.add_files)
+        file_menu.addAction("Add Cloud Account...", self.add_cloud)
+        file_menu.addAction("Scan Cloud Library", self.scan_clouds)
+        file_menu.addSeparator()
+        file_menu.addAction("Exit", self.close)
+        mb.addMenu(file_menu)
+
+        # --- Playback ---
+        playback_menu = QMenu(self)
+        playback_menu.setTitle("Playback")
+        playback_menu.addAction("Play / Pause", self.toggle_play)
+        playback_menu.addAction("Stop", self.stop)
+        playback_menu.addAction("Previous", self.prev_track)
+        playback_menu.addAction("Next", self.next_track)
+        playback_menu.addSeparator()
+        self.shuffle_action = playback_menu.addAction("Shuffle")
+        self.shuffle_action.setCheckable(True)
+        self.shuffle_action.toggled.connect(self.toggle_shuffle)
+        self.repeat_action = playback_menu.addAction("Repeat")
+        self.repeat_action.setCheckable(True)
+        self.repeat_action.toggled.connect(self.toggle_repeat)
+        mb.addMenu(playback_menu)
+
+        # --- Tools ---
+        tools_menu = QMenu(self)
+        tools_menu.setTitle("Tools")
+        tools_menu.addAction("Web Panel", self.open_web_panel)
+        tools_menu.addSeparator()
+        tools_menu.addAction("Settings", self.open_settings_dialog)
+        mb.addMenu(tools_menu)
+
+        # --- Help ---
+        help_menu = QMenu(self)
+        help_menu.setTitle("Help")
+        help_menu.addAction("About HiCloud MP", self._show_about)
+        mb.addMenu(help_menu)
+
+        # Ownership debugging vestige from the PySide wrapper-invalidation
+        # investigation: keep strong refs so no transient GC can reclaim them.
+        self._menu_holder = [file_menu, playback_menu, tools_menu, help_menu]
+
+    def _show_about(self):
+        QMessageBox.information(
+            self, "About HiCloud MP",
+            "HiCloud MP — local & cloud music player\n\n"
+            "WebDAV / Ampache / Subsonic cloud streaming, web remote panel,\n"
+            "playlists and library in one desktop app.\n\n"
+            "Repository: github.com/PhantomPixelDev/HiCloudMP")
+
     def set_dark_theme(self):
         """Apply the unified theme (theme/accent/density resolved from QSettings)."""
         import theme as _theme
@@ -521,10 +581,7 @@ class MusicPlayer(QMainWindow):
 
         self.nav_brand = QLabel("HiCloud")
         self.nav_brand.setObjectName("brandTitle")
-        brand_sub = QLabel("Music Player")
-        brand_sub.setObjectName("brandSub")
         side.addWidget(self.nav_brand)
-        side.addWidget(brand_sub)
 
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search music...")
@@ -557,16 +614,6 @@ class MusicPlayer(QMainWindow):
         actions_grid.addWidget(self.add_cloud_btn, 1, 0)
         actions_grid.addWidget(self.scan_cloud_btn, 1, 1)
         side.addLayout(actions_grid)
-
-        # Sidebar footer: quick access (replaces the old menu bar)
-        footer = QHBoxLayout()
-        self.web_panel_btn = QPushButton("Web Panel")
-        self.web_panel_btn.clicked.connect(self.open_web_panel)
-        self.settings_btn = QPushButton("Settings")
-        self.settings_btn.clicked.connect(self.open_settings_dialog)
-        footer.addWidget(self.web_panel_btn)
-        footer.addWidget(self.settings_btn)
-        side.addLayout(footer)
 
         root.addWidget(self.sidebar)
 
@@ -968,6 +1015,10 @@ class MusicPlayer(QMainWindow):
         self.shuffle_btn.setProperty("accentActive", enabled)
         self.shuffle_btn.style().unpolish(self.shuffle_btn)
         self.shuffle_btn.style().polish(self.shuffle_btn)
+        self.shuffle_btn.setChecked(enabled)
+        # keep the Playback menu checkbox in sync (guard against recursion)
+        if hasattr(self, 'shuffle_action') and self.shuffle_action.isChecked() != enabled:
+            self.shuffle_action.setChecked(enabled)
         if enabled:
             self.status_bar.showMessage("Shuffle mode enabled: random song will play after each track.")
         else:
@@ -978,6 +1029,9 @@ class MusicPlayer(QMainWindow):
         self.repeat_btn.setProperty("accentActive", enabled)
         self.repeat_btn.style().unpolish(self.repeat_btn)
         self.repeat_btn.style().polish(self.repeat_btn)
+        self.repeat_btn.setChecked(enabled)
+        if hasattr(self, 'repeat_action') and self.repeat_action.isChecked() != enabled:
+            self.repeat_action.setChecked(enabled)
     
     def on_media_status_changed(self, status):
         # Update status bar with current media status
