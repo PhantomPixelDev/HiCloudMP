@@ -27,5 +27,19 @@ Landed with this commit (`fix: stop touching the status bar ...`):
   subset (35 tests) `33 passed, 2 skipped` ×3; full suite `223 passed,
   2 skipped` ×3 cold (~28 s each). Before: ≈80 % crash rate at subset test #29.
 
-Next in line: crash-forensics logger commit (main.py pin tests), tray icon
-color fix, performance round.
+## 2026-10-18 — feat: crash-forensics logger pinned with tests
+
+Landed with this commit (`feat: keep the crash-forensics logger ...`):
+
+- main.py opens a per-user `crashlog.txt` (session header), enables
+  faulthandler into it and installs a severity-labelled Qt message handler,
+  all before PySide6 imports. This block produced the dbg forensics that
+  root-caused both crash signatures.
+- Pinned by tests: import opens the log; `_qt_message` labels and writes;
+  and a clean-interpreter child (no pytest-qt handler swaps) proves a Qt
+  warning emitted after `import main` lands in the crash log.
+- Finding while pinning: pytest-qt replaces the Qt message handler for the
+  duration of each test — that is why test-run crashlogs never contained the
+  Qt-side warnings seen during the investigation.
+
+Next in line: tray icon color fix, performance round.

@@ -2,8 +2,55 @@ import sys
 import os
 import json
 import tempfile
+from datetime import datetime
+
+# Crash forensics must exist before Qt/PySide load: Qt-level fatals
+# (Windows 0xc0000409 fastfail) kill the process without a Python
+# traceback, so every Qt message - including the fatal one that trips
+# the abort - and faulthandler output are captured to a dated log next
+# to the user data dir.
+def _open_crash_log():
+    try:
+        from platformdirs import user_data_dir
+        d = user_data_dir("HiCloudMP", "HiCloudMP", ensure_exists=True)
+    except Exception:
+        d = tempfile.gettempdir()
+    path = os.path.join(d, "crashlog.txt")
+    return open(path, "a", buffering=1, encoding="utf-8", errors="replace")
+
+_crash_log = _open_crash_log()
+_crash_log.write(
+    f"\n===== session start {datetime.now().isoformat()} "
+    f"pid={os.getpid()} =====\n")
+
+try:
+    import faulthandler
+    faulthandler.enable(file=_crash_log)
+except Exception:
+    pass
+
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QSettings, Qt as _Qt, qInstallMessageHandler, QtMsgType
+
+
+def _qt_message(mode, ctx, msg):
+    label = {
+        QtMsgType.QtDebugMsg: "DEBUG",
+        QtMsgType.QtInfoMsg: "INFO",
+        QtMsgType.QtWarningMsg: "WARN",
+        QtMsgType.QtCriticalMsg: "CRIT",
+        QtMsgType.QtFatalMsg: "FATAL",
+    }.get(mode, "?")
+    where = f" ({ctx.file}:{ctx.line})" if getattr(ctx, "file", None) else ""
+    try:
+        _crash_log.write(f"[{label}] {msg}{where}\n")
+    except Exception:
+        pass
+    if mode == QtMsgType.QtFatalMsg:
+        _crash_log.flush()
+
+
+qInstallMessageHandler(_qt_message)
 
 # Import custom modules
 from utils import HAS_WIN32
