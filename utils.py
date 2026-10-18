@@ -2,8 +2,10 @@ import os
 import sys
 import subprocess
 
-# Supported file extensions
-SUPPORTED_EXTS = [".mp3", ".flac", ".wav", ".ogg"]
+# Supported file extensions — the ONE list for scanning, dialogs and
+# cloud ingestion; the ffmpeg-backed Qt player decodes all of these.
+SUPPORTED_EXTS = [".mp3", ".flac", ".wav", ".ogg", ".oga", ".opus",
+                  ".m4a", ".mp4", ".aac", ".wma", ".aiff", ".aif", ".mka"]
 
 from platformdirs import user_data_dir
 

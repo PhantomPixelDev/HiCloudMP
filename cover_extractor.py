@@ -308,12 +308,24 @@ class CoverExtractor:
                         cover = cls._extract_flac_cover(file_path_or_url)
                         if cover:
                             return cover
-                    elif ext in ('.ogg', '.opus'):
+                    elif ext in ('.ogg', '.oga', '.opus'):
                         cover = cls._extract_ogg_cover(file_path_or_url)
                         if cover:
                             return cover
                     elif ext in ('.m4a', '.mp4'):
                         cover = cls._extract_mp4_cover(file_path_or_url)
+                        if cover:
+                            return cover
+                    elif ext == '.wma':
+                        cover = cls._extract_asf_cover(file_path_or_url)
+                        if cover:
+                            return cover
+                    elif ext in ('.aiff', '.aif'):
+                        cover = cls._extract_aiff_cover(file_path_or_url)
+                        if cover:
+                            return cover
+                    elif ext == '.wav':
+                        cover = cls._extract_wav_cover(file_path_or_url)
                         if cover:
                             return cover
                             
@@ -546,6 +558,83 @@ class CoverExtractor:
             logger.error(f"Error reading MP4 file: {e}")
             return None
     
+    @staticmethod
+    def _extract_asf_cover(file_path_or_obj):
+        """Extract album art from ASF/WMA tags (WM/Picture attribute).
+
+        mutagen is imported function-locally so a defective install or a
+        monkeypatched test double stays possible without module-import cost."""
+        try:
+            from mutagen.asf import ASF
+        except ImportError:
+            return None
+        try:
+            audio = ASF(file_path_or_obj)
+            pictures = audio.getall("WM/Picture")
+        except Exception:
+            return None
+        for picture in pictures:
+            data = getattr(picture, "data", None) or \
+                (getattr(picture, "image", None) if
+                 not isinstance(getattr(picture, "image", None), str) else None)
+            if not data:
+                continue
+            try:
+                return Image.open(BytesIO(data))
+            except UnidentifiedImageError:
+                continue
+        return None
+
+    @staticmethod
+    def _extract_aiff_cover(file_path_or_obj):
+        """Extract cover art from an ID3 chunk embedded in AIFF files."""
+        try:
+            from mutagen.aiff import AIFF
+        except ImportError:
+            return None
+        try:
+            audio = AIFF(file_path_or_obj)
+            tags = getattr(audio, "tags", None)
+            if not tags:
+                return None
+            frames = tags.getall("APIC")
+        except Exception:
+            return None
+        for frame in frames:
+            data = getattr(frame, "data", None)
+            if not data:
+                continue
+            try:
+                return Image.open(BytesIO(data))
+            except UnidentifiedImageError:
+                continue
+        return None
+
+    @staticmethod
+    def _extract_wav_cover(file_path_or_obj):
+        """Extract cover art from an ID3 chunk embedded in WAVE files."""
+        try:
+            from mutagen.wave import WAVE
+        except ImportError:
+            return None
+        try:
+            audio = WAVE(file_path_or_obj)
+            tags = getattr(audio, "tags", None)
+            if not tags:
+                return None
+            frames = tags.getall("APIC")
+        except Exception:
+            return None
+        for frame in frames:
+            data = getattr(frame, "data", None)
+            if not data:
+                continue
+            try:
+                return Image.open(BytesIO(data))
+            except UnidentifiedImageError:
+                continue
+        return None
+
     @staticmethod
     def _try_generic_extraction(file_path):
         """Try to extract cover art using mutagen's generic file handler"""
