@@ -199,7 +199,9 @@ class WebControlServer:
             pos = self._safe_int(data.get('position', 0), None)
             if pos is None or pos < 0:
                 return
-            self.player.run_on_ui.emit(lambda: (self.player.player.setPosition(pos), self._broadcast_progress()))
+            self.player.run_on_ui.emit(lambda: (self.player.seek_position(pos),
+                                                    self._broadcast_progress(),
+                                                    self._broadcast_status()))
 
         @self.socketio.on('toggle_shuffle')
         def handle_toggle_shuffle():
