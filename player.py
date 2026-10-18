@@ -1130,34 +1130,35 @@ class MusicPlayer(QMainWindow):
             self.status_bar.showMessage(f"Preparing to stream: {file_name}...")
             QApplication.processEvents()  # Update UI
             
-            # Handle different cloud types
-            if cloud_type == "webdav":
-                auth_user = cloud["config"].get("webdav_login", "")
-                auth_pass = cloud["config"].get("webdav_password", "")
-                media_url = QUrl(url)
-                # If credentials not present in URL, set via QUrl to safely encode
-                if auth_user and auth_pass and not media_url.userName():
-                    media_url.setUserName(auth_user)
-                    media_url.setPassword(auth_pass)
-            else:
-                media_url = QUrl(url)
+            # Track info used by every branch (provider catalogs carry it)
+            base_name = os.path.splitext(file_name)[0]
+            info_artist = file_info.get("artist") or "-"
+            info_album = file_info.get("album") or "-"
+
+            self.track_title_label.setText(f"Title: {base_name}")
+            self.track_artist_label.setText(f"Artist: {info_artist}")
+            self.track_album_label.setText(f"Album: {info_album}")
             
-            # Stop current playback asynchronously
             self.player.stop()
             self.player.setSource(QUrl())
             QApplication.processEvents()  # Process events to ensure clean state
 
-            # Stream directly using the resilient streaming helper (with retry)
-            stream_url = str(media_url.toString())
-            self._play_stream(stream_url, os.path.basename(file_name))
+            if cloud_type == "webdav":
+                # Nextcloud/ownCloud DAV serves files only behind Basic auth,
+                # which the streaming backend cannot attach to its GET. Route
+                # through the authenticated download-then-play path instead
+                # (streaming had failed with endless retries).
+                auth_user = cloud["config"].get("webdav_login", "")
+                auth_pass = cloud["config"].get("webdav_password", "")
+                self._download_and_play(
+                    url, cloud_type, cloud["config"], file_name,
+                    auth=(auth_user, auth_pass) if auth_user else None,
+                )
+            else:
+                # Ampache/Subsonic embed their session auth in the URL itself
+                # (action=stream / stream.view); stream directly.
+                self._play_stream(url, file_name)
 
-            # Update UI with track information
-            base_name = os.path.splitext(file_name)[0]
-            self.track_title_label.setText(f"Title: {base_name}")
-            self.track_artist_label.setText("Artist: -")
-            self.track_album_label.setText("Album: -")
-            
-            
             self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
             # Update metadata shortly after starting stream
             QTimer.singleShot(200, self.update_metadata_display)
@@ -2201,6 +2202,30 @@ class MusicPlayer(QMainWindow):
 
     def closeEvent(self, event):
         self.player.stop()
+        # Release the decoder BEFORE teardown: the FFmpeg backend crashes at
+        # exit when the app closes while media is still attached (exit code 1).
+        try:
+            self.player.setSource(QUrl())
+        except Exception:
+            pass
+        # Abort any in-flight cloud download and flush its thread
+        try:
+            if getattr(self, 'download_worker', None) is not None:
+                self.download_worker.abort()
+        except Exception:
+            pass
+        try:
+            if getattr(self, 'download_thread', None) is not None:
+                self.download_thread.quit()
+                self.download_thread.wait(2000)
+        except Exception:
+            pass
+        # Abort pending cover-art workers
+        try:
+            if hasattr(self, 'meta'):
+                self.meta.stop()
+        except Exception:
+            pass
         # Stop web server if running
         if self.web_server:
             self.web_server.stop()
