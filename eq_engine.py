@@ -55,6 +55,9 @@ class EQEngine(QObject):
         self._skip_until_ms = 0
         self._skip_done = True
         self._volume = 1.0
+        # Spectrum tap (visualizer): rolling mono tail + latest band data.
+        self._spectrum = None
+        self._spec_buf = np.zeros((0,), dtype=np.float32)
         self._pump_timer = QTimer(self)
         self._pump_timer.setInterval(40)
         self._pump_timer.timeout.connect(self._pump)
@@ -81,6 +84,10 @@ class EQEngine(QObject):
 
     def is_playing(self):
         return self._playing
+
+    def is_paused(self):
+        """Engine holds a loaded sink but audio is currently paused."""
+        return (not self._playing) and self._sink is not None
 
     def is_active(self):
         return self._decoder is not None
@@ -225,6 +232,8 @@ class EQEngine(QObject):
         self._io = None
         self._proc = None
         self._pending = np.zeros((0, self.CHANNELS), dtype=np.int16)
+        self._spectrum = None
+        self._spec_buf = np.zeros((0,), dtype=np.float32)
 
     def _on_duration_changed(self, ms):
         self._duration_ms = int(ms)
@@ -348,9 +357,26 @@ class EQEngine(QObject):
                 written = self._write_bytes(chunk.tobytes())
                 if written > 0:
                     consumed = written // (self.CHANNELS * self._BYTES_PER_SAMPLE)
+                    self._tap_spectrum(self._pending[:consumed])
                     self._pending = self._pending[consumed:]
         self._emit_position()
         self._check_finished()
+
+    def _tap_spectrum(self, chunk):
+        """Roll the written (post-EQ = audible) audio through the analyzer."""
+        try:
+            import spectrum
+            mono = chunk.astype(np.float32).mean(axis=1)
+            self._spec_buf = np.concatenate(
+                [self._spec_buf, mono])[-spectrum.N_FFT:]
+            if self._spec_buf.size >= spectrum.N_FFT:
+                self._spectrum = spectrum.compute_spectrum(self._spec_buf)
+        except Exception:
+            pass
+
+    def get_spectrum(self):
+        """Latest band energies (np array) or None when nothing is playing."""
+        return self._spectrum
 
     def _write_bytes(self, data):
         """Push s16 bytes to the sink. PySide6 6.10 exposes push mode via the

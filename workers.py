@@ -7,6 +7,75 @@ from io import BytesIO
 from urllib.parse import urlparse
 from cover_extractor import CoverExtractor
 from cloud_handlers import CLOUD_TYPES
+from utils import is_music_file
+
+class LibraryScanWorker:
+    """Walks media folders and hands every result to `dispatch`.
+
+    Deliberately NOT a QObject on a QThread: results reach the UI thread
+    through MusicPlayer.run_on_ui (a queued callable bridge), so there is
+    no Qt object affinity on a second thread and none of the
+    deleteLater/destroy-while-running races that abort native processes.
+    Runs as a plain daemon thread; abort() is checked per folder/chunk.
+    """
+
+    CHUNK = 500
+
+    def __init__(self, folders, dispatch):
+        self.folders = list(folders or [])
+        self._dispatch = dispatch    # fn(callable) -> run on the UI thread
+        self._abort = False
+        self._indexed_total = 0
+        self.on_folder = None        # fn(folder, subdirs)
+        self.on_files = None         # fn(folder, tree_chunk)
+        self.on_indexed = None       # fn(paths)
+        self.on_finished = None      # fn(total)
+
+    def run(self):
+        self._indexed_total = 0
+        try:
+            for folder in self.folders:
+                if self._abort:
+                    break
+                try:
+                    self._walk_folder(folder)
+                except Exception as e:
+                    print(f"Library scan error in {folder}: {e}")
+        finally:
+            self._emit(self.on_finished, self._indexed_total)
+
+    def _walk_folder(self, folder):
+        subdirs = []
+        top_files = []
+        for root, dirs, files in os.walk(folder):
+            if self._abort:
+                return
+            if root == folder:
+                subdirs = list(dirs)
+                top_files = [os.path.join(folder, f) for f in files
+                             if is_music_file(f)]
+            else:
+                # deeper levels only feed the search index
+                chunk = [os.path.join(root, f) for f in files if is_music_file(f)]
+                if chunk:
+                    self._indexed_total += len(chunk)
+                    self._emit(self.on_indexed, chunk)
+        self._emit(self.on_folder, folder, subdirs)
+        self._indexed_total += len(top_files)
+        if top_files:
+            self._emit(self.on_indexed, list(top_files))
+        for i in range(0, len(top_files), self.CHUNK):
+            if self._abort:
+                return
+            self._emit(self.on_files, folder, top_files[i:i + self.CHUNK])
+
+    def _emit(self, cb, *args):
+        if cb is not None:
+            self._dispatch(lambda cb=cb, a=args: cb(*a))
+
+    def abort(self):
+        self._abort = True
+
 
 class DownloadWorker(QObject):
     """Worker for downloading files from cloud storage"""

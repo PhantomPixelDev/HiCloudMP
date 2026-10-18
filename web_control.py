@@ -244,11 +244,15 @@ class WebControlServer:
             self.player.run_on_ui.emit(_do)
 
     def _get_status(self):
+        try:
+            state = str(self.player.effective_playback_state())
+        except AttributeError:
+            state = str(self.player.player.playbackState())
         return {
             'track': getattr(self.player, 'track_title_label', None).text() if hasattr(self.player, 'track_title_label') else '-',
             'artist': getattr(self.player, 'track_artist_label', None).text() if hasattr(self.player, 'track_artist_label') else '-',
             'album': getattr(self.player, 'track_album_label', None).text() if hasattr(self.player, 'track_album_label') else '-',
-            'state': str(self.player.player.playbackState()),
+            'state': state,
             'volume': int(self.player.volume_slider.value()) if hasattr(self.player, 'volume_slider') else 70,
             'current_index': getattr(self.player, 'current_index', -1),
             'shuffle': self.player.shuffle_btn.isChecked() if hasattr(self.player, 'shuffle_btn') else False,

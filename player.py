@@ -13,6 +13,11 @@ from tray import TrayController
 from metadata import MetadataController
 from playlists_manager import PlaylistsManager
 from library_view import LibraryView
+# dialogs live in dialogs.py; re-export so existing imports/patches
+# (player.SettingsDialog, monkeypatched player.CloudAccountsDialog) keep working
+from dialogs import CloudAccountsDialog, SettingsDialog  # noqa: F401
+from playback import PlaybackEngineMixin
+from visualizer import SFVisualizer
 import icons
 
 from PySide6.QtWidgets import (
@@ -42,395 +47,7 @@ from workers import DownloadWorker, ScanCloudWorker, CoverArtWorker
 
 from web_control import WebControlServer
 
-class CloudAccountsDialog(QDialog):
-    def __init__(self, parent, clouds):
-        super().__init__(parent)
-        self.setWindowTitle("Cloud Accounts")
-        self.resize(500, 350)
-        self.clouds = clouds
-        layout = QVBoxLayout(self)
-        self.list_widget = QListWidget()
-        self.refresh_list()
-        layout.addWidget(self.list_widget)
-        btn_layout = QHBoxLayout()
-        add_btn = QPushButton("Add")
-        edit_btn = QPushButton("Edit")
-        remove_btn = QPushButton("Remove")
-        add_btn.clicked.connect(self.add_cloud)
-        edit_btn.clicked.connect(self.edit_cloud)
-        remove_btn.clicked.connect(self.remove_cloud)
-        btn_layout.addWidget(add_btn)
-        btn_layout.addWidget(edit_btn)
-        btn_layout.addWidget(remove_btn)
-        layout.addLayout(btn_layout)
-        # Close with QDialog.Accepted so the caller persists changes; without
-        # this the dialog can only ever reject, making edits hard to save.
-        self.button_box = QDialogButtonBox(QDialogButtonBox.Ok)
-        self.button_box.button(QDialogButtonBox.Ok).setText("Done")
-        self.button_box.accepted.connect(self.accept)
-        layout.addWidget(self.button_box)
-    def refresh_list(self):
-        self.list_widget.clear()
-        for cloud in self.clouds:
-            status = "Connected" if cloud.get("files") else "Not Synced"
-            last_sync = cloud.get("last_sync", "Never")
-            self.list_widget.addItem(f"{cloud['name']} ({cloud['type']}) - {status} | Last Sync: {last_sync}")
-    def add_cloud(self):
-        dlg = AddCloudDialog(self)
-        if dlg.exec() == QDialog.Accepted:
-            data = dlg.get_data()
-            if data["type"] != "unknown":
-                self.clouds.append({
-                    "type": data["type"],
-                    "name": data["name"],
-                    "config": data["config"],
-                    "files": [],
-                    "last_sync": "Never"
-                })
-                self.refresh_list()
-    def edit_cloud(self):
-        row = self.list_widget.currentRow()
-        if row < 0 or row >= len(self.clouds):
-            return
-        cloud = self.clouds[row]
-        dlg = EditCloudDialog(cloud, self)
-        if dlg.exec() == QDialog.Accepted:
-            data = dlg.get_data()
-            cloud["name"] = data["name"]
-            cloud["config"] = data["config"]
-            self.refresh_list()
-    def remove_cloud(self):
-        row = self.list_widget.currentRow()
-        if row < 0 or row >= len(self.clouds):
-            return
-        del self.clouds[row]
-        self.refresh_list()
-
-class SettingsDialog(QDialog):
-    """Settings with sidebar navigation: Playback / Appearance / Library /
-    Web Remote. All historical widget attribute names are preserved."""
-
-    WEB_HINT = ("Control this app from your phone or any other computer — "
-                "like a remote control for your music. Both devices only "
-                "need to be on the same Wi-Fi network.")
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Settings")
-        self.resize(640, 470)
-        self.settings = QSettings("HiCloudMP", "HiCloudMP")
-        self.parent = parent
-        self.custom_accent_hex = None
-
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(10, 10, 10, 10)
-        body = QHBoxLayout()
-        body.setSpacing(12)
-        outer.addLayout(body, 1)
-
-        # ---------------- Navigation rail ----------------
-        self.nav_list = QListWidget(self)
-        self.nav_list.setObjectName("settingsNav")
-        self.nav_list.setFixedWidth(148)
-        self.nav_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        body.addWidget(self.nav_list)
-
-        # ---------------- Pages ----------------
-        self.pages = QStackedWidget(self)
-        body.addWidget(self.pages, 1)
-        self.pages.addWidget(self._build_playback_page())
-        self.pages.addWidget(self._build_appearance_page())
-        self.pages.addWidget(self._build_library_page())
-        self.pages.addWidget(self._build_web_page())
-
-        self.nav_list.currentRowChanged.connect(self.pages.setCurrentIndex)
-        for label in ("Playback", "Appearance", "Library", "Web Remote"):
-            self.nav_list.addItem(QListWidgetItem(label))
-        self.nav_list.setCurrentRow(0)
-
-        btn_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        btn_box.accepted.connect(self.accept)
-        btn_box.rejected.connect(self.reject)
-        outer.addWidget(btn_box)
-
-    # ------------------------------------------------------------ pages
-    def _build_playback_page(self):
-        page = QWidget()
-        v = QVBoxLayout(page)
-        v.setContentsMargins(4, 4, 4, 4)
-        box = QGroupBox("Playback")
-        v.addWidget(box)
-        v.addStretch(1)
-        form = QFormLayout(box)
-        self.volume_slider = QSlider(Qt.Horizontal)
-        self.volume_slider.setRange(0, 100)
-        self.volume_slider.setValue(self.settings.value("volume", 70, int))
-        form.addRow("Default volume", self.volume_slider)
-        hint = QLabel("Used every time the app starts.")
-        hint.setObjectName("hintLabel")
-        form.addRow("", hint)
-        return page
-
-    def _build_appearance_page(self):
-        page = QScrollArea()
-        page.setWidgetResizable(True)
-        page.setFrameShape(QFrame.NoFrame)
-        inner = QWidget()
-        page.setWidget(inner)
-        v = QVBoxLayout(inner)
-        v.setContentsMargins(4, 4, 4, 4)
-
-        # --- Colors ---
-        colors_box = QGroupBox("Colors")
-        v.addWidget(colors_box)
-        form = QFormLayout(colors_box)
-        self.theme_combo = QComboBox()
-        self.theme_combo.addItems(["Dark", "Light"])
-        self.theme_combo.setCurrentText(self.settings.value("theme", "Dark"))
-        form.addRow("Theme", self.theme_combo)
-
-        import theme as _theme
-        self.accent_combo = QComboBox()
-        self.accent_combo.addItems(list(_theme.ACCENTS.keys()))
-        stored_accent = self.settings.value("ui/accent", _theme.ACCENTS["Emerald"])
-        default_accent_name = next(
-            (n for n, h in _theme.ACCENTS.items()
-             if h.lower() == str(stored_accent).lower()), None)
-        if default_accent_name is None:
-            # A previously chosen custom color: surface it as "Custom"
-            self.custom_accent_hex = str(stored_accent)
-            self.accent_combo.addItem("Custom")
-            self.accent_combo.setCurrentText("Custom")
-        else:
-            self.accent_combo.setCurrentText(default_accent_name)
-
-        pick_row = QHBoxLayout()
-        self.custom_accent_btn = QPushButton("Pick any color…")
-        self.custom_accent_btn.setToolTip("Choose any color as the accent")
-        self.custom_accent_btn.clicked.connect(self.pick_custom_accent)
-        pick_row.addWidget(self.accent_combo)
-        pick_row.addWidget(self.custom_accent_btn)
-        form.addRow("Accent color", pick_row)
-
-        self.density_combo = QComboBox()
-        self.density_combo.addItems(["Comfortable", "Compact"])
-        self.density_combo.setCurrentText(
-            str(self.settings.value("ui/density", "comfortable")).capitalize())
-        form.addRow("UI density", self.density_combo)
-
-        # --- Background image ---
-        bg_box = QGroupBox("Background image")
-        v.addWidget(bg_box)
-        bgl = QVBoxLayout(bg_box)
-        self.bg_image_edit = QLineEdit(str(self.settings.value("ui/bg_image", "")))
-        self.bg_image_edit.setReadOnly(True)
-        self.bg_image_edit.setPlaceholderText("No background image selected")
-        bgl.addWidget(self.bg_image_edit)
-        brows = QHBoxLayout()
-        self.bg_browse_btn = QPushButton("Choose image…")
-        self.bg_browse_btn.clicked.connect(self.browse_bg_image)
-        self.bg_clear_btn = QPushButton("Remove")
-        self.bg_clear_btn.setEnabled(bool(self.bg_image_edit.text()))
-        self.bg_clear_btn.clicked.connect(self.clear_bg_image)
-        brows.addWidget(self.bg_browse_btn)
-        brows.addWidget(self.bg_clear_btn)
-        brows.addStretch(1)
-        bgl.addLayout(brows)
-        dim_row = QHBoxLayout()
-        dim_row.addWidget(QLabel("Darkness"))
-        self.bg_dim_slider = QSlider(Qt.Horizontal)
-        self.bg_dim_slider.setRange(0, 80)
-        self.bg_dim_slider.setValue(
-            int(self._safe_int(self.settings.value("ui/bg_dim", 35))))
-        self.bg_dim_label = QLabel(f"{self.bg_dim_slider.value()}%")
-        self.bg_dim_slider.valueChanged.connect(
-            lambda v_: self.bg_dim_label.setText(f"{v_}%"))
-        self.bg_dim_slider.setFixedWidth(220)
-        dim_row.addWidget(self.bg_dim_slider)
-        dim_row.addWidget(self.bg_dim_label)
-        dim_row.addStretch(1)
-        bgl.addLayout(dim_row)
-        bg_hint = QLabel("The image goes behind the player panels. "
-                         "Darkness makes it subtle. Applies instantly.")
-        bg_hint.setObjectName("hintLabel")
-        bg_hint.setWordWrap(True)
-        bgl.addWidget(bg_hint)
-        v.addStretch(1)
-        return page
-
-    def _build_library_page(self):
-        page = QWidget()
-        v = QVBoxLayout(page)
-        v.setContentsMargins(4, 4, 4, 4)
-        box = QGroupBox("Library & cloud accounts")
-        v.addWidget(box)
-        v.addStretch(1)
-        form = QFormLayout(box)
-        self.download_folder_edit = QLineEdit(
-            str(self.settings.value("download_folder", "")))
-        browse_btn = QPushButton("Browse…")
-        browse_btn.clicked.connect(self.browse_folder)
-        folder_layout = QHBoxLayout()
-        folder_layout.addWidget(self.download_folder_edit, 1)
-        folder_layout.addWidget(browse_btn)
-        form.addRow("Download folder", folder_layout)
-        self.cloud_btn = QPushButton("Manage cloud accounts…")
-        self.cloud_btn.clicked.connect(self.open_cloud_accounts)
-        form.addRow("", self.cloud_btn)
-        hint = QLabel("Streams and downloads from Nextcloud, "
-                      "Ampache or Subsonic servers.")
-        hint.setObjectName("hintLabel")
-        hint.setWordWrap(True)
-        form.addRow("", hint)
-        return page
-
-    def _build_web_page(self):
-        page = QWidget()
-        v = QVBoxLayout(page)
-        v.setContentsMargins(4, 4, 4, 4)
-
-        self.web_hint_label = QLabel(self.WEB_HINT)
-        self.web_hint_label.setWordWrap(True)
-        v.addWidget(self.web_hint_label)
-
-        link_box = QGroupBox("Your remote link")
-        v.addWidget(link_box)
-        v.addStretch(1)
-        ll = QVBoxLayout(link_box)
-        token = ""
-        port = 5000
-        if self.parent is not None and hasattr(self.parent, "ensure_web_token"):
-            token = self.parent.ensure_web_token()
-            port = getattr(self.parent, "web_port", port)
-        else:
-            token = str(self.settings.value("web/token", ""))
-        base = f"http://localhost:{port}" if token == "" else \
-            f"http://localhost:{port}/?token={token}"
-        self.web_link_edit = QLineEdit(base)
-        self.web_link_edit.setReadOnly(True)
-        ll.addWidget(self.web_link_edit)
-        link_row = QHBoxLayout()
-        self.web_copy_btn = QPushButton("Copy link")
-        self.web_copy_btn.clicked.connect(self.copy_web_link)
-        self.web_open_btn = QPushButton("Open in browser")
-        self.web_open_btn.clicked.connect(self.open_web_link)
-        link_row.addWidget(self.web_copy_btn)
-        link_row.addWidget(self.web_open_btn)
-        link_row.addStretch(1)
-        ll.addLayout(link_row)
-
-        self.web_status_label = QLabel(self._web_status_text())
-        self.web_status_label.setObjectName("hintLabel")
-        ll.addWidget(self.web_status_label)
-
-        opts = QGroupBox("Options")
-        v.addWidget(opts)
-        ol = QVBoxLayout(opts)
-        self.web_checkbox = QCheckBox("Enable web remote")
-        self.web_checkbox.setChecked(self.settings.value("web_interface", False, bool))
-        self.web_checkbox.toggled.connect(
-            lambda _on: self.web_status_label.setText(self._web_status_text()))
-        ol.addWidget(self.web_checkbox)
-        self.lan_checkbox = QCheckBox("Allow other devices on this network "
-                                      "(needed for phones)")
-        self.lan_checkbox.setChecked(self.settings.value("web/host", "127.0.0.1") == "0.0.0.0")
-        ol.addWidget(self.lan_checkbox)
-        lan_hint = QLabel("Music stays private: only people who open the "
-                          "link above can connect. Leave this off if you "
-                          "only use the remote on this computer.")
-        lan_hint.setObjectName("hintLabel")
-        lan_hint.setWordWrap(True)
-        ol.addWidget(lan_hint)
-
-        # Advanced: raw access code stays reachable, mostly invisible
-        self.web_token_toggle = QToolButton()
-        self.web_token_toggle.setText("show access code…")
-        self.web_token_toggle.setCheckable(True)
-        self.web_token_toggle.setAutoRaise(True)
-        self.web_token_edit = QLineEdit(token)
-        self.web_token_edit.setReadOnly(True)
-        self.web_token_edit.setVisible(False)
-        self.web_token_toggle.toggled.connect(self.web_token_edit.setVisible)
-        adv_row = QHBoxLayout()
-        adv_row.addStretch(1)
-        adv_row.addWidget(self.web_token_toggle)
-        adv_row.addWidget(self.web_token_edit, 1)
-        v.addLayout(adv_row)
-        return page
-
-    # ------------------------------------------------------------ helpers
-    @staticmethod
-    def _safe_int(value):
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return 35
-
-    def _web_status_text(self):
-        running = bool(getattr(self.parent, "web_server", None)
-                       if self.parent else False)
-        enabled = self.settings.value("web_interface", False, bool)
-        if running:
-            return "Web remote is running. Open the link on any device."
-        return ("Web remote is off. Turn it on, then open the link "
-                "on your phone.") if enabled else \
-            "Web remote is off."
-
-    def pick_custom_accent(self):
-        initial = QColor(self.custom_accent_hex or "#10b981")
-        color = QColorDialog.getColor(initial, self, "Custom accent color")
-        if color is None or not color.isValid():
-            return  # dialog cancelled — no change
-        self.custom_accent_hex = color.name()
-        if self.accent_combo.findText("Custom") < 0:
-            self.accent_combo.addItem("Custom")
-        self.accent_combo.setCurrentText("Custom")
-
-    def browse_bg_image(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Choose a background image", "",
-            "Images (*.png *.jpg *.jpeg *.bmp *.webp)")
-        if path:
-            self.bg_image_edit.setText(path)
-            self.bg_clear_btn.setEnabled(True)
-            self.bg_preview_path = path
-
-    def clear_bg_image(self):
-        self.bg_image_edit.setText("")
-
-    def copy_web_link(self):
-        QApplication.clipboard().setText(self.web_link_edit.text())
-
-    def open_web_link(self):
-        import webbrowser
-        webbrowser.open(self.web_link_edit.text())
-
-    def browse_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select Download Folder")
-        if folder:
-            self.download_folder_edit.setText(folder)
-
-    def save_settings(self):
-        self.settings.setValue("volume", self.volume_slider.value())
-        self.settings.setValue("theme", self.theme_combo.currentText())
-        # Appearance persistence (accent stored as hex; density lowercased)
-        import theme as _theme
-        self.settings.setValue("ui/accent", _theme.accent_hex(
-            self.accent_combo.currentText(), custom=self.custom_accent_hex))
-        self.settings.setValue("ui/density", self.density_combo.currentText().lower())
-        self.settings.setValue("ui/bg_image", self.bg_image_edit.text())
-        self.settings.setValue("ui/bg_dim", self.bg_dim_slider.value())
-        self.settings.setValue("download_folder", self.download_folder_edit.text())
-        self.settings.setValue("web_interface", self.web_checkbox.isChecked())
-        self.settings.setValue("web/host", "0.0.0.0" if self.lan_checkbox.isChecked() else "127.0.0.1")
-
-    def open_cloud_accounts(self):
-        if self.parent:
-            dlg = CloudAccountsDialog(self, self.parent.clouds)
-            dlg.exec()
-
-
-class MusicPlayer(QMainWindow):
+class MusicPlayer(QMainWindow, PlaybackEngineMixin):
     cloud_file_downloaded = Signal(str)
     run_on_ui = Signal(object)  # pass a callable to execute on UI thread
     
@@ -510,13 +127,35 @@ class MusicPlayer(QMainWindow):
         self.eq_engine.error_occurred.connect(self._engine_playback_error)
         self.eq_engine.state_changed.connect(self._on_engine_state)
         
+        # Library data model + background scanner (no os.walk on the UI
+        # thread) and the LibraryView delegate that renders from it. These
+        # must exist before setup_ui() connects search/tree signals.
+        try:
+            self.library_mgr = LibraryView(self)
+            self.update_library_tree = self.library_mgr.update_library_tree
+            self.on_library_item_clicked = self.library_mgr.on_library_item_clicked
+            self.search_music = self.library_mgr.search_music
+        except Exception as e:
+            print(f"Warning: LibraryView init failed: {e}")
+        from library_store import LibraryStore
+        self.library_store = LibraryStore()
+        self._local_scan_worker = None
+        self._local_scan_thread = None
+
         # UI
         self.setup_ui()
+
+        # Visualizer polling (~20 Hz): engine spectrum or idle baseline.
+        self._viz_timer = QTimer(self)
+        self._viz_timer.setInterval(50)
+        self._viz_timer.timeout.connect(self._update_visualizer)
+        self._viz_timer.start()
         
         # Load saved data
         self.load_media_folders()
         self.load_clouds()
         self.load_playlists()
+        self._start_local_scan()
         
         # Playlists manager (delegate playlist operations)
         try:
@@ -531,15 +170,6 @@ class MusicPlayer(QMainWindow):
             self.delete_playlist = self.playlists_mgr.delete_playlist
         except Exception as e:
             print(f"Warning: PlaylistsManager init failed: {e}")
-        
-        # Library view (delegate library tree and search)
-        try:
-            self.library_mgr = LibraryView(self)
-            self.update_library_tree = self.library_mgr.update_library_tree
-            self.on_library_item_clicked = self.library_mgr.on_library_item_clicked
-            self.search_music = self.library_mgr.search_music
-        except Exception as e:
-            print(f"Warning: LibraryView init failed: {e}")
         
         self.web_server = None
         self.web_port = 5000
@@ -581,6 +211,7 @@ class MusicPlayer(QMainWindow):
         file_menu.setTitle("File")
         file_menu.addAction("Add Folder", self.add_folder)
         file_menu.addAction("Add Files", self.add_files)
+        file_menu.addAction("Rescan Library", self.rescan_library)
         file_menu.addAction("Add Cloud Account...", self.add_cloud)
         file_menu.addAction("Scan Cloud Library", self.scan_clouds)
         file_menu.addSeparator()
@@ -635,6 +266,11 @@ class MusicPlayer(QMainWindow):
         """Apply the unified theme (theme/accent/density resolved from QSettings)."""
         import theme as _theme
         _theme.apply_theme(self)
+        try:
+            accent = _theme.icon_colors(self.settings)[0]
+            self.visualizer.set_palette(accent)
+        except Exception:
+            pass
         self._refresh_icon_colors()
 
     # === Accent icon helpers ===
@@ -700,6 +336,11 @@ class MusicPlayer(QMainWindow):
             # Apply the unified theme (Dark/Light, accent color, density)
             import theme as _theme
             _theme.apply_theme(self)
+            try:
+                accent = _theme.icon_colors(dialog.settings)[0]
+                self.visualizer.set_palette(accent)
+            except Exception:
+                pass
             self._refresh_icon_colors()
             # Apply volume
             volume = dialog.settings.value("volume", 70, int)
@@ -1113,6 +754,11 @@ class MusicPlayer(QMainWindow):
         buttons_layout.addWidget(self.repeat_btn)
         buttons_layout.addStretch(1)
 
+        # Spectrum visualizer (EQ-engine tap; calm baseline when EQ is off)
+        self.visualizer = SFVisualizer()
+        self.visualizer.setFixedSize(120, 32)
+        buttons_layout.addWidget(self.visualizer)
+
         # Volume (icon + compact slider in the transport bar)
         self.volume_icon = QToolButton()
         self.volume_icon.setIcon(self._icon("volume", size=18))
@@ -1295,6 +941,20 @@ class MusicPlayer(QMainWindow):
             pass
 
             
+    def _update_visualizer(self):
+        """Feed the visualizer: engine spectrum when active, else idle."""
+        try:
+            if getattr(self, "_using_engine", False):
+                data = self.eq_engine.get_spectrum()
+            else:
+                data = None
+        except Exception:
+            data = None
+        try:
+            self.visualizer.set_spectrum(data)
+        except Exception:
+            pass
+
     def update_position(self, position):
         self.seek_slider.blockSignals(True)
         self.seek_slider.setValue(position)
@@ -1544,64 +1204,6 @@ class MusicPlayer(QMainWindow):
             parts = [0.0] * 10
         return parts
 
-    def _eq_active(self):
-        """EQ drives playback only when enabled and gains are non-neutral."""
-        try:
-            enabled = self.settings.value("audio/eq_enabled", False, type=bool)
-        except Exception:
-            enabled = False
-        if not enabled:
-            return False
-        return any(abs(g) > 0.05 for g in self._eq_gains())
-
-    def _engine_start(self, kind, src, name=''):
-        """Route the current track through the EQ engine (decoder→EQ→sink)."""
-        self._disconnect_stream_handlers()
-        self._using_engine = True
-        self._engine_source = (kind, src, name)
-        self.eq_engine.play(src)
-
-    def _on_engine_state(self, state):
-        try:
-            self.play_btn.setIcon(self._icon_pause()
-                                  if state == 'playing' else self._icon_play())
-        except Exception:
-            pass
-
-    def _on_engine_track_finished(self):
-        # Mirror the native EndOfMedia auto-advance rules.
-        self._using_engine = False
-        self._engine_source = ('', '', '')
-        if self.repeat_btn.isChecked():
-            self.play()
-        elif self.shuffle_btn.isChecked() and len(self.playlist) > 1:
-            import random
-            next_index = self.current_index
-            while next_index == self.current_index and len(self.playlist) > 1:
-                next_index = random.randint(0, len(self.playlist) - 1)
-            self.current_index = next_index
-            self.play()
-        elif self.current_index < len(self.playlist) - 1:
-            self.next_track()
-
-    def _engine_playback_error(self, msg):
-        """Decoder/sink failure on the EQ path: replay via the native player."""
-        if not getattr(self, '_using_engine', False):
-            return
-        self._using_engine = False
-        kind, src, name = self._engine_source
-        self._engine_source = ('', '', '')
-        self.status_bar.showMessage(
-            "Equalizer unavailable for this track — using standard playback", 4000)
-        try:
-            if kind == 'url' and src:
-                self._play_stream(src, name)
-            elif kind == 'file' and src:
-                self.player.setSource(QUrl.fromLocalFile(src))
-                self.player.play()
-            self.play_btn.setIcon(self._icon_pause())
-        except Exception:
-            pass
 
     def open_eq_dialog(self):
         from dialogs import EqualizerDialog
@@ -2215,156 +1817,6 @@ class MusicPlayer(QMainWindow):
             self.new_playlist()
         # For folders, just expand/collapse (default QTreeWidget behavior)
     
-    def update_library_tree(self):
-        """Update the library tree with current data"""
-        self.library_tree.clear()
-        self.library_tree.setSelectionMode(QTreeWidget.ExtendedSelection)
-        folder_icon = self._icon("folder", role="dim", size=16)
-        file_icon = self._icon("music", role="dim", size=16)
-        # Local folders section
-        local_root = QTreeWidgetItem(self.library_tree, ["Local Media"])
-        local_root.setExpanded(True)
-        local_root.setData(0, Qt.UserRole, {"type": "local_root"})
-        # Add playlists section
-        playlists_root = QTreeWidgetItem(self.library_tree, ["Playlists"])
-        playlists_root.setExpanded(True)
-        for playlist in self.playlists:
-            playlist_item = QTreeWidgetItem(playlists_root, [playlist.name])
-            playlist_item.setData(0, Qt.UserRole, {"type": "playlist", "id": playlist.id})
-            playlist_item.setIcon(0, file_icon)
-        new_playlist_item = QTreeWidgetItem(playlists_root, ["+ New Playlist"])
-        new_playlist_item.setData(0, Qt.UserRole, {"type": "new_playlist"})
-        new_playlist_item.setIcon(0, folder_icon)
-        # Local folders and files
-        for folder in self.media_folders:
-            folder_item = QTreeWidgetItem(local_root, [os.path.basename(folder)])
-            folder_item.setData(0, Qt.UserRole, {"type": "local_folder", "path": folder})
-            folder_item.setIcon(0, folder_icon)
-            try:
-                for root, dirs, files in os.walk(folder):
-                    if root == folder:
-                        # Add subfolders
-                        for dir_name in dirs:
-                            dir_path = os.path.join(root, dir_name)
-                            subdir_item = QTreeWidgetItem(folder_item, [dir_name])
-                            subdir_item.setData(0, Qt.UserRole, {"type": "local_folder", "path": dir_path})
-                            subdir_item.setIcon(0, folder_icon)
-                        # Add files
-                        for file in files:
-                            if is_music_file(file):
-                                file_path = os.path.join(root, file)
-                                file_item = QTreeWidgetItem(folder_item, [file])
-                                file_item.setData(0, Qt.UserRole, {"type": "local_file", "path": file_path})
-                                file_item.setIcon(0, file_icon)
-            except Exception as e:
-                print(f"Error scanning subfolders: {e}")
-        open_folder_item = QTreeWidgetItem(local_root, ["Open Folder..."])
-        open_folder_item.setData(0, Qt.UserRole, {"type": "open_folder"})
-        open_folder_item.setIcon(0, folder_icon)
-        # Cloud section
-        cloud_root = QTreeWidgetItem(self.library_tree, ["Cloud Media"])
-        cloud_root.setExpanded(True)
-        for idx, cloud in enumerate(self.clouds):
-            cloud_item = QTreeWidgetItem(cloud_root, [cloud["name"]])
-            cloud_item.setData(0, Qt.UserRole, {"type": "cloud_account", "index": idx})
-            cloud_item.setIcon(0, folder_icon)
-            if "files" in cloud and cloud["files"]:
-                # Group files by folder structure
-                folder_structure = {}
-                for file_idx, file in enumerate(cloud["files"]):
-                    path = file["path"]
-                    path = path.replace('//', '/').strip('/')
-                    parts = path.split("/")
-                    if len(parts) > 1:
-                        folder = "/".join(parts[:-1]) or "/"
-                        filename = parts[-1]
-                    else:
-                        folder = "/"
-                        filename = path
-                    if folder not in folder_structure:
-                        folder_structure[folder] = []
-                    folder_structure[folder].append({
-                        "name": filename,
-                        "file_index": file_idx
-                    })
-                # Add folders and files to tree
-                for folder, files in folder_structure.items():
-                    if not folder:
-                        continue
-                    folder_item = QTreeWidgetItem(cloud_item, [folder])
-                    folder_item.setData(0, Qt.UserRole, {
-                        "type": "cloud_folder",
-                        "cloud_index": idx,
-                        "folder": folder,
-                        "file_indices": [f["file_index"] for f in files]
-                    })
-                    folder_item.setIcon(0, folder_icon)
-                    # Add files in this folder
-                    for f in files:
-                        file_info = cloud["files"][f["file_index"]]
-                        file_item = QTreeWidgetItem(folder_item, [f["name"]])
-                        file_item.setData(0, Qt.UserRole, {
-                            "type": "cloud_file",
-                            "cloud_index": idx,
-                            "file_index": f["file_index"]
-                        })
-                        file_item.setIcon(0, file_icon)
-
-    def search_music(self):
-        """Search for music in local and cloud libraries"""
-        search_term = self.search_input.text().strip().lower()
-        if not search_term:
-            # If search is empty, restore original tree
-            self.update_library_tree()
-            return
-            
-        self.status_bar.showMessage(f"Searching for: {search_term}")
-        
-        # Clear and setup search results tree
-        self.library_tree.clear()
-        search_root = QTreeWidgetItem(self.library_tree, ["Search Results"])
-        search_root.setExpanded(True)
-        
-        # Search local folders
-        local_results = QTreeWidgetItem(search_root, ["Local Media"])
-        local_results.setExpanded(True)
-        
-        found_local = False
-        for folder in self.media_folders:
-            for root, _, files in os.walk(folder):
-                for file in files:
-                    if is_music_file(file) and search_term in file.lower():
-                        full_path = os.path.join(root, file)
-                        result_item = QTreeWidgetItem(local_results, [file])
-                        result_item.setData(0, Qt.UserRole, {"type": "local_file", "path": full_path})
-                        found_local = True
-        
-        if not found_local:
-            QTreeWidgetItem(local_results, ["No matches found"])
-        
-        # Search cloud files
-        cloud_results = QTreeWidgetItem(search_root, ["Cloud Media"])
-        cloud_results.setExpanded(True)
-        
-        found_cloud = False
-        for cloud_idx, cloud in enumerate(self.clouds):
-            if "files" in cloud and cloud["files"]:
-                for file_idx, file in enumerate(cloud["files"]):
-                    file_name = os.path.basename(file["path"])
-                    if search_term in file_name.lower():
-                        result_item = QTreeWidgetItem(cloud_results, [f"{file_name} ({cloud['name']})"])
-                        result_item.setData(0, Qt.UserRole, {
-                            "type": "cloud_file", 
-                            "cloud_index": cloud_idx, 
-                            "file_index": file_idx
-                        })
-                        found_cloud = True
-        
-        if not found_cloud:
-            QTreeWidgetItem(cloud_results, ["No matches found"])
-            
-        self.status_bar.showMessage(f"Search complete: {search_term}")
-    
     def add_folder(self):
         """Add a folder to the media library"""
         folder = QFileDialog.getExistingDirectory(self, "Add Media Folder")
@@ -2372,6 +1824,7 @@ class MusicPlayer(QMainWindow):
             self.media_folders.append(folder)
             self.save_media_folders()
             self.update_library_tree()
+            self._start_local_scan()
     
     def add_files(self):
         """Add individual music files to the library or playlist"""
@@ -2427,6 +1880,7 @@ class MusicPlayer(QMainWindow):
                 self.media_folders.extend(unique_folders)
                 self.save_media_folders()
                 self.update_library_tree()
+                self._start_local_scan()
                 self.status_bar.showMessage(f"Added {len(files)} files to library")
             else:
                 self.status_bar.showMessage("Files already in library")
@@ -2513,7 +1967,7 @@ class MusicPlayer(QMainWindow):
             worker.moveToThread(thread)
             thread.started.connect(worker.run)
             thread.finished.connect(lambda w=worker: w.deleteLater())
-            thread.finished.connect(thread.deleteLater)
+            # (no thread.deleteLater-on-own-finished: aborts mid-teardown)
             # handle_scan_complete runs BEFORE thread.quit is processed, so the
             # not-running check needs a second chance on real thread exit.
             thread.finished.connect(self._check_all_scans_complete)
@@ -2546,7 +2000,80 @@ class MusicPlayer(QMainWindow):
             if hasattr(worker, 'abort'):
                 worker.abort()
         self.status_bar.showMessage("Cloud scan canceled")
-    
+
+    # ------------------------------------------------ local library scan
+    def _start_local_scan(self):
+        """(Re)scan local media folders on a daemon thread; results arrive
+        on the UI thread via run_on_ui. One scan at a time."""
+        import threading as _threading
+        from workers import LibraryScanWorker
+        self._scan_generation = getattr(self, "_scan_generation", 0) + 1
+        gen = self._scan_generation
+        if self._local_scan_worker is not None:
+            self._local_scan_worker.abort()
+        self._local_scan_worker = None
+        self._local_scan_thread = None
+        self.library_store.reset()
+        self.update_library_tree()
+        if not self.media_folders:
+            return
+        worker = LibraryScanWorker(self.media_folders, self.run_on_ui.emit)
+        worker.on_folder = lambda f, s: self._on_local_folder_scanned(gen, f, s)
+        worker.on_files = lambda f, c: self._on_local_files_scanned(gen, f, c)
+        worker.on_indexed = lambda p: self._on_local_indexed(gen, p)
+        worker.on_finished = lambda t: self._on_local_scan_finished(gen, t)
+        self._local_scan_worker = worker
+        thread = _threading.Thread(target=worker.run, daemon=True,
+                                   name="library-scan")
+        self._local_scan_thread = thread
+        thread.start()
+
+    def _superseded(self, gen):
+        """True when a newer scan replaced this one (drop stale batches)."""
+        return gen != getattr(self, "_scan_generation", 0)
+
+    def _on_local_folder_scanned(self, gen, folder, subdirs):
+        if self._superseded(gen):
+            return
+        self.library_store.add_folder(folder, subdirs)
+        self._refresh_local_section()
+
+    def _on_local_files_scanned(self, gen, folder, chunk):
+        if self._superseded(gen):
+            return
+        self.library_store.add_tree_files(folder, chunk)
+        self._refresh_local_section()
+
+    def _on_local_indexed(self, gen, paths):
+        if self._superseded(gen):
+            return
+        self.library_store.add_indexed(paths)
+        self.status_bar.showMessage(f"Library: {self.library_store.local_count()} tracks", 3000)
+
+    def _on_local_scan_finished(self, gen, total):
+        if self._superseded(gen):
+            return
+        self._local_scan_worker = None
+        self._local_scan_thread = None
+        self.status_bar.showMessage(f"Library scan complete: {total} tracks", 5000)
+
+    def cancel_local_scan(self):
+        if self._local_scan_worker is not None:
+            self._local_scan_worker.abort()
+            self.status_bar.showMessage("Library scan canceled")
+
+    def rescan_library(self):
+        """File > Rescan Library: re-walk media folders in the background."""
+        self._start_local_scan()
+        self.status_bar.showMessage("Rescanning library…")
+
+    def _refresh_local_section(self):
+        """Re-render only the Local Media subtree from the store."""
+        try:
+            self.library_mgr.refresh_local_section()
+        except Exception:
+            pass
+
     def new_playlist(self):
         """Create a new playlist"""
         name, ok = QInputDialog.getText(self, "New Playlist", "Playlist name:")

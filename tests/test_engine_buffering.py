@@ -57,6 +57,59 @@ def _engine_with_fake(qapp, n_buffers):
     return eng
 
 
+class _FakeSink:
+    def __init__(self):
+        self._free = 1 << 20
+
+    def bytesFree(self):
+        return self._free
+
+    def processedUSecs(self):
+        return 0
+
+
+class _FakeIO:
+    def __init__(self):
+        self.written = 0
+
+    def write(self, data):
+        self.written += len(data)
+        return len(data)
+
+
+def test_flush_taps_spectrum_from_written_audio(qapp):
+    """The pump writes POST-EQ audio to the sink — that is what the
+    listener hears, so the visualizer tap measures exactly that."""
+    eng = _engine_with_fake(qapp, 0)
+    eng._decoder = None
+    eng._sink = _FakeSink()
+    eng._io = _FakeIO()
+    assert eng.get_spectrum() is None
+    t = np.arange(4096) / float(EQEngine.SAMPLE_RATE)
+    wave = (8000 * np.sin(2 * np.pi * 1000 * t)).astype(np.int16)
+    eng._pending = np.stack([wave, wave], axis=1)
+    eng._flush_to_sink()
+    spec = eng.get_spectrum()
+    assert spec is not None
+    peak = int(np.argmax(spec))
+    assert 10 <= peak <= 13, f"1 kHz peaked at band {peak}"
+    assert spec[peak] >= 0.4
+
+
+def test_spectrum_clears_on_teardown(qapp):
+    eng = _engine_with_fake(qapp, 0)
+    eng._decoder = None
+    eng._sink = _FakeSink()
+    eng._io = _FakeIO()
+    t = np.arange(4096) / float(EQEngine.SAMPLE_RATE)
+    wave = (8000 * np.sin(2 * np.pi * 1000 * t)).astype(np.int16)
+    eng._pending = np.stack([wave, wave], axis=1)
+    eng._flush_to_sink()
+    assert eng.get_spectrum() is not None
+    eng._teardown()
+    assert eng.get_spectrum() is None
+
+
 def test_refill_drains_every_available_buffer(qapp):
     eng = _engine_with_fake(qapp, n_buffers=10)
     eng._refill()

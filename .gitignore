@@ -5,3 +5,11 @@ venv/
 playlists.json
 __pycache__/
 .superpowers/
+# build outputs + local caches (never ship or commit)
+build/
+dist/
+packaging/Output/
+tmpappdata/
+.pytest_cache/
+.clcache/
+*.spec.bak
