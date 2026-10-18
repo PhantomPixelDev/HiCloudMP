@@ -4,6 +4,7 @@ import json
 import time
 import random
 import tempfile
+from datetime import datetime
 from urllib.parse import urlparse
 from platformdirs import user_data_dir, user_cache_dir
 from cover_extractor import CoverExtractor
@@ -12,6 +13,7 @@ from tray import TrayController
 from metadata import MetadataController
 from playlists_manager import PlaylistsManager
 from library_view import LibraryView
+import icons
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
@@ -19,7 +21,8 @@ from PySide6.QtWidgets import (
     QTreeWidgetItem, QSplitter, QLineEdit, QDialog, QFormLayout, QTabWidget, 
     QToolButton, QStatusBar, QStyle, QFrame, QMenu, QProgressBar, QSystemTrayIcon,
     QComboBox, QInputDialog, QListWidgetItem, QRadioButton, QDialogButtonBox, QProgressDialog,
-    QCheckBox, QWidgetAction
+    QCheckBox, QWidgetAction, QGroupBox, QGridLayout, QStackedWidget, QColorDialog,
+    QScrollArea
 )
 from PySide6.QtGui import QPainter
 from PySide6.QtCore import Qt, QTimer, Signal, QObject, QThread, QUrl, QSize, QEvent, QSettings
@@ -30,7 +33,7 @@ from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput, QMediaFormat
 from utils import (
     is_music_file, scan_music_files, format_time, 
     MEDIA_FOLDERS_FILE, CLOUD_FILES_FILE, PLAYLISTS_FILE,
-    HAS_WIN32
+    open_folder, atomic_write_text
 )
 from cloud_handlers import CLOUD_TYPES
 from playlist import Playlist
@@ -60,6 +63,12 @@ class CloudAccountsDialog(QDialog):
         btn_layout.addWidget(edit_btn)
         btn_layout.addWidget(remove_btn)
         layout.addLayout(btn_layout)
+        # Close with QDialog.Accepted so the caller persists changes; without
+        # this the dialog can only ever reject, making edits hard to save.
+        self.button_box = QDialogButtonBox(QDialogButtonBox.Ok)
+        self.button_box.button(QDialogButtonBox.Ok).setText("Done")
+        self.button_box.accepted.connect(self.accept)
+        layout.addWidget(self.button_box)
     def refresh_list(self):
         self.list_widget.clear()
         for cloud in self.clouds:
@@ -98,58 +107,327 @@ class CloudAccountsDialog(QDialog):
         self.refresh_list()
 
 class SettingsDialog(QDialog):
+    """Settings with sidebar navigation: Playback / Appearance / Library /
+    Web Remote. All historical widget attribute names are preserved."""
+
+    WEB_HINT = ("Control this app from your phone or any other computer — "
+                "like a remote control for your music. Both devices only "
+                "need to be on the same Wi-Fi network.")
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Settings")
-        self.resize(400, 300)
+        self.resize(640, 470)
         self.settings = QSettings("HiCloudMP", "HiCloudMP")
-        layout = QVBoxLayout(self)
-        self.volume_slider = QSlider(Qt.Horizontal)
-        self.volume_slider.setRange(0, 100)
-        self.volume_slider.setValue(self.settings.value("volume", 70, int))
-        layout.addWidget(QLabel("Default Volume"))
-        layout.addWidget(self.volume_slider)
-        self.theme_combo = QComboBox()
-        self.theme_combo.addItems(["Dark", "Light"])
-        self.theme_combo.setCurrentText(self.settings.value("theme", "Dark"))
-        layout.addWidget(QLabel("Theme"))
-        layout.addWidget(self.theme_combo)
-        self.download_folder_edit = QLineEdit(self.settings.value("download_folder", ""))
-        browse_btn = QPushButton("Browse...")
-        browse_btn.clicked.connect(self.browse_folder)
-        folder_layout = QHBoxLayout()
-        folder_layout.addWidget(self.download_folder_edit)
-        folder_layout.addWidget(browse_btn)
-        layout.addWidget(QLabel("Download Folder"))
-        layout.addLayout(folder_layout)
-        # Cloud account management
-        cloud_btn = QPushButton("Manage Cloud Accounts")
-        cloud_btn.clicked.connect(self.open_cloud_accounts)
-        layout.addWidget(cloud_btn)
-        # Add web interface toggle
-        self.web_checkbox = QCheckBox("Enable Web Interface (LAN control)")
-        self.web_checkbox.setChecked(self.settings.value("web_interface", False, bool))
-        layout.addWidget(self.web_checkbox)
+        self.parent = parent
+        self.custom_accent_hex = None
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(10, 10, 10, 10)
+        body = QHBoxLayout()
+        body.setSpacing(12)
+        outer.addLayout(body, 1)
+
+        # ---------------- Navigation rail ----------------
+        self.nav_list = QListWidget(self)
+        self.nav_list.setObjectName("settingsNav")
+        self.nav_list.setFixedWidth(148)
+        self.nav_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        body.addWidget(self.nav_list)
+
+        # ---------------- Pages ----------------
+        self.pages = QStackedWidget(self)
+        body.addWidget(self.pages, 1)
+        self.pages.addWidget(self._build_playback_page())
+        self.pages.addWidget(self._build_appearance_page())
+        self.pages.addWidget(self._build_library_page())
+        self.pages.addWidget(self._build_web_page())
+
+        self.nav_list.currentRowChanged.connect(self.pages.setCurrentIndex)
+        for label in ("Playback", "Appearance", "Library", "Web Remote"):
+            self.nav_list.addItem(QListWidgetItem(label))
+        self.nav_list.setCurrentRow(0)
+
         btn_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         btn_box.accepted.connect(self.accept)
         btn_box.rejected.connect(self.reject)
-        layout.addWidget(btn_box)
-        self.parent = parent
+        outer.addWidget(btn_box)
+
+    # ------------------------------------------------------------ pages
+    def _build_playback_page(self):
+        page = QWidget()
+        v = QVBoxLayout(page)
+        v.setContentsMargins(4, 4, 4, 4)
+        box = QGroupBox("Playback")
+        v.addWidget(box)
+        v.addStretch(1)
+        form = QFormLayout(box)
+        self.volume_slider = QSlider(Qt.Horizontal)
+        self.volume_slider.setRange(0, 100)
+        self.volume_slider.setValue(self.settings.value("volume", 70, int))
+        form.addRow("Default volume", self.volume_slider)
+        hint = QLabel("Used every time the app starts.")
+        hint.setObjectName("hintLabel")
+        form.addRow("", hint)
+        return page
+
+    def _build_appearance_page(self):
+        page = QScrollArea()
+        page.setWidgetResizable(True)
+        page.setFrameShape(QFrame.NoFrame)
+        inner = QWidget()
+        page.setWidget(inner)
+        v = QVBoxLayout(inner)
+        v.setContentsMargins(4, 4, 4, 4)
+
+        # --- Colors ---
+        colors_box = QGroupBox("Colors")
+        v.addWidget(colors_box)
+        form = QFormLayout(colors_box)
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItems(["Dark", "Light"])
+        self.theme_combo.setCurrentText(self.settings.value("theme", "Dark"))
+        form.addRow("Theme", self.theme_combo)
+
+        import theme as _theme
+        self.accent_combo = QComboBox()
+        self.accent_combo.addItems(list(_theme.ACCENTS.keys()))
+        stored_accent = self.settings.value("ui/accent", _theme.ACCENTS["Emerald"])
+        default_accent_name = next(
+            (n for n, h in _theme.ACCENTS.items()
+             if h.lower() == str(stored_accent).lower()), None)
+        if default_accent_name is None:
+            # A previously chosen custom color: surface it as "Custom"
+            self.custom_accent_hex = str(stored_accent)
+            self.accent_combo.addItem("Custom")
+            self.accent_combo.setCurrentText("Custom")
+        else:
+            self.accent_combo.setCurrentText(default_accent_name)
+
+        pick_row = QHBoxLayout()
+        self.custom_accent_btn = QPushButton("Pick any color…")
+        self.custom_accent_btn.setToolTip("Choose any color as the accent")
+        self.custom_accent_btn.clicked.connect(self.pick_custom_accent)
+        pick_row.addWidget(self.accent_combo)
+        pick_row.addWidget(self.custom_accent_btn)
+        form.addRow("Accent color", pick_row)
+
+        self.density_combo = QComboBox()
+        self.density_combo.addItems(["Comfortable", "Compact"])
+        self.density_combo.setCurrentText(
+            str(self.settings.value("ui/density", "comfortable")).capitalize())
+        form.addRow("UI density", self.density_combo)
+
+        # --- Background image ---
+        bg_box = QGroupBox("Background image")
+        v.addWidget(bg_box)
+        bgl = QVBoxLayout(bg_box)
+        self.bg_image_edit = QLineEdit(str(self.settings.value("ui/bg_image", "")))
+        self.bg_image_edit.setReadOnly(True)
+        self.bg_image_edit.setPlaceholderText("No background image selected")
+        bgl.addWidget(self.bg_image_edit)
+        brows = QHBoxLayout()
+        self.bg_browse_btn = QPushButton("Choose image…")
+        self.bg_browse_btn.clicked.connect(self.browse_bg_image)
+        self.bg_clear_btn = QPushButton("Remove")
+        self.bg_clear_btn.setEnabled(bool(self.bg_image_edit.text()))
+        self.bg_clear_btn.clicked.connect(self.clear_bg_image)
+        brows.addWidget(self.bg_browse_btn)
+        brows.addWidget(self.bg_clear_btn)
+        brows.addStretch(1)
+        bgl.addLayout(brows)
+        dim_row = QHBoxLayout()
+        dim_row.addWidget(QLabel("Darkness"))
+        self.bg_dim_slider = QSlider(Qt.Horizontal)
+        self.bg_dim_slider.setRange(0, 80)
+        self.bg_dim_slider.setValue(
+            int(self._safe_int(self.settings.value("ui/bg_dim", 35))))
+        self.bg_dim_label = QLabel(f"{self.bg_dim_slider.value()}%")
+        self.bg_dim_slider.valueChanged.connect(
+            lambda v_: self.bg_dim_label.setText(f"{v_}%"))
+        self.bg_dim_slider.setFixedWidth(220)
+        dim_row.addWidget(self.bg_dim_slider)
+        dim_row.addWidget(self.bg_dim_label)
+        dim_row.addStretch(1)
+        bgl.addLayout(dim_row)
+        bg_hint = QLabel("The image goes behind the player panels. "
+                         "Darkness makes it subtle. Applies instantly.")
+        bg_hint.setObjectName("hintLabel")
+        bg_hint.setWordWrap(True)
+        bgl.addWidget(bg_hint)
+        v.addStretch(1)
+        return page
+
+    def _build_library_page(self):
+        page = QWidget()
+        v = QVBoxLayout(page)
+        v.setContentsMargins(4, 4, 4, 4)
+        box = QGroupBox("Library & cloud accounts")
+        v.addWidget(box)
+        v.addStretch(1)
+        form = QFormLayout(box)
+        self.download_folder_edit = QLineEdit(
+            str(self.settings.value("download_folder", "")))
+        browse_btn = QPushButton("Browse…")
+        browse_btn.clicked.connect(self.browse_folder)
+        folder_layout = QHBoxLayout()
+        folder_layout.addWidget(self.download_folder_edit, 1)
+        folder_layout.addWidget(browse_btn)
+        form.addRow("Download folder", folder_layout)
+        self.cloud_btn = QPushButton("Manage cloud accounts…")
+        self.cloud_btn.clicked.connect(self.open_cloud_accounts)
+        form.addRow("", self.cloud_btn)
+        hint = QLabel("Streams and downloads from Nextcloud, "
+                      "Ampache or Subsonic servers.")
+        hint.setObjectName("hintLabel")
+        hint.setWordWrap(True)
+        form.addRow("", hint)
+        return page
+
+    def _build_web_page(self):
+        page = QWidget()
+        v = QVBoxLayout(page)
+        v.setContentsMargins(4, 4, 4, 4)
+
+        self.web_hint_label = QLabel(self.WEB_HINT)
+        self.web_hint_label.setWordWrap(True)
+        v.addWidget(self.web_hint_label)
+
+        link_box = QGroupBox("Your remote link")
+        v.addWidget(link_box)
+        v.addStretch(1)
+        ll = QVBoxLayout(link_box)
+        token = ""
+        port = 5000
+        if self.parent is not None and hasattr(self.parent, "ensure_web_token"):
+            token = self.parent.ensure_web_token()
+            port = getattr(self.parent, "web_port", port)
+        else:
+            token = str(self.settings.value("web/token", ""))
+        base = f"http://localhost:{port}" if token == "" else \
+            f"http://localhost:{port}/?token={token}"
+        self.web_link_edit = QLineEdit(base)
+        self.web_link_edit.setReadOnly(True)
+        ll.addWidget(self.web_link_edit)
+        link_row = QHBoxLayout()
+        self.web_copy_btn = QPushButton("Copy link")
+        self.web_copy_btn.clicked.connect(self.copy_web_link)
+        self.web_open_btn = QPushButton("Open in browser")
+        self.web_open_btn.clicked.connect(self.open_web_link)
+        link_row.addWidget(self.web_copy_btn)
+        link_row.addWidget(self.web_open_btn)
+        link_row.addStretch(1)
+        ll.addLayout(link_row)
+
+        self.web_status_label = QLabel(self._web_status_text())
+        self.web_status_label.setObjectName("hintLabel")
+        ll.addWidget(self.web_status_label)
+
+        opts = QGroupBox("Options")
+        v.addWidget(opts)
+        ol = QVBoxLayout(opts)
+        self.web_checkbox = QCheckBox("Enable web remote")
+        self.web_checkbox.setChecked(self.settings.value("web_interface", False, bool))
+        self.web_checkbox.toggled.connect(
+            lambda _on: self.web_status_label.setText(self._web_status_text()))
+        ol.addWidget(self.web_checkbox)
+        self.lan_checkbox = QCheckBox("Allow other devices on this network "
+                                      "(needed for phones)")
+        self.lan_checkbox.setChecked(self.settings.value("web/host", "127.0.0.1") == "0.0.0.0")
+        ol.addWidget(self.lan_checkbox)
+        lan_hint = QLabel("Music stays private: only people who open the "
+                          "link above can connect. Leave this off if you "
+                          "only use the remote on this computer.")
+        lan_hint.setObjectName("hintLabel")
+        lan_hint.setWordWrap(True)
+        ol.addWidget(lan_hint)
+
+        # Advanced: raw access code stays reachable, mostly invisible
+        self.web_token_toggle = QToolButton()
+        self.web_token_toggle.setText("show access code…")
+        self.web_token_toggle.setCheckable(True)
+        self.web_token_toggle.setAutoRaise(True)
+        self.web_token_edit = QLineEdit(token)
+        self.web_token_edit.setReadOnly(True)
+        self.web_token_edit.setVisible(False)
+        self.web_token_toggle.toggled.connect(self.web_token_edit.setVisible)
+        adv_row = QHBoxLayout()
+        adv_row.addStretch(1)
+        adv_row.addWidget(self.web_token_toggle)
+        adv_row.addWidget(self.web_token_edit, 1)
+        v.addLayout(adv_row)
+        return page
+
+    # ------------------------------------------------------------ helpers
+    @staticmethod
+    def _safe_int(value):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 35
+
+    def _web_status_text(self):
+        running = bool(getattr(self.parent, "web_server", None)
+                       if self.parent else False)
+        enabled = self.settings.value("web_interface", False, bool)
+        if running:
+            return "Web remote is running. Open the link on any device."
+        return ("Web remote is off. Turn it on, then open the link "
+                "on your phone.") if enabled else \
+            "Web remote is off."
+
+    def pick_custom_accent(self):
+        initial = QColor(self.custom_accent_hex or "#10b981")
+        color = QColorDialog.getColor(initial, self, "Custom accent color")
+        if color is None or not color.isValid():
+            return  # dialog cancelled — no change
+        self.custom_accent_hex = color.name()
+        if self.accent_combo.findText("Custom") < 0:
+            self.accent_combo.addItem("Custom")
+        self.accent_combo.setCurrentText("Custom")
+
+    def browse_bg_image(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Choose a background image", "",
+            "Images (*.png *.jpg *.jpeg *.bmp *.webp)")
+        if path:
+            self.bg_image_edit.setText(path)
+            self.bg_clear_btn.setEnabled(True)
+            self.bg_preview_path = path
+
+    def clear_bg_image(self):
+        self.bg_image_edit.setText("")
+
+    def copy_web_link(self):
+        QApplication.clipboard().setText(self.web_link_edit.text())
+
+    def open_web_link(self):
+        import webbrowser
+        webbrowser.open(self.web_link_edit.text())
+
     def browse_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Select Download Folder")
         if folder:
             self.download_folder_edit.setText(folder)
+
     def save_settings(self):
         self.settings.setValue("volume", self.volume_slider.value())
         self.settings.setValue("theme", self.theme_combo.currentText())
+        # Appearance persistence (accent stored as hex; density lowercased)
+        import theme as _theme
+        self.settings.setValue("ui/accent", _theme.accent_hex(
+            self.accent_combo.currentText(), custom=self.custom_accent_hex))
+        self.settings.setValue("ui/density", self.density_combo.currentText().lower())
+        self.settings.setValue("ui/bg_image", self.bg_image_edit.text())
+        self.settings.setValue("ui/bg_dim", self.bg_dim_slider.value())
         self.settings.setValue("download_folder", self.download_folder_edit.text())
         self.settings.setValue("web_interface", self.web_checkbox.isChecked())
+        self.settings.setValue("web/host", "0.0.0.0" if self.lan_checkbox.isChecked() else "127.0.0.1")
+
     def open_cloud_accounts(self):
         if self.parent:
             dlg = CloudAccountsDialog(self, self.parent.clouds)
             dlg.exec()
-
-    pass
 
 
 class MusicPlayer(QMainWindow):
@@ -159,7 +437,8 @@ class MusicPlayer(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("HiCloud MP")
-        self.resize(1000, 600)
+        self.resize(1120, 720)
+        self.setMinimumSize(960, 640)
         self.setWindowIcon(QIcon("icon.ico"))
         
         # Set up application directories
@@ -174,7 +453,12 @@ class MusicPlayer(QMainWindow):
         
         # Initialize settings
         self.settings = QSettings("HiCloudMP", "HiCloudMP")
-        
+
+        # Themed icon factory (accent-tinted Feather glyphs; stock QStyle
+        # icons are fully replaced). Colors refresh with every theme change.
+        self.icon_factory = icons.IconFactory()
+        self._refresh_icon_colors()
+
         # Set up temporary directory for downloads
         self.temp_dir = os.path.join(self.cache_dir, "temp")
         os.makedirs(self.temp_dir, exist_ok=True)
@@ -199,11 +483,10 @@ class MusicPlayer(QMainWindow):
         self.audio_output.setVolume(0.7)  # 70% volume default
         # Metadata/Cover controller
         self.meta = MetadataController(self)
+        # Stream-specific retry handlers (see _play_stream/_disconnect_stream_handlers)
+        self._stream_status_handler = None
+        self._stream_error_handler = None
         
-        # Set up Windows message handler for media keys
-        if HAS_WIN32:
-            self.win_proc = create_win_proc_handler(self)
-            
         # Enable system media control (media keys)
         self.setup_system_media_controls()
         
@@ -213,6 +496,19 @@ class MusicPlayer(QMainWindow):
         self.player.mediaStatusChanged.connect(self.on_media_status_changed)
         self.cloud_file_downloaded.connect(self.play_downloaded_file)
         self.run_on_ui.connect(self._run_on_ui)
+
+        # Equalizer engine (decoder -> 10-band EQ -> audio sink). Routed per
+        # track when the equalizer is enabled; engine errors fall back to the
+        # native QMediaPlayer path (see _engine_playback_error).
+        self._using_engine = False
+        self._engine_source = ('', '', '')
+        from eq_engine import EQEngine
+        self.eq_engine = EQEngine(self)
+        self.eq_engine.position_changed.connect(self.update_position)
+        self.eq_engine.duration_changed.connect(self.update_duration)
+        self.eq_engine.track_finished.connect(self._on_engine_track_finished)
+        self.eq_engine.error_occurred.connect(self._engine_playback_error)
+        self.eq_engine.state_changed.connect(self._on_engine_state)
         
         # UI
         self.setup_ui()
@@ -253,77 +549,142 @@ class MusicPlayer(QMainWindow):
         # Auto-start web interface if enabled in settings
         if self.settings.value("web_interface", False, bool):
             self.start_web_interface()
+
+        # Real top menu bar (moved here from the old sidebar footer buttons)
+        self._create_menubar()
         
-        # Create menu bar
-        menubar = self.menuBar()
-        
-        # Add Web Panel action
-        web_panel_action = QAction("Web Panel", self)
-        web_panel_action.triggered.connect(self.open_web_panel)
-        menubar.addAction(web_panel_action)
-        
-        # Add Settings action
-        settings_action = QAction("Settings", self)
-        settings_action.triggered.connect(self.open_settings_dialog)
-        menubar.addAction(settings_action)
-        
-        # (autostart handled above once)
-        
+    def _create_menubar(self):
+        """Standard top menu bar: File / Playback / Tools / Help."""
+        mb = self.menuBar()
+        # Widget-backed bar: native bars on Windows are handled out-of-process,
+        # which makes Python-side wrappers transient and hides QSS styling.
+        mb.setNativeMenuBar(False)
+
+        # --- File ---
+        file_menu = QMenu(self)
+        file_menu.setTitle("File")
+        file_menu.addAction("Add Folder", self.add_folder)
+        file_menu.addAction("Add Files", self.add_files)
+        file_menu.addAction("Add Cloud Account...", self.add_cloud)
+        file_menu.addAction("Scan Cloud Library", self.scan_clouds)
+        file_menu.addSeparator()
+        file_menu.addAction("Exit", self.close)
+        mb.addMenu(file_menu)
+
+        # --- Playback ---
+        playback_menu = QMenu(self)
+        playback_menu.setTitle("Playback")
+        playback_menu.addAction("Play / Pause", self.toggle_play)
+        playback_menu.addAction("Stop", self.stop)
+        playback_menu.addAction("Previous", self.prev_track)
+        playback_menu.addAction("Next", self.next_track)
+        playback_menu.addSeparator()
+        self.shuffle_action = playback_menu.addAction("Shuffle")
+        self.shuffle_action.setCheckable(True)
+        self.shuffle_action.toggled.connect(self.toggle_shuffle)
+        self.repeat_action = playback_menu.addAction("Repeat")
+        self.repeat_action.setCheckable(True)
+        self.repeat_action.toggled.connect(self.toggle_repeat)
+        mb.addMenu(playback_menu)
+
+        # --- Tools ---
+        tools_menu = QMenu(self)
+        tools_menu.setTitle("Tools")
+        tools_menu.addAction("Equalizer…", self.open_eq_dialog)
+        tools_menu.addSeparator()
+        tools_menu.addAction("Web Panel", self.open_web_panel)
+        tools_menu.addSeparator()
+        tools_menu.addAction("Settings", self.open_settings_dialog)
+        mb.addMenu(tools_menu)
+
+        # --- Help ---
+        help_menu = QMenu(self)
+        help_menu.setTitle("Help")
+        help_menu.addAction("About HiCloud MP", self._show_about)
+        mb.addMenu(help_menu)
+
+        # Ownership debugging vestige from the PySide wrapper-invalidation
+        # investigation: keep strong refs so no transient GC can reclaim them.
+        self._menu_holder = [file_menu, playback_menu, tools_menu, help_menu]
+
+    def _show_about(self):
+        QMessageBox.information(
+            self, "About HiCloud MP",
+            "HiCloud MP — local & cloud music player\n\n"
+            "WebDAV / Ampache / Subsonic cloud streaming, web remote panel,\n"
+            "playlists and library in one desktop app.\n\n"
+            "Repository: github.com/PhantomPixelDev/HiCloudMP")
+
     def set_dark_theme(self):
-        """Apply dark theme to the application"""
-        self.setStyleSheet("""
-            QMainWindow, QDialog {
-                background-color: #2b2b2b;
-                color: #ffffff;
-            }
-            QLabel, QPushButton, QCheckBox, QRadioButton, QLineEdit, QListWidget, QComboBox {
-                color: #ffffff;
-            }
-            QPushButton {
-                background-color: #3a3a3a;
-                border: 1px solid #555;
-                padding: 5px;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #4a4a4a;
-            }
-            QPushButton:pressed {
-                background-color: #2a2a2a;
-            }
-            QListWidget, QLineEdit, QComboBox {
-                background-color: #3a3a3a;
-                border: 1px solid #555;
-                padding: 5px;
-                border-radius: 4px;
-            }
-            QScrollBar:vertical {
-                background: #3a3a3a;
-                width: 12px;
-                margin: 0px;
-            }
-            QScrollBar::handle:vertical {
-                background: #555;
-                min-height: 20px;
-                border-radius: 6px;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                height: 0px;
-            }
-        """)
+        """Apply the unified theme (theme/accent/density resolved from QSettings)."""
+        import theme as _theme
+        _theme.apply_theme(self)
+        self._refresh_icon_colors()
+
+    # === Accent icon helpers ===
+    def _refresh_icon_colors(self):
+        """Bind the icon factory to the live theme (accent/text/dim) and
+        re-render every themed icon."""
+        if not hasattr(self, 'icon_factory'):
+            return
+        try:
+            import theme as _theme
+            accent, text, dim = _theme.icon_colors(self.settings)
+            self.icon_factory.set_colors(accent, text, dim)
+        except Exception:
+            pass
+        self._apply_icons()
+
+    def _icon(self, name, role="text", size=20):
+        return self.icon_factory.icon(name, size=size, role=role)
+
+    def _icon_play(self):
+        return self._icon("play", role="onaccent", size=28)
+
+    def _icon_pause(self):
+        return self._icon("pause", role="onaccent", size=28)
+
+    def _apply_icons(self):
+        """Set themed glyph icons on every button (font-size independent)."""
+        f = getattr(self, 'icon_factory', None)
+        if f is None:
+            return
+        try:
+            self.play_btn.setIcon(self._icon_play())
+            self.play_btn.setIconSize(QSize(28, 28))
+            self.stop_btn.setIcon(self._icon("stop", size=20))
+            self.prev_btn.setIcon(self._icon("skip-back", size=20))
+            self.next_btn.setIcon(self._icon("skip-forward", size=20))
+            for btn, glyph in ((self.stop_btn, "stop"),
+                               (self.prev_btn, "skip-back"),
+                               (self.next_btn, "skip-forward")):
+                btn.setIconSize(QSize(20, 20))
+            self._apply_toggle_icons()
+            vbtn = getattr(self, 'volume_icon', None)
+            if vbtn is not None:
+                vbtn.setIcon(self._icon("volume", size=20))
+                vbtn.setIconSize(QSize(20, 20))
+        except AttributeError:
+            pass  # setup_ui() still building; icons apply once others land
+
+    def _apply_toggle_icons(self):
+        """Shuffle/Repeat glyphs follow their accentActive toggle state."""
+        self.shuffle_btn.setIcon(self._icon(
+            "shuffle", role="accent" if self.shuffle_btn.isChecked() else "dim"))
+        self.shuffle_btn.setIconSize(QSize(20, 20))
+        self.repeat_btn.setIcon(self._icon(
+            "repeat", role="accent" if self.repeat_btn.isChecked() else "dim"))
+        self.repeat_btn.setIconSize(QSize(20, 20))
 
     def open_settings_dialog(self):
         """Open the settings dialog and apply any changes"""
         dialog = SettingsDialog(self)
         if dialog.exec() == QDialog.Accepted:
             dialog.save_settings()
-            # Apply theme
-            theme = dialog.settings.value("theme", "Dark")
-            if theme == "Dark":
-                self.set_dark_theme()
-            else:
-                # Reset to default light theme
-                self.setStyleSheet("")
+            # Apply the unified theme (Dark/Light, accent color, density)
+            import theme as _theme
+            _theme.apply_theme(self)
+            self._refresh_icon_colors()
             # Apply volume
             volume = dialog.settings.value("volume", 70, int)
             self.audio_output.setVolume(volume / 100.0)
@@ -340,10 +701,16 @@ class MusicPlayer(QMainWindow):
         if getattr(self, 'web_server', None):
             return True  # Already running
         try:
-            from web_control import WebControlServer
-            self.web_server = WebControlServer(self, host='0.0.0.0', port=self.web_port)
+            from web_control import WebControlServer, panel_url, lan_ip
+            token = self.ensure_web_token()
+            host = self.settings.value("web/host", "127.0.0.1")
+            self.web_server = WebControlServer(self, host=host, port=self.web_port, token=token)
             self.web_server.start()
-            self.status_bar.showMessage(f"Web interface started on http://localhost:{self.web_port}")
+            visible_ip = lan_ip() if host == "0.0.0.0" else None
+            url = panel_url(self.web_port, token, lan_ip=visible_ip)
+            self.status_bar.showMessage(
+                f"Web remote ready: {url} — open this link from any "
+                f"device on the same network.")
             return True
         except Exception as e:
             print(f"Failed to start web interface: {e}")
@@ -351,6 +718,15 @@ class MusicPlayer(QMainWindow):
                                 "Failed to start web interface. Make sure Flask and Flask-SocketIO are installed.")
             self.web_server = None
             return False
+
+    def ensure_web_token(self):
+        """Return the web panel access token, generating one on first use."""
+        token = self.settings.value("web/token", "")
+        if not token:
+            import secrets
+            token = secrets.token_hex(16)
+            self.settings.setValue("web/token", token)
+        return token
     
     def stop_web_interface(self):
         """Stop the web interface server"""
@@ -366,13 +742,15 @@ class MusicPlayer(QMainWindow):
         """Open the web control panel in the default browser"""
         import webbrowser
         if getattr(self, 'web_server', None):
-            url = f"http://localhost:{self.web_port}"
+            token = getattr(self.web_server, 'token', '') or self.ensure_web_token()
+            url = f"http://localhost:{self.web_port}/?token={token}"
             webbrowser.open(url)
         else:
             # If setting is enabled, try to start it automatically
             if self.settings.value("web_interface", False, bool):
                 if self.start_web_interface():
-                    url = f"http://localhost:{self.web_port}"
+                    token = getattr(self.web_server, 'token', '') or self.ensure_web_token()
+                    url = f"http://localhost:{self.web_port}/?token={token}"
                     webbrowser.open(url)
                     return
             QMessageBox.warning(self, "Web Panel", "Web interface is not enabled in settings.")
@@ -499,103 +877,139 @@ class MusicPlayer(QMainWindow):
             pass
     
     def setup_ui(self):
-        """Set up the user interface"""
+        """Modern two-zone layout: navigation sidebar + content stage with
+        transport bar. All widget attribute names are preserved (tests and the
+        web-control bridge depend on them)."""
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-        
-        main_layout = QHBoxLayout(central_widget)
-        
-        # Left panel - library
-        library_panel = QWidget()
-        library_layout = QVBoxLayout(library_panel)
-        
-        # Search box
-        search_layout = QHBoxLayout()
+        central_widget.setObjectName("central")
+        root = QHBoxLayout(central_widget)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # ================= Sidebar =================
+        self.sidebar = QWidget()
+        self.sidebar.setObjectName("sidebar")
+        self.sidebar.setFixedWidth(250)
+        side = QVBoxLayout(self.sidebar)
+        side.setContentsMargins(14, 14, 14, 10)
+        side.setSpacing(10)
+
+        self.nav_brand = QLabel("HiCloud")
+        self.nav_brand.setObjectName("brandTitle")
+        side.addWidget(self.nav_brand)
+
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search music...")
+        self.search_input.setClearButtonEnabled(True)
         self.search_input.returnPressed.connect(self.search_music)
-        self.search_btn = QToolButton()
-        self.search_btn.setIcon(self.style().standardIcon(QStyle.SP_FileDialogContentsView))
-        self.search_btn.clicked.connect(self.search_music)
-        search_layout.addWidget(self.search_input)
-        search_layout.addWidget(self.search_btn)
-        library_layout.addLayout(search_layout)
-        
-        # Library tree
+        side.addWidget(self.search_input)
+
         self.library_tree = QTreeWidget()
         self.library_tree.setHeaderHidden(True)
         self.library_tree.itemDoubleClicked.connect(self.on_library_item_clicked)
         self.library_tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.library_tree.customContextMenuRequested.connect(self.show_library_context_menu)
-        library_layout.addWidget(self.library_tree)
-        
-        # Library buttons
-        lib_buttons_layout = QHBoxLayout()
+        side.addWidget(self.library_tree, 1)
+
+        # Library actions (2x2 grid)
         self.add_folder_btn = QPushButton("Add Folder")
         self.add_files_btn = QPushButton("Add Files")
         self.add_cloud_btn = QPushButton("Add Cloud")
         self.scan_cloud_btn = QPushButton("Scan Cloud")
-        
+
         self.add_folder_btn.clicked.connect(self.add_folder)
         self.add_files_btn.clicked.connect(self.add_files)
         self.add_cloud_btn.clicked.connect(self.add_cloud)
         self.scan_cloud_btn.clicked.connect(self.scan_clouds)
-        
-        lib_buttons_layout.addWidget(self.add_folder_btn)
-        lib_buttons_layout.addWidget(self.add_files_btn)
-        lib_buttons_layout.addWidget(self.add_cloud_btn)
-        lib_buttons_layout.addWidget(self.scan_cloud_btn)
-        
-        library_layout.addLayout(lib_buttons_layout)
-        
-        # Right panel - player
-        player_panel = QWidget()
-        player_layout = QVBoxLayout(player_panel)
-        
-        # Playlist management
+
+        actions_grid = QGridLayout()
+        actions_grid.setSpacing(6)
+        actions_grid.addWidget(self.add_folder_btn, 0, 0)
+        actions_grid.addWidget(self.add_files_btn, 0, 1)
+        actions_grid.addWidget(self.add_cloud_btn, 1, 0)
+        actions_grid.addWidget(self.scan_cloud_btn, 1, 1)
+        side.addLayout(actions_grid)
+
+        root.addWidget(self.sidebar)
+
+        # ================= Stage =================
+        stage = QWidget()
+        stage_col = QVBoxLayout(stage)
+        stage_col.setContentsMargins(12, 12, 12, 8)
+        stage_col.setSpacing(10)
+
+        # Top bar: playlist selector + manage buttons
         playlist_header = QHBoxLayout()
-        
-        # Playlist selector
         self.playlist_selector = QComboBox()
         self.playlist_selector.currentIndexChanged.connect(self.on_playlist_changed)
         playlist_header.addWidget(self.playlist_selector, 1)
-        
-        # Playlist buttons
+
         playlist_new_btn = QToolButton()
-        playlist_new_btn.setIcon(self.style().standardIcon(QStyle.SP_FileIcon))
+        playlist_new_btn.setIcon(self._icon("plus", size=16))
         playlist_new_btn.setToolTip("New Playlist")
         playlist_new_btn.clicked.connect(self.new_playlist)
-        
+
         playlist_save_btn = QToolButton()
-        playlist_save_btn.setIcon(self.style().standardIcon(QStyle.SP_DialogSaveButton))
+        playlist_save_btn.setIcon(self._icon("save", size=16))
         playlist_save_btn.setToolTip("Save Playlist")
         playlist_save_btn.clicked.connect(self.save_current_playlist)
-        
+
         playlist_delete_btn = QToolButton()
-        playlist_delete_btn.setIcon(self.style().standardIcon(QStyle.SP_TrashIcon))
+        playlist_delete_btn.setIcon(self._icon("trash", size=16))
         playlist_delete_btn.setToolTip("Delete Playlist")
         playlist_delete_btn.clicked.connect(self.delete_current_playlist)
-        
+
         playlist_header.addWidget(playlist_new_btn)
         playlist_header.addWidget(playlist_save_btn)
         playlist_header.addWidget(playlist_delete_btn)
-        
-        player_layout.addLayout(playlist_header)
-        
-        # Playlist search/filter/sort controls
-        playlist_controls_layout = QHBoxLayout()
+        stage_col.addLayout(playlist_header)
+
+        # Filter / sort row
+        playlist_controls = QHBoxLayout()
         self.playlist_search_input = QLineEdit()
-        self.playlist_search_input.setPlaceholderText("Search playlist...")
+        self.playlist_search_input.setPlaceholderText("Filter playlist...")
+        self.playlist_search_input.setClearButtonEnabled(True)
         self.playlist_search_input.textChanged.connect(self.filter_playlist)
         self.playlist_sort_combo = QComboBox()
         self.playlist_sort_combo.addItems(["Original", "Title", "Artist", "Album"])
         self.playlist_sort_combo.currentIndexChanged.connect(self.sort_playlist)
-        playlist_controls_layout.addWidget(QLabel("Playlist:"))
-        playlist_controls_layout.addWidget(self.playlist_search_input)
-        playlist_controls_layout.addWidget(self.playlist_sort_combo)
-        player_layout.addLayout(playlist_controls_layout)
-        
-        # Playlist
+        playlist_controls.addWidget(self.playlist_search_input, 1)
+        playlist_controls.addWidget(self.playlist_sort_combo)
+        stage_col.addLayout(playlist_controls)
+
+        # Content row: now-playing card + playlist
+        content_row = QHBoxLayout()
+        content_row.setSpacing(12)
+
+        now_card = QFrame()
+        now_card.setObjectName("nowCard")
+        now_card.setFixedWidth(300)
+        card_col = QVBoxLayout(now_card)
+        card_col.setContentsMargins(16, 16, 16, 16)
+        card_col.setSpacing(8)
+
+        self.cover_art_label = QLabel()
+        self.cover_art_label.setObjectName("coverCard")
+        self.cover_art_label.setAlignment(Qt.AlignCenter)
+        self.cover_art_label.setFixedSize(256, 256)
+        card_col.addWidget(self.cover_art_label, 0, Qt.AlignHCenter)
+
+        self.track_title_label = QLabel("Title: -")
+        self.track_title_label.setObjectName("trackTitle")
+        self.track_artist_label = QLabel("Artist: -")
+        self.track_artist_label.setObjectName("trackDim")
+        self.track_album_label = QLabel("Album: -")
+        self.track_album_label.setObjectName("trackDim")
+        card_col.addWidget(self.track_title_label)
+        card_col.addWidget(self.track_artist_label)
+        card_col.addWidget(self.track_album_label)
+        card_col.addStretch(1)
+
+        self.set_default_cover()
+
+        content_row.addWidget(now_card)
+
         self.playlist_widget = QListWidget()
         self.playlist_widget.itemDoubleClicked.connect(self.play_selected)
         self.playlist_widget.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -603,103 +1017,18 @@ class MusicPlayer(QMainWindow):
         # Enable drag-and-drop reordering and multi-select
         self.playlist_widget.setDragDropMode(QListWidget.InternalMove)
         self.playlist_widget.setSelectionMode(QListWidget.ExtendedSelection)
-        player_layout.addWidget(self.playlist_widget)
-        
-        # Cover art and metadata display
-        meta_container = QWidget()
-        meta_layout = QHBoxLayout(meta_container)
-        
-        # Cover art with frame
-        cover_frame = QFrame()
-        cover_frame.setFixedSize(220, 220)  # Slightly larger to accommodate the frame
-        cover_frame.setStyleSheet("""
-            QFrame {
-                background-color: #2d2d2d;
-                border: 2px solid #444;
-                border-radius: 8px;
-                padding: 10px;
-            }
-        """)
-        
-        # Create a layout for the cover art
-        cover_layout = QVBoxLayout(cover_frame)
-        cover_layout.setContentsMargins(0, 0, 0, 0)
-        cover_layout.setSpacing(0)
-        
-        # Cover art label
-        self.cover_art_label = QLabel()
-        self.cover_art_label.setFixedSize(200, 200)  # Fixed size for cover art
-        self.cover_art_label.setAlignment(Qt.AlignCenter)
-        self.cover_art_label.setStyleSheet("""
-            QLabel {
-                background-color: #1a1a1a;
-                border: 1px solid #333;
-                border-radius: 4px;
-            }
-        """)
-        
-        # Add cover art to its frame
-        cover_layout.addWidget(self.cover_art_label)
-        
-        # Debug: Print cover art label info
-        print("\n=== Cover Art Label Info ===")
-        print(f"Size: {self.cover_art_label.size().width()}x{self.cover_art_label.size().height()}")
-        print(f"Is visible: {self.cover_art_label.isVisible()}")
-        print(f"Is enabled: {self.cover_art_label.isEnabled()}")
-        
-        # Set default cover art
-        self.set_default_cover()
-        
-        # Metadata text
-        meta_text_layout = QVBoxLayout()
-        self.track_title_label = QLabel("Title: -")
-        self.track_artist_label = QLabel("Artist: -")
-        self.track_album_label = QLabel("Album: -")
-        
-        # Style metadata labels
-        for label in [self.track_title_label, self.track_artist_label, self.track_album_label]:
-            label.setStyleSheet("font-size: 12px; margin: 2px;")
-        
-        meta_text_layout.addWidget(self.track_title_label)
-        meta_text_layout.addWidget(self.track_artist_label)
-        meta_text_layout.addWidget(self.track_album_label)
-        meta_text_layout.addStretch(1)
-        
-        # Add widgets to layout with proper spacing and alignment
-        meta_layout.addWidget(cover_frame, 0, Qt.AlignTop | Qt.AlignLeft)  # Add the framed cover art
-        meta_layout.addLayout(meta_text_layout)
-        meta_layout.setStretch(0, 0)  # Don't stretch cover art
-        meta_layout.setStretch(1, 1)  # Stretch metadata text
-        meta_layout.setSpacing(20)  # Add some spacing between cover art and text
-        
-        # Force update the layout
-        meta_layout.update()
-        meta_layout.activate()
-        
-        # Debug: Print layout info
-        print("\n=== Cover Art Layout Info ===")
-        print(f"Cover art in layout: {meta_layout.itemAt(0).widget() is self.cover_art_label}")
-        print(f"Layout contents rect: {meta_layout.contentsRect()}")
-        
-        # Create a container widget for metadata
-        meta_widget = QWidget()
-        meta_widget.setLayout(meta_layout)
-        meta_widget.setMinimumHeight(240)  # Increased to fit the cover art
-        meta_widget.setMaximumHeight(240)  # Fixed height to prevent layout jumps
-        player_layout.addWidget(meta_widget)
-        
-        # Force a style refresh
-        meta_widget.style().unpolish(meta_widget)
-        meta_widget.style().polish(meta_widget)
-        meta_widget.update()
-        
-        # Playback controls
-        controls_frame = QFrame()
-        controls_frame.setFrameShape(QFrame.StyledPanel)
-        controls_layout = QVBoxLayout(controls_frame)
-        
-        # Time and seek
+        content_row.addWidget(self.playlist_widget, 1)
+        stage_col.addLayout(content_row, 1)
+
+        # Transport bar
+        self.transport_bar = QFrame()
+        self.transport_bar.setObjectName("transportBar")
+        transport_col = QVBoxLayout(self.transport_bar)
+        transport_col.setContentsMargins(16, 10, 16, 12)
+        transport_col.setSpacing(6)
+
         seek_layout = QHBoxLayout()
+        seek_layout.setSpacing(10)
         self.position_label = QLabel("00:00")
         self.duration_label = QLabel("00:00")
         self.seek_slider = QSlider(Qt.Horizontal)
@@ -711,87 +1040,97 @@ class MusicPlayer(QMainWindow):
         self.seek_slider.mouseMoveEvent = self.seek_slider_mouse_move
         self.seek_slider.setSingleStep(1000)  # 1 second step
         self.seek_slider.setPageStep(10000)   # 10 second step
-        
+
         seek_layout.addWidget(self.position_label)
-        seek_layout.addWidget(self.seek_slider)
+        seek_layout.addWidget(self.seek_slider, 1)
         seek_layout.addWidget(self.duration_label)
-        controls_layout.addLayout(seek_layout)
-        
-        # Control buttons
+        transport_col.addLayout(seek_layout)
+
         buttons_layout = QHBoxLayout()
-        
-        # Use QToolButton with icons from QStyle
+        buttons_layout.setSpacing(8)
+        buttons_layout.addStretch(1)
+
         self.prev_btn = QToolButton()
-        self.prev_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaSkipBackward))
-        self.prev_btn.setIconSize(QSize(32, 32))
+        self.prev_btn.setIcon(self._icon("skip-back", size=24))
+        self.prev_btn.setIconSize(QSize(24, 24))
+        self.prev_btn.setFixedSize(44, 44)
         self.prev_btn.clicked.connect(self.prev_track)
-        
+
         self.play_btn = QToolButton()
-        self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
-        self.play_btn.setIconSize(QSize(48, 48))
+        self.play_btn.setObjectName("playBtn")
+        self.play_btn.setIcon(self._icon_play())
+        self.play_btn.setIconSize(QSize(28, 28))
+        self.play_btn.setFixedSize(56, 56)
         self.play_btn.clicked.connect(self.toggle_play)
-        
+
         self.stop_btn = QToolButton()
-        self.stop_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaStop))
-        self.stop_btn.setIconSize(QSize(32, 32))
+        self.stop_btn.setIcon(self._icon("stop", size=20))
+        self.stop_btn.setIconSize(QSize(20, 20))
+        self.stop_btn.setFixedSize(40, 40)
         self.stop_btn.clicked.connect(self.stop)
-        
+
         self.next_btn = QToolButton()
-        self.next_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaSkipForward))
-        self.next_btn.setIconSize(QSize(32, 32))
+        self.next_btn.setIcon(self._icon("skip-forward", size=24))
+        self.next_btn.setIconSize(QSize(24, 24))
+        self.next_btn.setFixedSize(44, 44)
         self.next_btn.clicked.connect(self.next_track)
-        
+
         self.shuffle_btn = QToolButton()
-        self.shuffle_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaSeekForward))
         self.shuffle_btn.setCheckable(True)
+        self.shuffle_btn.setIconSize(QSize(20, 20))
+        self.shuffle_btn.setFixedSize(40, 40)
         self.shuffle_btn.setToolTip("Shuffle: Play random song each time")
         self.shuffle_btn.clicked.connect(self.toggle_shuffle)
-        
+
         self.repeat_btn = QToolButton()
-        self.repeat_btn.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
         self.repeat_btn.setCheckable(True)
+        self.repeat_btn.setIconSize(QSize(20, 20))
+        self.repeat_btn.setFixedSize(40, 40)
         self.repeat_btn.clicked.connect(self.toggle_repeat)
-        
+        self._apply_toggle_icons()
+
         buttons_layout.addWidget(self.shuffle_btn)
         buttons_layout.addWidget(self.prev_btn)
         buttons_layout.addWidget(self.play_btn)
         buttons_layout.addWidget(self.stop_btn)
         buttons_layout.addWidget(self.next_btn)
         buttons_layout.addWidget(self.repeat_btn)
-        
-        # Volume
-        volume_layout = QHBoxLayout()
-        volume_label = QLabel("Volume:")
+        buttons_layout.addStretch(1)
+
+        # Volume (icon + compact slider in the transport bar)
+        self.volume_icon = QToolButton()
+        self.volume_icon.setIcon(self._icon("volume", size=18))
+        self.volume_icon.setIconSize(QSize(18, 18))
+        self.volume_icon.setFixedSize(32, 32)
+        self.volume_icon.setEnabled(False)  # purely a visual marker
+
         self.volume_slider = QSlider(Qt.Horizontal)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(70)
+        self.volume_slider.setFixedWidth(150)
         self.volume_slider.valueChanged.connect(self.set_volume)
-        
-        volume_layout.addWidget(volume_label)
-        volume_layout.addWidget(self.volume_slider)
-        
-        buttons_layout.addLayout(volume_layout)
-        controls_layout.addLayout(buttons_layout)
-        
-        player_layout.addWidget(controls_frame)
-        
-        # Add panels to main layout with splitter
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.addWidget(library_panel)
-        splitter.addWidget(player_panel)
-        splitter.setSizes([300, 700])  # Set initial sizes
-        
-        main_layout.addWidget(splitter)
-        
+
+        volume_h = QHBoxLayout()
+        volume_h.setSpacing(6)
+        volume_h.setContentsMargins(20, 0, 0, 5)
+        volume_h.addWidget(self.volume_icon)
+        volume_h.addWidget(self.volume_slider)
+        buttons_layout.addLayout(volume_h)
+
+        transport_col.addLayout(buttons_layout)
+        stage_col.addWidget(self.transport_bar)
+
+        root.addWidget(stage, 1)
+
         # Status bar with progress bar
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        
+
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setFixedWidth(200)
         self.progress_bar.hide()
-        
+
         self.status_bar.addPermanentWidget(self.progress_bar)
 
     def _run_on_ui(self, fn):
@@ -812,17 +1151,24 @@ class MusicPlayer(QMainWindow):
             self.play_cloud_file(cloud_idx, file_idx)
         else:
             path = self.playlist[self.current_index]
-            # Set up and play the media
-            url = QUrl.fromLocalFile(os.path.abspath(path))
-            self.player.setSource(url)
-            self.player.play()
+            # Local playback: detach stream-retry handlers installed by a
+            # previous cloud-stream attempt so their closures cannot hijack
+            # this track's media signals (EndOfMedia auto-advance, etc.)
+            self._disconnect_stream_handlers()
+            src = os.path.abspath(path)
+            if self._eq_active():
+                self._engine_start('file', src)
+            else:
+                # Set up and play the media
+                self.player.setSource(QUrl.fromLocalFile(src))
+                self.player.play()
             
             # Update UI elements
             self.playlist_widget.setCurrentRow(self.current_index)
             item = self.playlist_widget.item(self.current_index)
             if item:
                 self.playlist_widget.scrollToItem(item)
-            self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+            self.play_btn.setIcon(self._icon_pause())
             
             # Force an immediate metadata update
             QTimer.singleShot(100, self.update_metadata_display)
@@ -836,22 +1182,38 @@ class MusicPlayer(QMainWindow):
         self.play()
     
     def toggle_play(self):
+        if getattr(self, '_using_engine', False):
+            if self.eq_engine.is_playing():
+                self.eq_engine.pause()
+            else:
+                self.eq_engine.resume()
+            # Update tray UI
+            if hasattr(self, 'update_tray_ui'):
+                self.update_tray_ui()
+            return
         if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             self.player.pause()
-            self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+            self.play_btn.setIcon(self._icon_play())
         else:
             if self.player.mediaStatus() == QMediaPlayer.MediaStatus.NoMedia and self.current_index >= 0:
                 self.play()
             else:
                 self.player.play()
-                self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+                self.play_btn.setIcon(self._icon_pause())
         # Update tray UI
         if hasattr(self, 'update_tray_ui'):
             self.update_tray_ui()
     
     def stop(self):
-        self.player.stop()
-        self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+        if getattr(self, '_using_engine', False):
+            self._using_engine = False
+            self._engine_source = ('', '', '')
+            self.eq_engine.stop()
+            self.seek_slider.setValue(0)
+            self.position_label.setText("0:00")
+        else:
+            self.player.stop()
+        self.play_btn.setIcon(self._icon_play())
         # Update tray UI
         if hasattr(self, 'update_tray_ui'):
             self.update_tray_ui()
@@ -912,10 +1274,7 @@ class MusicPlayer(QMainWindow):
                     path = os.path.abspath(item['path'])
             if path and os.path.exists(path):
                 folder = os.path.dirname(path)
-                try:
-                    subprocess.Popen(["xdg-open", folder])
-                except Exception:
-                    pass
+                open_folder(folder)
         except Exception:
             pass
 
@@ -931,12 +1290,21 @@ class MusicPlayer(QMainWindow):
         self.duration_label.setText(format_time(duration))
     
     def on_slider_pressed(self):
+        if getattr(self, '_using_engine', False):
+            self._engine_was_playing = self.eq_engine.is_playing()
+            if self._engine_was_playing:
+                self.eq_engine.pause()
+            return
         # Store the current state to restore if needed
         self.was_playing = self.player.playbackState() == QMediaPlayer.PlayingState
         if self.was_playing:
             self.player.pause()
     
     def on_slider_released(self):
+        if getattr(self, '_using_engine', False):
+            if getattr(self, '_engine_was_playing', False):
+                self.eq_engine.resume()
+            return
         # Restore playback state if it was playing
         if hasattr(self, 'was_playing') and self.was_playing:
             self.player.play()
@@ -970,6 +1338,10 @@ class MusicPlayer(QMainWindow):
         # Make sure position is within valid range
         if position < 0:
             position = 0
+        if getattr(self, '_using_engine', False):
+            self.seek_slider.setValue(position)
+            self.eq_engine.seek(int(position))
+            return
         max_pos = self.player.duration()
         if position > max_pos and max_pos > 0:
             position = max_pos
@@ -984,21 +1356,33 @@ class MusicPlayer(QMainWindow):
     
     def set_volume(self, volume):
         self.audio_output.setVolume(volume / 100.0)
+        if getattr(self, '_using_engine', False):
+            self.eq_engine.set_volume(volume / 100.0)
     
     def toggle_shuffle(self, enabled):
-        # Only update the button style and state
+        # Accent highlight handled by stylesheet property (theme.py accentActive)
+        self.shuffle_btn.setProperty("accentActive", enabled)
+        self.shuffle_btn.style().unpolish(self.shuffle_btn)
+        self.shuffle_btn.style().polish(self.shuffle_btn)
+        self.shuffle_btn.setChecked(enabled)
+        self._apply_toggle_icons()
+        # keep the Playback menu checkbox in sync (guard against recursion)
+        if hasattr(self, 'shuffle_action') and self.shuffle_action.isChecked() != enabled:
+            self.shuffle_action.setChecked(enabled)
         if enabled:
-            self.shuffle_btn.setStyleSheet("background-color: #007bff; color: white;")
             self.status_bar.showMessage("Shuffle mode enabled: random song will play after each track.")
         else:
-            self.shuffle_btn.setStyleSheet("")
             self.status_bar.showMessage("Shuffle mode disabled: normal order.")
         self.highlight_current_track()
     
     def toggle_repeat(self, enabled):
-        self.repeat_btn.setStyleSheet(
-            "background-color: #007bff; color: white;" if enabled else ""
-        )
+        self.repeat_btn.setProperty("accentActive", enabled)
+        self.repeat_btn.style().unpolish(self.repeat_btn)
+        self.repeat_btn.style().polish(self.repeat_btn)
+        self.repeat_btn.setChecked(enabled)
+        self._apply_toggle_icons()
+        if hasattr(self, 'repeat_action') and self.repeat_action.isChecked() != enabled:
+            self.repeat_action.setChecked(enabled)
     
     def on_media_status_changed(self, status):
         # Update status bar with current media status
@@ -1091,10 +1475,10 @@ class MusicPlayer(QMainWindow):
         if status in [QMediaPlayer.MediaStatus.LoadedMedia, 
                      QMediaPlayer.MediaStatus.BufferedMedia,
                      QMediaPlayer.MediaStatus.BufferingMedia]:
-            self.play_btn.setIcon(self.style().standardIcon(
-                QStyle.SP_MediaPause if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState 
-                else QStyle.SP_MediaPlay
-            ))
+            self.play_btn.setIcon(self._icon_pause()
+                if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState 
+                else self._icon_play()
+            )
 
     def retry_current_playback(self):
         """Retry playing the current track, with a maximum number of retries."""
@@ -1133,6 +1517,97 @@ class MusicPlayer(QMainWindow):
                     # If this was the last track, just stop
                     self.stop()
     
+    # === Equalizer routing ===
+    def _eq_gains(self):
+        raw = self.settings.value("audio/eq_gains", "0,0,0,0,0,0,0,0,0,0")
+        try:
+            parts = [float(x) for x in str(raw).split(",")]
+        except (ValueError, TypeError):
+            parts = []
+        if len(parts) != 10:
+            parts = [0.0] * 10
+        return parts
+
+    def _eq_active(self):
+        """EQ drives playback only when enabled and gains are non-neutral."""
+        try:
+            enabled = self.settings.value("audio/eq_enabled", False, type=bool)
+        except Exception:
+            enabled = False
+        if not enabled:
+            return False
+        return any(abs(g) > 0.05 for g in self._eq_gains())
+
+    def _engine_start(self, kind, src, name=''):
+        """Route the current track through the EQ engine (decoder→EQ→sink)."""
+        self._disconnect_stream_handlers()
+        self._using_engine = True
+        self._engine_source = (kind, src, name)
+        self.eq_engine.play(src)
+
+    def _on_engine_state(self, state):
+        try:
+            self.play_btn.setIcon(self._icon_pause()
+                                  if state == 'playing' else self._icon_play())
+        except Exception:
+            pass
+
+    def _on_engine_track_finished(self):
+        # Mirror the native EndOfMedia auto-advance rules.
+        self._using_engine = False
+        self._engine_source = ('', '', '')
+        if self.repeat_btn.isChecked():
+            self.play()
+        elif self.shuffle_btn.isChecked() and len(self.playlist) > 1:
+            import random
+            next_index = self.current_index
+            while next_index == self.current_index and len(self.playlist) > 1:
+                next_index = random.randint(0, len(self.playlist) - 1)
+            self.current_index = next_index
+            self.play()
+        elif self.current_index < len(self.playlist) - 1:
+            self.next_track()
+
+    def _engine_playback_error(self, msg):
+        """Decoder/sink failure on the EQ path: replay via the native player."""
+        if not getattr(self, '_using_engine', False):
+            return
+        self._using_engine = False
+        kind, src, name = self._engine_source
+        self._engine_source = ('', '', '')
+        self.status_bar.showMessage(
+            "Equalizer unavailable for this track — using standard playback", 4000)
+        try:
+            if kind == 'url' and src:
+                self._play_stream(src, name)
+            elif kind == 'file' and src:
+                self.player.setSource(QUrl.fromLocalFile(src))
+                self.player.play()
+            self.play_btn.setIcon(self._icon_pause())
+        except Exception:
+            pass
+
+    def open_eq_dialog(self):
+        from dialogs import EqualizerDialog
+
+        gains = self._eq_gains()
+        try:
+            enabled = self.settings.value("audio/eq_enabled", False, type=bool)
+        except Exception:
+            enabled = False
+        preset = str(self.settings.value("audio/eq_preset", "Flat"))
+
+        def apply_cb(g, on):
+            self.settings.setValue("audio/eq_enabled", bool(on))
+            self.settings.setValue("audio/eq_gains",
+                                   ",".join(f"{v:g}" for v in g))
+            self.eq_engine.set_gains(g)   # live when playing; harmless idle
+
+        dlg = EqualizerDialog(self, gains, enabled, preset, apply_cb)
+        dlg.exec()
+        self.settings.setValue("audio/eq_preset", dlg.preset_combo.currentText())
+        self.status_bar.showMessage("Equalizer settings saved", 3000)
+
     # === Cloud Methods ===
     def play_cloud_file(self, cloud_idx, file_idx):
         try:
@@ -1151,35 +1626,39 @@ class MusicPlayer(QMainWindow):
             self.status_bar.showMessage(f"Preparing to stream: {file_name}...")
             QApplication.processEvents()  # Update UI
             
-            # Handle different cloud types
-            if cloud_type == "webdav":
-                auth_user = cloud["config"].get("webdav_login", "")
-                auth_pass = cloud["config"].get("webdav_password", "")
-                media_url = QUrl(url)
-                # If credentials not present in URL, set via QUrl to safely encode
-                if auth_user and auth_pass and not media_url.userName():
-                    media_url.setUserName(auth_user)
-                    media_url.setPassword(auth_pass)
-            else:
-                media_url = QUrl(url)
+            # Track info used by every branch (provider catalogs carry it)
+            base_name = os.path.splitext(file_name)[0]
+            info_artist = file_info.get("artist") or "-"
+            info_album = file_info.get("album") or "-"
+
+            self.track_title_label.setText(f"Title: {base_name}")
+            self.track_artist_label.setText(f"Artist: {info_artist}")
+            self.track_album_label.setText(f"Album: {info_album}")
             
-            # Stop current playback asynchronously
             self.player.stop()
             self.player.setSource(QUrl())
             QApplication.processEvents()  # Process events to ensure clean state
 
-            # Stream directly using the resilient streaming helper (with retry)
-            stream_url = str(media_url.toString())
-            self._play_stream(stream_url, os.path.basename(file_name))
+            if cloud_type == "webdav":
+                # Nextcloud/ownCloud DAV serves files only behind Basic auth,
+                # which the streaming backend cannot attach to its GET. Route
+                # through the authenticated download-then-play path instead
+                # (streaming had failed with endless retries).
+                auth_user = cloud["config"].get("webdav_login", "")
+                auth_pass = cloud["config"].get("webdav_password", "")
+                self._download_and_play(
+                    url, cloud_type, cloud["config"], file_name,
+                    auth=(auth_user, auth_pass) if auth_user else None,
+                )
+            else:
+                # Ampache/Subsonic embed their session auth in the URL itself
+                # (action=stream / stream.view); stream directly.
+                if self._eq_active():
+                    self._engine_start('url', url, file_name)
+                else:
+                    self._play_stream(url, file_name)
 
-            # Update UI with track information
-            base_name = os.path.splitext(file_name)[0]
-            self.track_title_label.setText(f"Title: {base_name}")
-            self.track_artist_label.setText("Artist: -")
-            self.track_album_label.setText("Album: -")
-            
-            
-            self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+            self.play_btn.setIcon(self._icon_pause())
             # Update metadata shortly after starting stream
             QTimer.singleShot(200, self.update_metadata_display)
             
@@ -1371,21 +1850,14 @@ class MusicPlayer(QMainWindow):
             if not hasattr(self, '_stream_retry'):
                 self._reset_stream_retry()
 
-            # Clear any existing media and handlers
-            try:
-                self.player.errorOccurred.disconnect()
-            except Exception:
-                pass
-            try:
-                self.player.mediaStatusChanged.disconnect()
-            except Exception:
-                pass
-
             # Stop and reset source first to avoid race conditions
             self.player.stop()
             self.player.setSource(QUrl())
 
-            # Set up the media content correctly for Qt6
+            # Disconnect ONLY our stream-specific handlers, then install fresh
+            # ones. The app-wide on_media_status_changed subscription (auto
+            # advance / shuffle / repeat) must keep working afterwards.
+            self._disconnect_stream_handlers()
             self.player.setSource(QUrl(url))
 
             # Error handling with retry
@@ -1402,9 +1874,10 @@ class MusicPlayer(QMainWindow):
             try:
                 # Connect with the two-arg signature if available; PySide will adapt as needed
                 self.player.errorOccurred.connect(handle_error)
+                self._stream_error_handler = handle_error
             except Exception:
                 # Fallback: if signature mismatch, still attempt reconnect on media status
-                pass
+                self._stream_error_handler = None
 
             # Media status handling for stalled/invalid/end
             def handle_media_status(status):
@@ -1424,6 +1897,7 @@ class MusicPlayer(QMainWindow):
                     self._schedule_stream_retry(url, display_name, immediate=True)
 
             self.player.mediaStatusChanged.connect(handle_media_status)
+            self._stream_status_handler = handle_media_status
 
             # Start playback
             self.player.play()
@@ -1434,6 +1908,22 @@ class MusicPlayer(QMainWindow):
             self.status_bar.showMessage(error_msg)
             # Try again with backoff
             self._schedule_stream_retry(url, display_name)
+
+    def _disconnect_stream_handlers(self):
+        """Disconnect only the stream-specific slots installed by _play_stream,
+        never the app-wide on_media_status_changed subscription."""
+        handlers = [
+            ('_stream_error_handler', self.player.errorOccurred),
+            ('_stream_status_handler', self.player.mediaStatusChanged),
+        ]
+        for attr, signal in handlers:
+            handler = getattr(self, attr, None)
+            if handler is not None:
+                try:
+                    signal.disconnect(handler)
+                except Exception:
+                    pass
+            setattr(self, attr, None)
 
     def cancel_download(self):
         if hasattr(self, 'download_worker') and hasattr(self.download_worker, 'abort'):
@@ -1467,13 +1957,15 @@ class MusicPlayer(QMainWindow):
                     raise FileNotFoundError(f"File not found at absolute path: {abs_path}")
                     
                 url = QUrl.fromLocalFile(abs_path)
-                self.player.setSource(url)
-                
-                # Update UI
-                self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
-                
-                # Start playback with a small delay to prevent race conditions
-                QTimer.singleShot(100, self.player.play)
+                if self._eq_active():
+                    self._engine_start('file', abs_path, file_name)
+                    self.play_btn.setIcon(self._icon_pause())
+                else:
+                    self.player.setSource(url)
+                    # Update UI
+                    self.play_btn.setIcon(self._icon_pause())
+                    # Start playback with a small delay to prevent race conditions
+                    QTimer.singleShot(100, self.player.play)
                 
                 # Update the current track in the playlist if it exists
                 if self.playlist_widget and hasattr(self, 'current_index') and 0 <= self.current_index < self.playlist_widget.count():
@@ -1711,8 +2203,8 @@ class MusicPlayer(QMainWindow):
         """Update the library tree with current data"""
         self.library_tree.clear()
         self.library_tree.setSelectionMode(QTreeWidget.ExtendedSelection)
-        folder_icon = self.style().standardIcon(QStyle.SP_DirIcon)
-        file_icon = self.style().standardIcon(QStyle.SP_FileIcon)
+        folder_icon = self._icon("folder", role="dim", size=16)
+        file_icon = self._icon("music", role="dim", size=16)
         # Local folders section
         local_root = QTreeWidgetItem(self.library_tree, ["Local Media"])
         local_root.setExpanded(True)
@@ -1964,20 +2456,25 @@ class MusicPlayer(QMainWindow):
     
     def add_cloud(self):
         """Add or manage cloud storage accounts"""
+        # Snapshot BEFORE constructing the dialog: AddCloudDialog.__init__ can
+        # (and, for prefilled edits, does) mutate the shared list even before exec().
+        try:
+            import json as _json
+            snapshot = _json.dumps(self.clouds, sort_keys=True, default=str)
+        except Exception:
+            snapshot = sorted((c.get("name", ""), c.get("type", "")) for c in self.clouds)
         dlg = CloudAccountsDialog(self, self.clouds)
-        if dlg.exec() == QDialog.Accepted:
-            data = dlg.get_data()
-            if data["type"] != "unknown":
-                self.clouds.append({
-                    "type": data["type"], 
-                    "name": data["name"], 
-                    "config": data["config"], 
-                    "files": [],
-                    "last_sync": "Never"
-                })
-                self.save_clouds()
-                self.update_library_tree()
-                self.status_bar.showMessage(f"Added {data['type']} account: {data['name']}")
+        dlg.exec()
+        # The dialog edits the shared clouds list in place (add/edit/remove,
+        # including config-credential edits); persist on any change.
+        try:
+            changed = _json.dumps(self.clouds, sort_keys=True, default=str) != snapshot
+        except Exception:
+            changed = True
+        if changed:
+            self.save_clouds()
+            self.update_library_tree()
+            self.status_bar.showMessage(f"Cloud accounts updated ({len(self.clouds)})")
     
     def scan_clouds(self):
         if not self.clouds:
@@ -1986,11 +2483,8 @@ class MusicPlayer(QMainWindow):
         self.scan_cloud_btn.setEnabled(False)
         self.scan_threads = []
         self.scan_workers = []
-        self.progress_dialog = QProgressDialog("Scanning cloud accounts...", "Cancel", 0, 100, self)
-        self.progress_dialog.setWindowTitle("Cloud Scan Progress")
-        self.progress_dialog.setWindowModality(Qt.WindowModal)
-        self.progress_dialog.setValue(0)
-        self.progress_dialog.canceled.connect(self.cancel_cloud_scan)
+        self._scan_errors = []
+        self.status_bar.showMessage(f"Starting cloud scan ({len(self.clouds)} accounts)…")
         for idx, cloud in enumerate(self.clouds):
             thread = QThread()
             worker = ScanCloudWorker(idx, cloud)
@@ -2004,33 +2498,38 @@ class MusicPlayer(QMainWindow):
             thread.started.connect(worker.run)
             thread.finished.connect(lambda w=worker: w.deleteLater())
             thread.finished.connect(thread.deleteLater)
+            # handle_scan_complete runs BEFORE thread.quit is processed, so the
+            # not-running check needs a second chance on real thread exit.
+            thread.finished.connect(self._check_all_scans_complete)
             self.scan_threads.append(thread)
-        self.status_bar.showMessage("Starting cloud scan...")
         for thread in self.scan_threads:
             thread.start()
+
     def update_scan_progress(self, progress, status, cloud_name):
-        if hasattr(self, 'progress_dialog') and self.progress_dialog:
-            self.progress_dialog.setValue(progress)
-            self.progress_dialog.setLabelText(f"{cloud_name}: {status}")
-        QApplication.processEvents()
+        self.status_bar.showMessage(f"Scanning {cloud_name}: {status}", 0)
+
     def handle_scan_complete(self, cloud_idx, files):
-        if cloud_idx >= 0 and cloud_idx < len(self.clouds):
-            self.clouds[cloud_idx]["files"] = files
-            self.save_clouds()
-            self.update_library_tree()
-        self._check_all_scans_complete()
+        try:
+            if 0 <= cloud_idx < len(self.clouds):
+                self.clouds[cloud_idx]["files"] = files
+                self.save_clouds()
+                self.update_library_tree()
+                name = self.clouds[cloud_idx]["name"]
+                self.status_bar.showMessage(f"Scan: {name} — {len(files)} tracks", 0)
+        finally:
+            self._check_all_scans_complete()
+
     def handle_scan_error(self, cloud_idx, error_msg):
-        if cloud_idx >= 0 and cloud_idx < len(self.clouds):
-            cloud_name = self.clouds[cloud_idx]["name"]
-            QMessageBox.critical(self, "Cloud Scan Error", f"{cloud_name}:\n\n{error_msg}")
+        name = self.clouds[cloud_idx]["name"] if 0 <= cloud_idx < len(self.clouds) else "?"
+        self._scan_errors.append((name, error_msg))
+        self.status_bar.showMessage(f"Scan: {name} failed — {str(error_msg)[:120]}", 0)
         self._check_all_scans_complete()
+
     def cancel_cloud_scan(self):
         for worker in getattr(self, 'scan_workers', []):
             if hasattr(worker, 'abort'):
                 worker.abort()
         self.status_bar.showMessage("Cloud scan canceled")
-        if hasattr(self, 'progress_dialog') and self.progress_dialog:
-            self.progress_dialog.close()
     
     def new_playlist(self):
         """Create a new playlist"""
@@ -2185,16 +2684,14 @@ class MusicPlayer(QMainWindow):
     def save_media_folders(self):
         """Save media folders to file"""
         try:
-            with open(MEDIA_FOLDERS_FILE, "w") as f:
-                json.dump(self.media_folders, f)
+            atomic_write_text(MEDIA_FOLDERS_FILE, json.dumps(self.media_folders))
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Could not save media folders: {e}")
     
     def save_clouds(self):
         """Save cloud accounts to file"""
         try:
-            with open(CLOUD_FILES_FILE, "w") as f:
-                json.dump(self.clouds, f)
+            atomic_write_text(CLOUD_FILES_FILE, json.dumps(self.clouds))
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Could not save cloud accounts: {e}")
     
@@ -2202,13 +2699,42 @@ class MusicPlayer(QMainWindow):
         """Save all playlists to file"""
         try:
             playlists_data = [p.to_dict() for p in self.playlists]
-            with open(PLAYLISTS_FILE, "w") as f:
-                json.dump(playlists_data, f)
+            atomic_write_text(PLAYLISTS_FILE, json.dumps(playlists_data))
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Could not save playlists: {e}")
 
     def closeEvent(self, event):
+        # Stop the EQ engine before the native player (it owns a QAudioSink
+        # and QAudioDecoder that must be torn down cleanly).
+        try:
+            self.eq_engine.stop()
+        except Exception:
+            pass
         self.player.stop()
+        # Release the decoder BEFORE teardown: the FFmpeg backend crashes at
+        # exit when the app closes while media is still attached (exit code 1).
+        try:
+            self.player.setSource(QUrl())
+        except Exception:
+            pass
+        # Abort any in-flight cloud download and flush its thread
+        try:
+            if getattr(self, 'download_worker', None) is not None:
+                self.download_worker.abort()
+        except Exception:
+            pass
+        try:
+            if getattr(self, 'download_thread', None) is not None:
+                self.download_thread.quit()
+                self.download_thread.wait(2000)
+        except Exception:
+            pass
+        # Abort pending cover-art workers
+        try:
+            if hasattr(self, 'meta'):
+                self.meta.stop()
+        except Exception:
+            pass
         # Stop web server if running
         if self.web_server:
             self.web_server.stop()
@@ -2226,10 +2752,6 @@ class MusicPlayer(QMainWindow):
         self.save_media_folders()
         self.save_clouds()
         self.save_playlists()
-        
-        # Clean up web server if running
-        if hasattr(self, 'web_server') and self.web_server:
-            self.web_server.shutdown()
         
         # Clean up any remaining temp files in the temp directory
         try:
@@ -2315,7 +2837,7 @@ class MusicPlayer(QMainWindow):
                 for playlist in self.playlists:
                     playlist_action = add_to_menu.addAction(playlist.name)
                     playlist_action.triggered.connect(
-                        lambda checked, p=playlist, d=data: self.add_file_to_playlist(p, d)
+                        lambda checked, p=playlist, d=data: self.add_file_to_specific_playlist(p, d)
                     )
         if not context_menu.isEmpty():
             context_menu.exec(self.library_tree.viewport().mapToGlobal(position))
@@ -2496,25 +3018,6 @@ class MusicPlayer(QMainWindow):
         
         self.status_bar.showMessage(f"Added folder to playlist: {playlist.name}")
     
-    def add_file_to_specific_playlist(self, playlist, data):
-        """Add a file to a specific playlist"""
-        original_playlist = self.playlist.copy()
-        original_index = self.current_index
-        
-        # Temporarily clear playlist to collect the file
-        self.playlist = []
-        self.add_file_to_playlist(data)
-        
-        # Add the file to the specific playlist
-        if self.playlist and self.playlist[0] not in playlist.items:
-            playlist.items.append(self.playlist[0])
-        
-        # Save playlists
-        playlist.modified = datetime.now().isoformat()
-        self.save_playlists()
-        
-        # Restore original playlist
-
     def highlight_current_track(self):
         for i in range(self.playlist_widget.count()):
             item = self.playlist_widget.item(i)
@@ -2571,15 +3074,23 @@ class MusicPlayer(QMainWindow):
 
     
     def _check_all_scans_complete(self):
-        all_done = all(not thread.isRunning() for thread in getattr(self, 'scan_threads', []))
-        if all_done:
-            self.scan_cloud_btn.setEnabled(True)
-            self.status_bar.showMessage("Cloud scan complete")
-            if hasattr(self, 'progress_dialog') and self.progress_dialog:
-                self.progress_dialog.close()
-            # Clear references
-            self.scan_threads = []
-            self.scan_workers = []
+        threads = list(getattr(self, 'scan_threads', []))
+        if not threads:
+            return
+        # Threads may not have finished their quit yet — recheck shortly.
+        if any(thread.isRunning() for thread in threads):
+            QTimer.singleShot(100, self._check_all_scans_complete)
+            return
+        self.scan_cloud_btn.setEnabled(True)
+        self.scan_threads = []
+        self.scan_workers = []
+        errors = list(getattr(self, '_scan_errors', []))
+        if errors:
+            summary = "\n\n".join(f"{name}: {msg}" for name, msg in errors[:6])
+            QMessageBox.critical(self, "Cloud Scan Finished With Errors",
+                                 f"{len(errors)} account scan(s) failed:\n\n{summary}")
+        else:
+            self.status_bar.showMessage("Cloud scan complete", 3000)
 
     def get_all_playlists(self):
         # Returns a list of dicts: {id, name}

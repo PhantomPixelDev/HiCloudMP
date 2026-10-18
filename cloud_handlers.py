@@ -314,8 +314,14 @@ class WebDAVHandler(CloudHandlerBase):
                     
                     # Only process music files
                     if is_music_file(item):
-                        # Generate proper URL for the file
+                        # Generate proper URL for the file. webdav_root is the
+                        # path scope the DAV client operates in (e.g.
+                        # /remote.php/dav/files/Admin); the static file URL must
+                        # carry it or the player's GET 404s.
                         base_url = self.config["webdav_hostname"].rstrip("/")
+                        root = (self.config.get("webdav_root") or "/").strip("/")
+                        if root and not base_url.endswith(root):
+                            base_url = f"{base_url}/{root}"
                         file_url = f"{base_url}/{full_path}"
                         
                         # Extract basic metadata from filename
@@ -354,5 +360,233 @@ class WebDAVHandler(CloudHandlerBase):
 
 # Dictionary mapping cloud types to their handler classes
 CLOUD_TYPES = {
-    "webdav": WebDAVHandler
+    "webdav": WebDAVHandler,
+    "ampache": None,   # replaced below; import-time registration keeps all in one module
+    "subsonic": None,
 }
+
+import hashlib
+import random
+import string
+import time
+import urllib.parse
+import xml.etree.ElementTree as ET
+from io import BytesIO
+import requests
+
+_AMPACHE_API_TIMEOUT = (10, 30)
+
+
+class _HTTPCloudHandler(CloudHandlerBase):
+    """Shared plumbing for HTTP catalog APIs (Ampache / Subsonic)."""
+
+    def __init__(self, config):
+        super().__init__(config)
+        self.total_items = 0
+        self.processed_items = 0
+
+    def _http_get(self, url, params=None, timeout=_AMPACHE_API_TIMEOUT):
+        return requests.get(url, params=params, timeout=timeout)
+
+    def _add_song(self, path_extra=None, path=None, url=None, name="",
+                  artist="", album="", cover_url=None):
+        entry = {"path": path or "", "url": url or "", "name": name,
+                 "artist": artist or "Unknown Artist",
+                 "album": album or "Unknown Album"}
+        if cover_url:
+            entry["cover_url"] = cover_url
+        if path_extra:
+            entry.update(path_extra)
+        self.files.append(entry)
+
+
+class AmpacheHandler(_HTTPCloudHandler):
+    """Ampache-compatible API (Nextcloud Music app and Ampache itself).
+
+    Auth: auth = SHA256(timestamp + SHA256(password)) with user + timestamp
+    params — the passphrase construction used by Nextcloud Music (verified
+    empirically against the user's instance; also valid for Ampache >= v5).
+    """
+
+    def __init__(self, config):
+        super().__init__(config)
+        self.token = None
+        self.endpoint = config.get("ampache_url", "").rstrip("/")
+        if self.endpoint and not self.endpoint.endswith("server/xml.server.php"):
+            self.endpoint += "/server/xml.server.php"
+
+    def scan(self):
+        self.files = []
+        self.status_message = "Connecting to Ampache..."
+        if not self.endpoint:
+            raise Exception("Ampache URL is not configured")
+
+        # --- handshake: sha256(sha256(password) + timestamp) ---
+        ts = str(int(time.time()))
+        key = hashlib.sha256(self.config.get("ampache_password", "").encode()).hexdigest()
+        passphrase = hashlib.sha256((ts + key).encode()).hexdigest()
+        resp = self._http_get(self.endpoint, params={
+            "action": "handshake", "auth": passphrase, "user": self.config.get("ampache_user", ""),
+            "timestamp": ts, "version": "6", "client": "HiCloudMP",
+        })
+        resp.raise_for_status()
+        root = ET.fromstring(resp.text)
+        token_el = root.find("./auth")
+        if token_el is None:
+            err = root.find("./error/errorMessage")
+            msg = err.text if err is not None else "handshake failed"
+            raise Exception(f"Ampache handshake failed: {msg}")
+        self.token = token_el.text
+        self._api_params = {"auth": self.token, "user": self.config.get("ampache_user", "")}
+
+        # --- paginate the catalog ---
+        limit = 1000
+        offset = 0
+        songs_xml = None
+        while True:
+            r = self._http_get(self.endpoint, params={
+                "action": "songs", "limit": limit, "offset": offset, **self._api_params,
+            })
+            r.raise_for_status()
+            sroot = ET.fromstring(r.text)
+            songs = sroot.findall("./song")
+            if not songs:
+                break
+            for s in songs:
+                # <url> carries a ready-to-use stream URL (action=stream)
+                url = s.findtext("./url") or ""
+                if url and not url.strip():
+                    url = ""
+                title = s.findtext("./title") or "Untitled"
+                artist = (s.findtext("./artist/name") or
+                          s.findtext("./artist") or "Unknown Artist")
+                album = (s.findtext("./album/name") or
+                         s.findtext("./album") or "Unknown Album")
+                album_el = s.find("./album")
+                album_id = album_el.get("id") if album_el is not None else None
+                # Dedicated artwork: <art> URL when the server provides one, else
+                # Ampache get_art on the album with the session token.
+                art_url = s.findtext("./art") or ""
+                if not art_url and album_id:
+                    art_url = (self.endpoint + "?" + urllib.parse.urlencode({
+                        "action": "get_art", "auth": self.token, "type": "album",
+                        "id": album_id, "size": 480, "client": "HiCloudMP",
+                    }))
+                path = f"{artist}/{album}/{title}"
+                self._add_song(path=path, url=url, name=title, artist=artist, album=album,
+                               cover_url=art_url or None)
+                self.processed_items += 1
+                self.current_file = title
+                self.status_message = f"Ampache: fetched {self.processed_items} songs"
+            if len(songs) < limit:
+                break
+            offset += limit
+
+        self.status_message = f"Ampache scan complete. Found {len(self.files)} songs."
+
+    def get_links(self):
+        return [f for f in self.files if f.get("url")]
+
+
+class SubsonicHandler(_HTTPCloudHandler):
+    """Subsonic-compatible API (Nextcloud Music app "Subsonic" address).
+
+    Auth: legacy plain-password param u/p (token t/s auth rejected by
+    Nextcloud Music with error 41 "Token-based authentication not
+    supported") — verified empirically on the user's instance.
+    """
+
+    _API_VERSION = "1.16.1"
+    _CLIENT = "HiCloudMP"
+
+    def __init__(self, config):
+        super().__init__(config)
+        base = config.get("subsonic_url", "").rstrip("/")
+        self.rest_base = base if base.endswith("/rest") else base + "/rest"
+
+    def _common_params(self):
+        return {"u": self.config.get("subsonic_user", ""),
+                "p": self.config.get("subsonic_password", ""),
+                "v": self._API_VERSION, "c": self._CLIENT, "f": "json"}
+
+    def _get_json(self, endpoint, **extra):
+        params = {**self._common_params(), **extra}
+        r = self._http_get(f"{self.rest_base}/{endpoint}", params=params)
+        r.raise_for_status()
+        return r.json().get("subsonic-response", {})
+
+    def scan(self):
+        self.files = []
+        self.status_message = "Connecting to Subsonic..."
+        ping = self._get_json("ping.view")
+        if ping.get("status") != "ok":
+            raise Exception(f"Subsonic ping failed: {ping}")
+
+        # albums, paged
+        albums = []
+        offset = 0
+        size = 500
+        while True:
+            data = self._get_json("getAlbumList2.view", type="alphabeticalByName",
+                                  size=size, offset=offset)
+            page = data.get("albumList2", {}).get("album", [])
+            if not page:
+                break
+            albums.extend(page)
+            if len(page) < size:
+                break
+            offset += size
+
+        self.total_items = len(albums) or 1
+
+        # Fetch album song lists concurrently — sequential one-request-per-album
+        # made scans take minutes on big libraries; a bounded pool cuts this to
+        # roughly one "page" of round trips. Results stay in catalog order.
+        fetch_pool = concurrent.futures.ThreadPoolExecutor(max_workers=8)
+
+        def _fetch_album(payload):
+            i, alb = payload
+            try:
+                album_data = self._get_json("getAlbum.view", id=alb.get("id"))
+            except Exception:
+                return i, []
+            return i, album_data.get("album", {}).get("song", [])
+
+        try:
+            for i, songs in fetch_pool.map(_fetch_album, enumerate(albums)):
+                alb = albums[i]
+                artist = alb.get("artist") or "Unknown Artist"
+                album_name = alb.get("name") or "Unknown Album"
+                for s in songs:
+                    title = s.get("title") or "Untitled"
+                    stream_id = s.get("id")
+                    url = (f"{self.rest_base}/stream.view?"
+                           + urllib.parse.urlencode({**self._common_params(), "id": stream_id}))
+                    # Nextcloud Music / Subsonic servers expose artwork at
+                    # getCoverArt.view; a direct image URL avoids re-downloading
+                    # (and re-decoding) the whole track for its embedded art.
+                    cover_id = s.get("coverArt") or alb.get("coverArt") or ""
+                    cover_url = ""
+                    if cover_id:
+                        cover_url = (f"{self.rest_base}/getCoverArt.view?"
+                                     + urllib.parse.urlencode({**self._common_params(),
+                                                               "id": cover_id}))
+                    self._add_song(
+                        path=f"{artist}/{album_name}/{title}", url=url,
+                        name=title, artist=artist, album=album_name,
+                        cover_url=cover_url or None)
+                self.processed_items = i + 1
+                self.current_file = album_name
+                self.status_message = (f"Subsonic: {len(self.files)} tracks "
+                                       f"({i + 1}/{len(albums)} albums)")
+        finally:
+            fetch_pool.shutdown(wait=False)
+
+        self.status_message = f"Subsonic scan complete. Found {len(self.files)} songs."
+
+    def get_links(self):
+        return [f for f in self.files if f.get("url")]
+
+
+CLOUD_TYPES["ampache"] = AmpacheHandler
+CLOUD_TYPES["subsonic"] = SubsonicHandler

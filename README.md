@@ -1,182 +1,169 @@
-# HiCloud MP - Cross-Platform Music Player
+# HiCloud MP
 
-A personal project born from the need for a lightweight music player with robust WebDAV integration, designed to seamlessly sync with cloud storage services.
+A modern desktop music player for your local files and your cloud libraries —
+with a **real 10-band equalizer**, a **phone-friendly web remote**, cover art,
+and a Windows installer built automatically by CI.
 
-A powerful, modern music player with support for local and cloud-based music libraries.
+![HiCloud MP — main window, dark theme with the accent play circle and themed icons](screen.png)
 
-![Python](https://img.shields.io/badge/Python-3.x-blue)
-![Qt](https://img.shields.io/badge/Qt-PySide6-green)
+| | |
+|---|---|
+| ![Python](https://img.shields.io/badge/Python-3.12%2B-blue) | ![PySide6](https://img.shields.io/badge/Qt-PySide6-green) |
+| ![CI](https://github.com/PhantomPixelDev/HiCloudMP/actions/workflows/windows-build.yml/badge.svg) | ![License](https://img.shields.io/badge/License-MIT-lightgrey) |
 
-## Screenshot
+## Highlights
 
-![HiCloud MP Screenshot](screen.png)
+- ☁️ **Cloud libraries** — Nextcloud/WebDAV, Ampache and Subsonic servers.
+  Albums are scanned in parallel (8×) and stream directly, so a song is
+  audible seconds after you press play.
+- 🎚️ **Real 10-band equalizer** — decoding → FFT overlap-add DSP → audio
+  sink for *every* played track (local or streamed). Presets and custom
+  gains apply live; zero-gain settings are a bit-exact bypass, and any
+  engine problem falls back to native playback automatically.
+- 🖼️ **Cover art pipeline** — pulled from tags (ID3/Vorbis/MP4/FLAC),
+  stream metadata, or extracted with ffmpeg when nothing else has it.
+- 🌐 **Web remote that normal people can use** — Settings shows one
+  ready-to-open link; the panel shows a live connection pill (`Connected ·
+  42 ms` / `Offline`). Tokens are handled for you (embedded in the link,
+  then hidden from the browser URL); LAN exposure is one checkbox.
+- 🎨 **Theme system** — Dark/Light, 12 accent presets or *any* custom
+  color, comfortable/compact density, and an optional background image
+  ("wallpaper mode") with an adjustable darkness slider. Icons are
+  rendered from code and re-tinted with the theme — no stale asset files.
+- 🧰 **Full remote control from everywhere** — in-app menus, tray menu
+  with transport + volume + seek, and MPRIS media keys on Linux desktops.
+- 🔒 **Security by default** — the web server binds to `127.0.0.1` unless
+  you explicitly allow the LAN; every route and socket requires the token;
+  config files are written atomically so a crash can't corrupt them.
 
-## Features
+## Downloads (Windows)
 
-✨ **Unified Music Library**
-- 🎵 Local files and folders
-- ☁️ Cloud storage via WebDAV (Nextcloud, OwnCloud, etc.)
-- 🔍 Search across local and cloud
+Grab the latest release from
+[**Releases**](https://github.com/PhantomPixelDev/HiCloudMP/releases):
 
-🎧 **Playback & Control**
-- 📋 Playlists (create, save, load, edit)
-- 🔀 Shuffle and 🔁 Repeat
-- 🎚️ Volume, mute, seeking with progress
-- ⌨️ System media keys via MPRIS (Play/Pause, Next, Previous, Stop)
-- 🧰 Enhanced tray menu: Now Playing, Play/Pause, Next/Prev, Stop, Shuffle, Repeat, Mute, inline Volume slider, Seek ±10s, Show/Hide Window, Open Current Location, Settings, Web Panel, Quit
-- 🌐 Web Interface (LAN): real-time remote control from any device
+- `HiCloudMP-Setup-x.y.z.exe` — standard installer (program files, start
+  menu, optional desktop shortcut). **No Python needed** — everything is
+  bundled.
+- `HiCloudMP-portable.zip` — unzip anywhere and run `HiCloudMP.exe`,
+  nothing is installed.
 
-☁️ **Cloud Integration**
-- 🌐 WebDAV (Nextcloud, OwnCloud, etc.) with folder scanning and cover art
+Both are built automatically on every version tag by GitHub Actions
+(Nuitka standalone + Inno Setup, ffmpeg bundled for cover extraction).
 
-🎨 **Modern UI**
-- 🌙 Dark theme with sleek purple-blue accents
-- 📱 Responsive layout
+Your data (settings, playlists, cloud accounts) lives in per-user app data
+and is never touched by installs, upgrades or uninstall.
 
-## Installation
+## Running from source
 
-### Requirements
-- Python 3.x
-- PySide6
-- Additional libraries (see below)
+Requirements: Python 3.12+ and `pip`.
 
-### Setup
-
-1. Clone the repository:
 ```bash
 git clone https://github.com/phantompixeldev/HiCloudMP.git
 cd HiCloudMP
-```
-
-2. (Recommended) Create and activate a virtual environment:
-```bash
 python -m venv venv
-# Windows
-venv\Scripts\activate
-# macOS/Linux
-source venv/bin/activate
-```
-
-3. Install Python dependencies:
-```bash
+venv\Scripts\activate          # Windows
+source venv/bin/activate       # macOS/Linux
 pip install -r requirements.txt
-```
-
-4. Linux desktop (for MPRIS/media keys): install system packages if missing
-- Arch/Endeavour/Manjaro:
-  ```bash
-  sudo pacman -S python-gobject
-  ```
-- Debian/Ubuntu:
-  ```bash
-  sudo apt-get install python3-gi gir1.2-glib-2.0
-  ```
-
-5. Run the player:
-```bash
+# Linux desktops with MPRIS/media keys:
+pip install -r requirements-linux.txt
 python main.py
 ```
 
-## Web Interface (LAN Remote Control)
+Linux desktop only: install the DBus/GLib bits if your distro doesn't have
+them — `sudo pacman -S python-gobject` (Arch) or
+`sudo apt-get install python3-gi gir1.2-glib-2.0` (Debian/Ubuntu).
 
-HiCloud MP now includes a powerful web interface for remote control from any device on your local network!
+## Using it
 
-### Features
-- 🎛️ **Full playback control** (play, pause, next, previous, stop)
-- 🔊 **Volume control**
-- 📋 **Playlist view** (see and play any track)
-- ⏩ **Seek bar** (see and seek track progress)
-- 🔀 **Shuffle** and 🔁 **Repeat** toggles
-- ⚡ **Real-time updates** (instant sync between desktop and all web clients)
-- 📱 **Multi-device**: Control from your phone, tablet, or another PC
+### Music library
 
-### How to use
-1. Open HiCloud MP and go to **Settings**
-2. Enable **Web Interface (LAN control)**
-3. On any device/browser in your LAN, go to:  
-   `http://<your-pc-ip>:5000`  
-   (replace `<your-pc-ip>` with your computer's local IP address)
-4. Enjoy full remote control of your music player!
+- **Add Folder / Add Files** builds a local library (mp3, flac, wav, ogg,
+  aac, m4a, wma) with cover art and searchable, album-grouped browsing.
+- **Add Cloud** connects Nextcloud/WebDAV, Ampache or Subsonic — enter the
+  server URL and credentials, then **Scan Cloud**. Status flows through
+  the status bar (no blocking dialogs); a failed account can't stall the
+  others.
 
-## Usage
+### Playback
 
-### Adding Local Media
-1. Click "Add Folder" or "Add Files" to add music to your library
-2. Browse to select your music files or folders
-3. Choose whether to add to your library or directly to a playlist
+- Full transport (play/pause, stop, next/prev), shuffle, repeat,
+  drag-seek, volume.
+- **Tools → Equalizer** for the 10-band engine: pick a preset, tweak
+  sliders, apply live. Close = keep; Cancel = restore.
+- Tray menu mirrors everything: Now Playing, play/pause, next/prev, stop,
+  seek, shuffle/repeat, mute, volume slider, show/hide, quit.
+- Keyboard media keys through MPRIS on Linux desktops.
 
-### Adding Cloud Accounts
-1. Click "Add Cloud" to add a WebDAV storage account
-2. Enter your WebDAV server details (URL, username, password)
-3. Click "Scan Cloud" to discover your music files
+Verify MPRIS (optional, Linux):
 
-### Creating Playlists
-1. Add tracks to the current queue
-2. Click "New Playlist" or use the dropdown menu
-3. Enter a name for your playlist
-4. Click "Save Playlist"
-
-### Playback Controls
-- Use the transport controls (Play/Pause, Next, Previous, Stop)
-- Adjust volume with the slider or the tray menu
-- Use your keyboard's media keys (via MPRIS) on supported desktops
-
-### Tray Menu
-- Right-click the tray icon to access controls and actions:
-  - Now Playing, Show/Hide Window
-  - Play/Pause, Previous, Next, Stop, Seek ±10s
-  - Shuffle, Repeat, Mute, Volume slider
-  - Open Current Location, Settings, Web Panel, Quit
-
-### Verify MPRIS (optional)
-With the app running:
 ```bash
-playerctl -l                 # list detected players
+playerctl -l
 playerctl -p hicloudmp status
 playerctl -p hicloudmp play-pause
-playerctl -p hicloudmp next
 playerctl -p hicloudmp metadata
 ```
 
-## Configuration Files
+### Web remote
 
-The player stores settings in the following files:
-- `mediafolders.json` - List of local media folders
-- `cloudfiles.json` - Cloud account settings and cached file lists
-- `playlists.json` - Saved playlists
+1. **Settings → Web Remote**: turn it on.
+2. Click **Copy link** (or **Open in browser**).
+3. Open the link on your phone/tablet — same Wi-Fi, zero setup.
+4. Want it from other devices on the network? Enable
+   *Allow other devices on this network*.
 
-## Supported Formats
+> The panel is token-protected; the token is embedded in the link Settings
+> generates and is stored only in the browser session — it's stripped from
+> the visible URL so it can't leak through bookmarks or shared tabs. The
+> ping endpoint affects nothing about the player (liveness only).
 
-- MP3 (.mp3)
-- FLAC (.flac)
-- WAV (.wav)
-- OGG (.ogg)
-- AAC (.aac)
-- M4A (.m4a)
-- WMA (.wma)
+### Playlists
+
+Add tracks to the queue → **New Playlist** → name it → **Save Playlist**.
+Everything is stored in plain JSON in per-user app data
+(`mediafolders.json`, `cloudfiles.json`, `playlists.json`).
+
+## Building & packaging
+
+- **Tests**: `pip install -r requirements-dev.txt` then `pytest tests/`
+  from the repo root (all headless/offscreen).
+- **Windows builds**: `.github/workflows/windows-build.yml` runs Nuitka
+  standalone (PySide6 plugin, console-free, app icon) on every push/PR and
+  attaches a portable zip artifact. Pushing a `v*` tag additionally
+  compiles the Inno Setup installer (`packaging/HiCloudMP.iss`) and
+  publishes both files as a GitHub Release.
+- Local packaging: build with the same Nuitka flags, place `ffmpeg.exe`
+  next to the exe (it is found automatically by `cover_extractor`), then
+  `ISCC /DAppVersion=1.2.3 packaging/HiCloudMP.iss`.
 
 ## Troubleshooting
 
-- Media keys not working but playerctl works:
-  - Close other media apps (e.g., Firefox, Spotify) so your desktop routes keys to HiCloud MP.
-  - Ensure the player is active/playing. Some desktops send keys to the last active MPRIS player.
-  - A desktop file can help desktops prefer your player (request one if you need it installed).
+- **Media keys not working (Linux)** but `playerctl` works: close other
+  media apps so the desktop routes the keys to HiCloud MP, and make sure
+  it is the last active player. Ensure a DBus user bus exists (normal on
+  desktop Linux).
+- **Web remote unreachable from the phone**: enable *Allow other devices
+  on this network* (Settings → Web Remote) and check that both devices
+  are on the same Wi-Fi; then copy the link again — it will contain the
+  desktop's LAN address.
+- **A track skips or stutters**: check CPU load and that the output
+  device isn't in exclusive mode. The equalizer engine keeps seconds of
+  buffered audio on purpose; if something still disrupts playback the app
+  falls back to the native pipeline automatically (watch the status bar).
+- **Web remote fails to start**: Flask and Flask-SocketIO come from
+  `requirements.txt` — reinstall them.
 
-- playerctl cannot find the player:
-  - Start the app and re-run `playerctl -l`. Look for `hicloudmp`.
-  - Check that your session has a DBus user bus (normal on desktop Linux).
+## Roadmap
 
-- Missing DBus/PyGObject on Linux:
-  - Install `python-gobject` (Arch) or `python3-gi` (Debian/Ubuntu) as shown above.
-
-- Web interface not starting:
-  - Ensure Flask and Flask-SocketIO are installed (`pip install -r requirements.txt`).
-  - Enable it in Settings, then open the Web Panel from the menu.
-
-## License
-
-MIT License
+- Visualizer view for the currently playing track
+- Custom per-cloud artwork caching improvements
+- Packaging for macOS / Linux (AppImage)
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome! Please open a PR — CI runs installer +
+portable builds on every branch push, and `pytest tests/` must stay
+green before merging.
+
+## License
+
+[MIT](LICENSE)

@@ -1,36 +1,125 @@
 import threading
 import os
-from flask import Flask, request, render_template_string, send_from_directory
+import secrets
+import time
+from flask import Flask, request, render_template_string, send_from_directory, jsonify
 from flask_socketio import SocketIO, emit
 
+DEFAULT_HOST = "127.0.0.1"
+
+
+def lan_ip():
+    """Best-effort LAN address for user-facing remote links (never raises).
+    Falls back to 127.0.0.1 when the machine is offline/isolated."""
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("192.168.255.255", 9))
+            ip = s.getsockname()[0]
+        finally:
+            s.close()
+        if ip and ip not in ("127.0.0.1", "0.0.0.0"):
+            return str(ip)
+    except Exception:
+        pass
+    try:
+        return str(socket.gethostbyname(socket.gethostname()))
+    except Exception:
+        return "127.0.0.1"
+
+
+def panel_url(port=5000, token="", lan_ip=None):
+    """Full ready-to-open remote link. The access key is embedded — people
+    copy this one link; nothing to configure."""
+    host = lan_ip or "127.0.0.1"
+    return f"http://{host}:{port}" + (f"/?token={token}" if token else "")
+
+
 class WebControlServer:
-    def __init__(self, player, host='0.0.0.0', port=5000):
+    """LAN web remote. Security model:
+    - binds loopback by default (opt-in exposes on LAN by passing host='0.0.0.0')
+    - every HTTP route requiring auth accepts Authorization: Bearer <token> or ?token=...
+    - socket.io connects must pass auth={"token": ...}; unauthenticated connects refused
+    - /health stays intentionally unauthenticated (liveness only, no player data)
+    """
+
+    def __init__(self, player, host=DEFAULT_HOST, port=5000, token=None):
         self.player = player
         self.host = host
         self.port = port
+        self.token = token or secrets.token_hex(16)
         self.app = Flask(__name__)
-        self.socketio = SocketIO(self.app, cors_allowed_origins='*', async_mode='threading')
+        self.socketio = SocketIO(self.app, async_mode='threading')
         self._thread = None
         self._running = False
         self._setup_routes()
         self._setup_socketio()
 
+    def _check_auth(self):
+        """Return True if the request carries the valid token (header or query)."""
+        supplied = request.args.get("token", "")
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.lower().startswith("bearer "):
+            supplied = supplied or auth_header[7:].strip()
+        try:
+            return supplied and secrets.compare_digest(supplied, self.token)
+        except Exception:
+            return False
+
+    @staticmethod
+    def _safe_int(value, default):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _unauthorized(self):
+        return jsonify({"error": "unauthorized"}), 401
+
     def _setup_routes(self):
         base_dir = os.path.dirname(os.path.abspath(__file__))
         static_dir = os.path.join(base_dir, 'static')
+
         @self.app.route('/')
         def index():
+            if not self._check_auth():
+                return self._unauthorized()
             return send_from_directory(base_dir, 'web_panel.html')
+
         @self.app.route('/static/<path:path>')
         def static_files(path):
             return send_from_directory(static_dir, path)
+
         @self.app.route('/health')
         def health():
             return {'status': 'ok'}
 
+        @self.app.route('/api/ping')
+        def ping():
+            """Public liveness probe for the panel's connection indicator.
+            Deliberately exposes nothing about the player — same contract as
+            /health plus a clock so the browser can show latency."""
+            return {'ok': True, 'app': 'HiCloudMP',
+                    'server_ms': int(time.time() * 1000)}
+
     def _setup_socketio(self):
         @self.socketio.on('connect')
-        def handle_connect():
+        def handle_connect(*args):
+            # flask_socketio delivers the socket.io `auth` payload as the third
+            # positional arg when present: (sid, environ, auth)
+            auth = args[2] if len(args) > 2 and isinstance(args[2], dict) else {}
+            supplied = str(auth.get("token", ""))
+            if not supplied:
+                for a in args:  # some transports pass auth differently; ignore silently
+                    if isinstance(a, dict) and a.get("token"):
+                        supplied = str(a.get("token"))
+            try:
+                ok = bool(supplied) and secrets.compare_digest(supplied, self.token)
+            except Exception:
+                ok = False
+            if not ok:
+                return False  # reject the connection
             emit('status', self._get_status())
             emit('playlist', self._get_playlist())
             emit('progress', self._get_progress())
@@ -67,7 +156,11 @@ class WebControlServer:
 
         @self.socketio.on('set_volume')
         def handle_set_volume(data):
-            vol = int(data.get('volume', 70))
+            if not isinstance(data, dict):
+                return
+            vol = self._safe_int(data.get('volume', 70), None)
+            if vol is None or not (0 <= vol <= 100):
+                return
             def _do():
                 self.player.set_volume(vol)
                 if hasattr(self.player, 'volume_slider'):
@@ -81,7 +174,11 @@ class WebControlServer:
 
         @self.socketio.on('play_index')
         def handle_play_index(data):
-            idx = int(data.get('index', 0))
+            if not isinstance(data, dict):
+                return
+            idx = self._safe_int(data.get('index', 0), -1)
+            if idx < 0:
+                return
             def _do():
                 if 0 <= idx < len(self.player.playlist):
                     self.player.current_index = idx
@@ -97,7 +194,11 @@ class WebControlServer:
 
         @self.socketio.on('seek')
         def handle_seek(data):
-            pos = int(data.get('position', 0))
+            if not isinstance(data, dict):
+                return
+            pos = self._safe_int(data.get('position', 0), None)
+            if pos is None or pos < 0:
+                return
             self.player.run_on_ui.emit(lambda: (self.player.player.setPosition(pos), self._broadcast_progress()))
 
         @self.socketio.on('toggle_shuffle')
@@ -124,6 +225,8 @@ class WebControlServer:
 
         @self.socketio.on('switch_playlist')
         def handle_switch_playlist(data):
+            if not isinstance(data, dict):
+                return
             pid = data.get('playlist_id')
             def _do():
                 if pid == '__queue__':
@@ -203,6 +306,13 @@ class WebControlServer:
         self._thread.start()
 
     def stop(self):
-        # Flask does not provide a built-in way to stop, so this is a placeholder
+        """Best-effort shutdown of the web server (idempotent, safe from any thread)."""
         self._running = False
-        # In production, use a more robust server or signal 
+        try:
+            # flask_socketio.SocketIO has no shutdown(); the underlying
+            # socketio.Server does (python-socketio >= 5.10).
+            self.socketio.server.shutdown()
+        except Exception:
+            pass  # no controlled shutdown handle in threading mode — the daemon
+        # server thread dies with the process; joining it would only add a
+        # multi-second close delay when the server ignores the shutdown signal. 

@@ -1,12 +1,15 @@
+import io
 import os
-from PySide6.QtCore import Qt, QThread, QTimer, QUrl
+from PySide6.QtCore import Qt, QThread, QTimer, QUrl, Signal
 from PySide6.QtGui import QPixmap, QPainter
-from PySide6.QtWidgets import QSystemTrayIcon
 
 from cover_extractor import CoverExtractor
 
 
 class CoverArtWorker(QThread):
+    finished = Signal(bytes)  # PNG-encoded image payload (may be empty)
+    error = Signal(str)
+
     def __init__(self, source, is_url=False):
         super().__init__()
         self.source = source
@@ -21,14 +24,16 @@ class CoverArtWorker(QThread):
             if self._abort:
                 self.finished.emit(b"")
                 return
-            if self.is_url:
-                png_bytes = CoverExtractor.extract_cover(url=self.source)
-            else:
-                png_bytes = CoverExtractor.extract_cover(file_path=self.source)
+            img = CoverExtractor.extract_cover(self.source, is_url=self.is_url)
+            data = b""
+            if img is not None and not self._abort:
+                buf = io.BytesIO()
+                img.convert("RGB").save(buf, format="PNG")
+                data = buf.getvalue()
             if self._abort:
                 self.finished.emit(b"")
                 return
-            self.finished.emit(png_bytes or b"")
+            self.finished.emit(data)
         except Exception as e:
             try:
                 # Emit empty on error
@@ -77,33 +82,44 @@ class MetadataController:
             source = None
             is_url = False
             if isinstance(item, dict):
-                url = item.get('url')
-                try:
-                    if (not url or "@" not in url) and "cloud_idx" in item and "file_idx" in item:
-                        cloud_idx = item.get('cloud_idx')
-                        file_idx = item.get('file_idx')
-                        if isinstance(cloud_idx, int) and 0 <= cloud_idx < len(self.app.clouds):
-                            cloud = self.app.clouds[cloud_idx]
-                            files = cloud.get('files', [])
-                            if isinstance(file_idx, int) and 0 <= file_idx < len(files):
-                                base_url = files[file_idx].get('url')
-                                if base_url:
-                                    cfg = cloud.get('config', {})
-                                    user = cfg.get('webdav_login', '')
-                                    pwd = cfg.get('webdav_password', '')
-                                    parsed = QUrl(base_url)
-                                    if user and pwd and not parsed.userName():
-                                        parsed.setUserName(user)
-                                        parsed.setPassword(pwd)
-                                    try:
-                                        url = parsed.toString(QUrl.UrlFormattingOption.FullyEncoded)
-                                    except Exception:
-                                        url = parsed.toString()
-                except Exception:
-                    pass
-                if url:
-                    source = url
-                    is_url = True
+                # A dedicated cover URL (Subsonic getCoverArt / Ampache get_art)
+                # beats re-parsing full audio streams; fall back to the
+                # stream/credential-embedded URL.
+                cov = item.get('cover_url')
+                if cov:
+                    source, is_url = cov, True
+                else:
+                    url = item.get('url')
+                    try:
+                        if (not url or "@" not in url) and "cloud_idx" in item and "file_idx" in item:
+                            cloud_idx = item.get('cloud_idx')
+                            file_idx = item.get('file_idx')
+                            if isinstance(cloud_idx, int) and 0 <= cloud_idx < len(self.app.clouds):
+                                cloud = self.app.clouds[cloud_idx]
+                                files = cloud.get('files', [])
+                                if isinstance(file_idx, int) and 0 <= file_idx < len(files):
+                                    row = files[file_idx]
+                                    base_url = row.get('url')
+                                    row_cov = row.get('cover_url')
+                                    if isinstance(row_cov, str) and row_cov.strip():
+                                        url = row_cov
+                                    elif base_url:
+                                        cfg = cloud.get('config', {})
+                                        user = cfg.get('webdav_login', '')
+                                        pwd = cfg.get('webdav_password', '')
+                                        parsed = QUrl(base_url)
+                                        if user and pwd and not parsed.userName():
+                                            parsed.setUserName(user)
+                                            parsed.setPassword(pwd)
+                                        try:
+                                            url = parsed.toString(QUrl.UrlFormattingOption.FullyEncoded)
+                                        except Exception:
+                                            url = parsed.toString()
+                    except Exception:
+                        pass
+                    if url:
+                        source = url
+                        is_url = True
             elif isinstance(item, str) and os.path.exists(item):
                 source = item
                 is_url = False
@@ -169,10 +185,13 @@ class MetadataController:
                     except Exception:
                         pass
                     try:
-                        md = CoverExtractor.extract_metadata(url or '', is_url=True)
-                        if md.get('title'): title = md['title']
-                        if md.get('artist'): artist = md['artist']
-                        if md.get('album'): album = md['album']
+                        # ffprobe against the stream can take seconds — only pay
+                        # that cost when the scan row left metadata to fill in.
+                        if not title or not artist or not album:
+                            md = CoverExtractor.extract_metadata(url or '', is_url=True)
+                            if md.get('title'): title = md['title']
+                            if md.get('artist'): artist = md['artist']
+                            if md.get('album'): album = md['album']
                     except Exception:
                         pass
                 if not title:
@@ -190,10 +209,11 @@ class MetadataController:
                 self.app.track_album_label.setText(f"Album: {album}")
 
                 self.update_cover_art(current_item)
+                # Tray tooltip only — no per-track "Now Playing" balloon popups
+                # (they spam Windows notifications on streaming metadata updates).
                 try:
-                    if hasattr(self.app, 'tray'): self.app.tray.update_tray_ui()
-                    if hasattr(self.app, 'tray') and self.app.tray.tray_icon:
-                        self.app.tray.tray_icon.showMessage("Now Playing", f"{title} — {artist}", QSystemTrayIcon.Information, 3000)
+                    if hasattr(self.app, 'tray'):
+                        self.app.tray.update_tray_ui()
                 except Exception:
                     pass
                 return
@@ -210,9 +230,8 @@ class MetadataController:
                     self.app.track_album_label.setText(f"Album: {album}")
                     self.update_cover_art(current_item)
                     try:
-                        if hasattr(self.app, 'tray'): self.app.tray.update_tray_ui()
-                        if hasattr(self.app, 'tray') and self.app.tray.tray_icon:
-                            self.app.tray.tray_icon.showMessage("Now Playing", f"{title} — {artist}", QSystemTrayIcon.Information, 3000)
+                        if hasattr(self.app, 'tray'):
+                            self.app.tray.update_tray_ui()
                     except Exception:
                         pass
                     return
