@@ -23,8 +23,11 @@ def test_workflow_builds_with_nuitka_pyside6():
     assert "nuitka" in wf.lower()
     assert "--enable-plugin=pyside6" in wf
     assert "main.py" in wf
-    for data_needle in ("web_panel.html", "icon.ico", "--include-data-dir"):
+    # real data files only: the panel html + app icon; no phantom dirs
+    for data_needle in ("web_panel.html", "icon.ico"):
         assert data_needle in wf, data_needle
+    assert "--include-data-dir" not in wf, \
+        "include-data-dir must reference a directory that exists in-repo"
 
 
 def test_workflow_bundles_ffmpeg():
