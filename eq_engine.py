@@ -82,6 +82,10 @@ class EQEngine(QObject):
     def is_playing(self):
         return self._playing
 
+    def is_paused(self):
+        """Engine holds a loaded sink but audio is currently paused."""
+        return (not self._playing) and self._sink is not None
+
     def is_active(self):
         return self._decoder is not None
 

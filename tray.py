@@ -115,11 +115,14 @@ class TrayController:
     def update_tray_ui(self):
         if not self.tray_icon:
             return
-        # Icon based on playing/paused
+        # Icon based on playing/paused (unified truth: engine-aware)
         try:
-            state = self.app.player.playbackState()
+            state = self.app.effective_playback_state()
         except Exception:
-            state = self.app.player.PlaybackState.StoppedState
+            try:
+                state = self.app.player.playbackState()
+            except Exception:
+                state = self.app.player.PlaybackState.StoppedState
         if state == self.app.player.PlaybackState.PlayingState:
             self.tray_icon.setIcon(self.app.style().standardIcon(QStyle.SP_MediaPause))
         elif state == self.app.player.PlaybackState.PausedState:

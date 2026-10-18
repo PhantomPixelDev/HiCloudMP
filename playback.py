@@ -15,6 +15,22 @@ class PlaybackEngineMixin:
     playlist/current_index, play()/next_track(), _play_stream(),
     player (QMediaPlayer) and status_bar."""
 
+    def effective_playback_state(self):
+        """Single truth for playback state across native + EQ engine.
+
+        The web panel and tray must ask THIS, not the native player:
+        while the engine plays, the native player sits idle."""
+        from PySide6.QtMultimedia import QMediaPlayer
+        if getattr(self, "_using_engine", False):
+            engine = getattr(self, "eq_engine", None)
+            if engine is not None:
+                if engine.is_playing():
+                    return QMediaPlayer.PlaybackState.PlayingState
+                if engine.is_paused():
+                    return QMediaPlayer.PlaybackState.PausedState
+            return QMediaPlayer.PlaybackState.StoppedState
+        return self.player.playbackState()
+
     def _eq_active(self):
         """EQ drives playback only when enabled and gains are non-neutral."""
         try:
