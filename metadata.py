@@ -185,10 +185,13 @@ class MetadataController:
                     except Exception:
                         pass
                     try:
-                        md = CoverExtractor.extract_metadata(url or '', is_url=True)
-                        if md.get('title'): title = md['title']
-                        if md.get('artist'): artist = md['artist']
-                        if md.get('album'): album = md['album']
+                        # ffprobe against the stream can take seconds — only pay
+                        # that cost when the scan row left metadata to fill in.
+                        if not title or not artist or not album:
+                            md = CoverExtractor.extract_metadata(url or '', is_url=True)
+                            if md.get('title'): title = md['title']
+                            if md.get('artist'): artist = md['artist']
+                            if md.get('album'): album = md['album']
                     except Exception:
                         pass
                 if not title:

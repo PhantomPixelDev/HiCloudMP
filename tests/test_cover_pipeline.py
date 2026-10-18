@@ -161,3 +161,25 @@ def test_no_now_playing_toasts(music_player, monkeypatch):
     mp.meta.update_metadata_display()
 
     assert calls == [], f"toast spam: {len(calls)} 'Now Playing' notifications shown"
+
+
+def test_metadata_display_skips_ffprobe_when_row_complete(music_player, monkeypatch):
+    mp = music_player
+    probe_calls = []
+
+    def fake_probe(*a, **k):
+        probe_calls.append(1)
+        return {}
+
+    monkeypatch.setattr(metadata_mod.CoverExtractor, "extract_metadata", fake_probe)
+    mp.tray = types.SimpleNamespace(tray_icon=None, update_tray_ui=lambda: None)
+
+    mp.clouds = [{"name": "T Cloud", "config": {}, "files": [
+        {"path": "A/B/S.flac", "url": "https://s/x?y=1"}]}]
+    mp.playlist = [{"type": "cloud", "title": "S", "artist": "A", "album": "B",
+                    "cloud_idx": 0, "file_idx": 0, "url": "https://s/x?y=1"}]
+    mp.current_index = 0
+
+    mp.meta.update_metadata_display()
+
+    assert probe_calls == [], "ffprobe must not run when scan rows already carry full metadata"
