@@ -12,6 +12,11 @@ apply_theme() resolves values from QSettings and applies them to any widget
 widgets QSS cannot reach lives in apply_app_palette().
 """
 
+from datetime import datetime
+import hashlib
+import os
+
+from platformdirs import user_cache_dir
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtCore import Qt
 
@@ -23,6 +28,12 @@ ACCENTS = {
     "Amber": "#f59e0b",
     "Rose": "#f43f5e",
     "Sky": "#38bdf8",
+    "Cyan": "#06b6d4",
+    "Orange": "#f97316",
+    "Pink": "#ec4899",
+    "Lime": "#84cc16",
+    "Indigo": "#6366f1",
+    "Slate": "#64748b",
 }
 
 _DEFAULTS = {
@@ -65,8 +76,75 @@ def _resolve(theme, accent, density):
     return theme, str(accent), density
 
 
-def build_qss(theme="Dark", accent=None, density="comfortable"):
-    """Generate the full application stylesheet."""
+def accent_hex(name_or_hex, custom=None):
+    """Map a preset name (or pass through a hex) to its hex color.
+    'Custom' resolves to the dialog-provided hex, if any."""
+    if name_or_hex == "Custom":
+        if custom and str(custom).startswith("#"):
+            return str(custom)
+        return _DEFAULTS["accent"]
+    if name_or_hex in ACCENTS:
+        return ACCENTS[name_or_hex]
+    if isinstance(name_or_hex, str) and name_or_hex.startswith("#"):
+        return name_or_hex
+    return _DEFAULTS["accent"]
+
+
+def prepare_background(src, dim_pct, cache_dir=None):
+    """Process a user photo for use as app wallpaper.
+
+    Returns the path of a cached, dimmed PNG (max side 1600px), or None when
+    the source is missing/unreadable. Deterministic per (file, dim) via a
+    content + dim hash, so repeated theme applications never re-process."""
+    if not src:
+        return None
+    try:
+        from PySide6.QtGui import QColor, QImage, QPainter
+
+        img = QImage(str(src))
+        if img.isNull():
+            return None
+
+        # downscale giant photos before hashing (perf)
+        max_side = 1600
+        if max(img.width(), img.height()) > max_side:
+            img = img.scaled(
+                max_side, max_side, Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation)
+
+        h = hashlib.sha1(open(str(src), "rb").read()).hexdigest() \
+            if os.path.exists(src) else "x"
+        # scale-date guard: re-encode when dimensions changed on disk
+        composite = f"{h}_{img.width()}x{img.height()}_{int(dim_pct) & 0xff}"
+        name = hashlib.sha1(composite.encode("utf-8")).hexdigest()[:24]
+        if cache_dir is None:
+            cache_dir = user_cache_dir("HiCloudMP", "HiCloudMP",
+                                       ensure_exists=True)
+        os.makedirs(str(cache_dir), exist_ok=True)
+        out = os.path.join(str(cache_dir), f"bg_{name}.png")
+        if os.path.exists(out):
+            return out
+
+        if img.format() != QImage.Format.Format_ARGB32:
+            img = img.convertToFormat(QImage.Format.Format_ARGB32)
+        dim_alpha = max(0, min(255, int(int(dim_pct) * 2.55)))
+        if dim_alpha:
+            painter = QPainter(img)
+            painter.setCompositionMode(
+                QPainter.CompositionMode.CompositionMode_SourceOver)
+            painter.fillRect(img.rect(), QColor(8, 10, 14, dim_alpha))
+            painter.end()
+        img.save(out, "PNG")
+        return out
+    except Exception:
+        return None
+
+
+def build_qss(theme="Dark", accent=None, density="comfortable", bg=None):
+    """Generate the full application stylesheet.
+
+    `bg` (str path of a pre-dimmed photo) switches big surfaces to
+    translucent glass and paints the photo behind the main content area."""
     theme, accent, density = _resolve(theme, accent, density)
     tk = _DARK if theme == "Dark" else _LIGHT
     d = _DENSITY[density]
@@ -79,7 +157,7 @@ def build_qss(theme="Dark", accent=None, density="comfortable"):
     acc_trans = _qa(accent, 28)
     acc_hover = _qa(accent, 60)
 
-    return f"""
+    qss = f"""
     QMainWindow, QDialog {{
         background-color: {tk['window']};
         color: {tk['text']};
@@ -359,6 +437,33 @@ def build_qss(theme="Dark", accent=None, density="comfortable"):
     }}
     """
 
+    if bg:
+        url = str(bg).replace("\\", "/")
+        qss += f"""
+
+    /* ================ Custom background (wallpaper mode) ================ */
+    QWidget#central {{
+        border-image: url('{url}') 0;
+    }}
+    QWidget#sidebar {{
+        background-color: {_qa(tk['surface'], 232)};
+    }}
+    QFrame#nowCard, QFrame#transportBar {{
+        background-color: {_qa(tk['surface'], 224)};
+    }}
+    QFrame#nowCard QLabel#trackTitle, QFrame#nowCard QLabel#trackDim,
+    QFrame#transportBar QLabel {{
+        color: {tk['text']};
+    }}
+    QGroupBox {{
+        background-color: {_qa(tk['surface'], 236)};
+    }}
+    QListWidget, QTreeWidget, QTableWidget, QListView, QTreeView {{
+        background-color: {_qa(tk['surface'], 244)};
+    }}
+    """
+    return qss
+
 
 def icon_colors(settings=None, theme=None, accent=None):
     """(accent_hex, text_hex, dim_hex) for icon tinting, theme-consistent."""
@@ -376,6 +481,7 @@ def icon_colors(settings=None, theme=None, accent=None):
 
 def apply_theme(widget, settings=None, theme=None, accent=None, density=None):
     """Resolve appearance values (explicit args win) and setStyleSheet on widget."""
+    bg = None
     if theme is None or accent is None or density is None:
         from PySide6.QtCore import QSettings as _QSettings
         q = settings
@@ -384,17 +490,20 @@ def apply_theme(widget, settings=None, theme=None, accent=None, density=None):
         theme = theme if theme is not None else q.value("theme", _DEFAULTS["theme"])
         accent = accent if accent is not None else q.value("ui/accent", _DEFAULTS["accent"])
         density = density if density is not None else q.value("ui/density", _DEFAULTS["density"])
-    widget.setStyleSheet(build_qss(theme=theme, accent=accent, density=density))
+    if settings is not None:
+        # Wallpaper mode: pre-dimmed photo behind translucent glass surfaces.
+        bg_path = settings.value("ui/bg_image", "")
+        if bg_path:
+            try:
+                dim = int(settings.value("ui/bg_dim", 35))
+            except (TypeError, ValueError):
+                dim = 35
+            prepared = prepare_background(bg_path, dim)
+            if prepared and os.path.exists(prepared):
+                bg = prepared
+    widget.setStyleSheet(build_qss(theme=theme, accent=accent,
+                                   density=density, bg=bg))
     return widget
-
-
-def accent_hex(name_or_hex):
-    """Map a preset name (or pass through a hex) to its hex color."""
-    if name_or_hex in ACCENTS:
-        return ACCENTS[name_or_hex]
-    if isinstance(name_or_hex, str) and name_or_hex.startswith("#"):
-        return name_or_hex
-    return _DEFAULTS["accent"]
 
 
 def apply_app_palette(app, theme="Dark"):

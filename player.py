@@ -21,7 +21,8 @@ from PySide6.QtWidgets import (
     QTreeWidgetItem, QSplitter, QLineEdit, QDialog, QFormLayout, QTabWidget, 
     QToolButton, QStatusBar, QStyle, QFrame, QMenu, QProgressBar, QSystemTrayIcon,
     QComboBox, QInputDialog, QListWidgetItem, QRadioButton, QDialogButtonBox, QProgressDialog,
-    QCheckBox, QWidgetAction, QGroupBox, QGridLayout
+    QCheckBox, QWidgetAction, QGroupBox, QGridLayout, QStackedWidget, QColorDialog,
+    QScrollArea
 )
 from PySide6.QtGui import QPainter
 from PySide6.QtCore import Qt, QTimer, Signal, QObject, QThread, QUrl, QSize, QEvent, QSettings
@@ -106,93 +107,327 @@ class CloudAccountsDialog(QDialog):
         self.refresh_list()
 
 class SettingsDialog(QDialog):
+    """Settings with sidebar navigation: Playback / Appearance / Library /
+    Web Remote. All historical widget attribute names are preserved."""
+
+    WEB_HINT = ("Control this app from your phone or any other computer — "
+                "like a remote control for your music. Both devices only "
+                "need to be on the same Wi-Fi network.")
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Settings")
-        self.resize(400, 300)
+        self.resize(640, 470)
         self.settings = QSettings("HiCloudMP", "HiCloudMP")
-        layout = QVBoxLayout(self)
+        self.parent = parent
+        self.custom_accent_hex = None
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(10, 10, 10, 10)
+        body = QHBoxLayout()
+        body.setSpacing(12)
+        outer.addLayout(body, 1)
+
+        # ---------------- Navigation rail ----------------
+        self.nav_list = QListWidget(self)
+        self.nav_list.setObjectName("settingsNav")
+        self.nav_list.setFixedWidth(148)
+        self.nav_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        body.addWidget(self.nav_list)
+
+        # ---------------- Pages ----------------
+        self.pages = QStackedWidget(self)
+        body.addWidget(self.pages, 1)
+        self.pages.addWidget(self._build_playback_page())
+        self.pages.addWidget(self._build_appearance_page())
+        self.pages.addWidget(self._build_library_page())
+        self.pages.addWidget(self._build_web_page())
+
+        self.nav_list.currentRowChanged.connect(self.pages.setCurrentIndex)
+        for label in ("Playback", "Appearance", "Library", "Web Remote"):
+            self.nav_list.addItem(QListWidgetItem(label))
+        self.nav_list.setCurrentRow(0)
+
+        btn_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btn_box.accepted.connect(self.accept)
+        btn_box.rejected.connect(self.reject)
+        outer.addWidget(btn_box)
+
+    # ------------------------------------------------------------ pages
+    def _build_playback_page(self):
+        page = QWidget()
+        v = QVBoxLayout(page)
+        v.setContentsMargins(4, 4, 4, 4)
+        box = QGroupBox("Playback")
+        v.addWidget(box)
+        v.addStretch(1)
+        form = QFormLayout(box)
         self.volume_slider = QSlider(Qt.Horizontal)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(self.settings.value("volume", 70, int))
-        layout.addWidget(QLabel("Default Volume"))
-        layout.addWidget(self.volume_slider)
-        # --- Appearance (unified theme system in theme.py) ---
-        appearance_box = QGroupBox("Appearance")
-        appearance_form = QFormLayout(appearance_box)
+        form.addRow("Default volume", self.volume_slider)
+        hint = QLabel("Used every time the app starts.")
+        hint.setObjectName("hintLabel")
+        form.addRow("", hint)
+        return page
+
+    def _build_appearance_page(self):
+        page = QScrollArea()
+        page.setWidgetResizable(True)
+        page.setFrameShape(QFrame.NoFrame)
+        inner = QWidget()
+        page.setWidget(inner)
+        v = QVBoxLayout(inner)
+        v.setContentsMargins(4, 4, 4, 4)
+
+        # --- Colors ---
+        colors_box = QGroupBox("Colors")
+        v.addWidget(colors_box)
+        form = QFormLayout(colors_box)
         self.theme_combo = QComboBox()
         self.theme_combo.addItems(["Dark", "Light"])
         self.theme_combo.setCurrentText(self.settings.value("theme", "Dark"))
-        appearance_form.addRow("Theme", self.theme_combo)
+        form.addRow("Theme", self.theme_combo)
+
         import theme as _theme
         self.accent_combo = QComboBox()
         self.accent_combo.addItems(list(_theme.ACCENTS.keys()))
         stored_accent = self.settings.value("ui/accent", _theme.ACCENTS["Emerald"])
         default_accent_name = next(
-            (n for n, h in _theme.ACCENTS.items() if h.lower() == str(stored_accent).lower()),
-            "Emerald")
-        self.accent_combo.setCurrentText(default_accent_name)
-        appearance_form.addRow("Accent color", self.accent_combo)
+            (n for n, h in _theme.ACCENTS.items()
+             if h.lower() == str(stored_accent).lower()), None)
+        if default_accent_name is None:
+            # A previously chosen custom color: surface it as "Custom"
+            self.custom_accent_hex = str(stored_accent)
+            self.accent_combo.addItem("Custom")
+            self.accent_combo.setCurrentText("Custom")
+        else:
+            self.accent_combo.setCurrentText(default_accent_name)
+
+        pick_row = QHBoxLayout()
+        self.custom_accent_btn = QPushButton("Pick any color…")
+        self.custom_accent_btn.setToolTip("Choose any color as the accent")
+        self.custom_accent_btn.clicked.connect(self.pick_custom_accent)
+        pick_row.addWidget(self.accent_combo)
+        pick_row.addWidget(self.custom_accent_btn)
+        form.addRow("Accent color", pick_row)
+
         self.density_combo = QComboBox()
         self.density_combo.addItems(["Comfortable", "Compact"])
         self.density_combo.setCurrentText(
             str(self.settings.value("ui/density", "comfortable")).capitalize())
-        appearance_form.addRow("UI density", self.density_combo)
-        layout.addWidget(appearance_box)
-        self.download_folder_edit = QLineEdit(self.settings.value("download_folder", ""))
-        browse_btn = QPushButton("Browse...")
+        form.addRow("UI density", self.density_combo)
+
+        # --- Background image ---
+        bg_box = QGroupBox("Background image")
+        v.addWidget(bg_box)
+        bgl = QVBoxLayout(bg_box)
+        self.bg_image_edit = QLineEdit(str(self.settings.value("ui/bg_image", "")))
+        self.bg_image_edit.setReadOnly(True)
+        self.bg_image_edit.setPlaceholderText("No background image selected")
+        bgl.addWidget(self.bg_image_edit)
+        brows = QHBoxLayout()
+        self.bg_browse_btn = QPushButton("Choose image…")
+        self.bg_browse_btn.clicked.connect(self.browse_bg_image)
+        self.bg_clear_btn = QPushButton("Remove")
+        self.bg_clear_btn.setEnabled(bool(self.bg_image_edit.text()))
+        self.bg_clear_btn.clicked.connect(self.clear_bg_image)
+        brows.addWidget(self.bg_browse_btn)
+        brows.addWidget(self.bg_clear_btn)
+        brows.addStretch(1)
+        bgl.addLayout(brows)
+        dim_row = QHBoxLayout()
+        dim_row.addWidget(QLabel("Darkness"))
+        self.bg_dim_slider = QSlider(Qt.Horizontal)
+        self.bg_dim_slider.setRange(0, 80)
+        self.bg_dim_slider.setValue(
+            int(self._safe_int(self.settings.value("ui/bg_dim", 35))))
+        self.bg_dim_label = QLabel(f"{self.bg_dim_slider.value()}%")
+        self.bg_dim_slider.valueChanged.connect(
+            lambda v_: self.bg_dim_label.setText(f"{v_}%"))
+        self.bg_dim_slider.setFixedWidth(220)
+        dim_row.addWidget(self.bg_dim_slider)
+        dim_row.addWidget(self.bg_dim_label)
+        dim_row.addStretch(1)
+        bgl.addLayout(dim_row)
+        bg_hint = QLabel("The image goes behind the player panels. "
+                         "Darkness makes it subtle. Applies instantly.")
+        bg_hint.setObjectName("hintLabel")
+        bg_hint.setWordWrap(True)
+        bgl.addWidget(bg_hint)
+        v.addStretch(1)
+        return page
+
+    def _build_library_page(self):
+        page = QWidget()
+        v = QVBoxLayout(page)
+        v.setContentsMargins(4, 4, 4, 4)
+        box = QGroupBox("Library & cloud accounts")
+        v.addWidget(box)
+        v.addStretch(1)
+        form = QFormLayout(box)
+        self.download_folder_edit = QLineEdit(
+            str(self.settings.value("download_folder", "")))
+        browse_btn = QPushButton("Browse…")
         browse_btn.clicked.connect(self.browse_folder)
         folder_layout = QHBoxLayout()
-        folder_layout.addWidget(self.download_folder_edit)
+        folder_layout.addWidget(self.download_folder_edit, 1)
         folder_layout.addWidget(browse_btn)
-        layout.addWidget(QLabel("Download Folder"))
-        layout.addLayout(folder_layout)
-        # Cloud account management
-        cloud_btn = QPushButton("Manage Cloud Accounts")
-        cloud_btn.clicked.connect(self.open_cloud_accounts)
-        layout.addWidget(cloud_btn)
-        # Add web interface toggle
-        self.web_checkbox = QCheckBox("Enable Web Interface (LAN control)")
-        self.web_checkbox.setChecked(self.settings.value("web_interface", False, bool))
-        layout.addWidget(self.web_checkbox)
-        # Expose on LAN opt-in (0.0.0.0); default stays loopback-only
-        self.lan_checkbox = QCheckBox("Expose on LAN (token still required)")
-        self.lan_checkbox.setChecked(self.settings.value("web/host", "127.0.0.1") == "0.0.0.0")
-        layout.addWidget(self.lan_checkbox)
-        # Access token display: read-only, selectable for copying
+        form.addRow("Download folder", folder_layout)
+        self.cloud_btn = QPushButton("Manage cloud accounts…")
+        self.cloud_btn.clicked.connect(self.open_cloud_accounts)
+        form.addRow("", self.cloud_btn)
+        hint = QLabel("Streams and downloads from Nextcloud, "
+                      "Ampache or Subsonic servers.")
+        hint.setObjectName("hintLabel")
+        hint.setWordWrap(True)
+        form.addRow("", hint)
+        return page
+
+    def _build_web_page(self):
+        page = QWidget()
+        v = QVBoxLayout(page)
+        v.setContentsMargins(4, 4, 4, 4)
+
+        self.web_hint_label = QLabel(self.WEB_HINT)
+        self.web_hint_label.setWordWrap(True)
+        v.addWidget(self.web_hint_label)
+
+        link_box = QGroupBox("Your remote link")
+        v.addWidget(link_box)
+        v.addStretch(1)
+        ll = QVBoxLayout(link_box)
+        token = ""
+        port = 5000
         if self.parent is not None and hasattr(self.parent, "ensure_web_token"):
             token = self.parent.ensure_web_token()
+            port = getattr(self.parent, "web_port", port)
         else:
-            token = self.settings.value("web/token", "")
-        layout.addWidget(QLabel("Web Panel Access Token (Bearer / ?token=...)"))
+            token = str(self.settings.value("web/token", ""))
+        base = f"http://localhost:{port}" if token == "" else \
+            f"http://localhost:{port}/?token={token}"
+        self.web_link_edit = QLineEdit(base)
+        self.web_link_edit.setReadOnly(True)
+        ll.addWidget(self.web_link_edit)
+        link_row = QHBoxLayout()
+        self.web_copy_btn = QPushButton("Copy link")
+        self.web_copy_btn.clicked.connect(self.copy_web_link)
+        self.web_open_btn = QPushButton("Open in browser")
+        self.web_open_btn.clicked.connect(self.open_web_link)
+        link_row.addWidget(self.web_copy_btn)
+        link_row.addWidget(self.web_open_btn)
+        link_row.addStretch(1)
+        ll.addLayout(link_row)
+
+        self.web_status_label = QLabel(self._web_status_text())
+        self.web_status_label.setObjectName("hintLabel")
+        ll.addWidget(self.web_status_label)
+
+        opts = QGroupBox("Options")
+        v.addWidget(opts)
+        ol = QVBoxLayout(opts)
+        self.web_checkbox = QCheckBox("Enable web remote")
+        self.web_checkbox.setChecked(self.settings.value("web_interface", False, bool))
+        self.web_checkbox.toggled.connect(
+            lambda _on: self.web_status_label.setText(self._web_status_text()))
+        ol.addWidget(self.web_checkbox)
+        self.lan_checkbox = QCheckBox("Allow other devices on this network "
+                                      "(needed for phones)")
+        self.lan_checkbox.setChecked(self.settings.value("web/host", "127.0.0.1") == "0.0.0.0")
+        ol.addWidget(self.lan_checkbox)
+        lan_hint = QLabel("Music stays private: only people who open the "
+                          "link above can connect. Leave this off if you "
+                          "only use the remote on this computer.")
+        lan_hint.setObjectName("hintLabel")
+        lan_hint.setWordWrap(True)
+        ol.addWidget(lan_hint)
+
+        # Advanced: raw access code stays reachable, mostly invisible
+        self.web_token_toggle = QToolButton()
+        self.web_token_toggle.setText("show access code…")
+        self.web_token_toggle.setCheckable(True)
+        self.web_token_toggle.setAutoRaise(True)
         self.web_token_edit = QLineEdit(token)
         self.web_token_edit.setReadOnly(True)
-        layout.addWidget(self.web_token_edit)
-        btn_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        btn_box.accepted.connect(self.accept)
-        btn_box.rejected.connect(self.reject)
-        layout.addWidget(btn_box)
-        self.parent = parent
+        self.web_token_edit.setVisible(False)
+        self.web_token_toggle.toggled.connect(self.web_token_edit.setVisible)
+        adv_row = QHBoxLayout()
+        adv_row.addStretch(1)
+        adv_row.addWidget(self.web_token_toggle)
+        adv_row.addWidget(self.web_token_edit, 1)
+        v.addLayout(adv_row)
+        return page
+
+    # ------------------------------------------------------------ helpers
+    @staticmethod
+    def _safe_int(value):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 35
+
+    def _web_status_text(self):
+        running = bool(getattr(self.parent, "web_server", None)
+                       if self.parent else False)
+        enabled = self.settings.value("web_interface", False, bool)
+        if running:
+            return "Web remote is running. Open the link on any device."
+        return ("Web remote is off. Turn it on, then open the link "
+                "on your phone.") if enabled else \
+            "Web remote is off."
+
+    def pick_custom_accent(self):
+        initial = QColor(self.custom_accent_hex or "#10b981")
+        color = QColorDialog.getColor(initial, self, "Custom accent color")
+        if color is None or not color.isValid():
+            return  # dialog cancelled — no change
+        self.custom_accent_hex = color.name()
+        if self.accent_combo.findText("Custom") < 0:
+            self.accent_combo.addItem("Custom")
+        self.accent_combo.setCurrentText("Custom")
+
+    def browse_bg_image(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Choose a background image", "",
+            "Images (*.png *.jpg *.jpeg *.bmp *.webp)")
+        if path:
+            self.bg_image_edit.setText(path)
+            self.bg_clear_btn.setEnabled(True)
+            self.bg_preview_path = path
+
+    def clear_bg_image(self):
+        self.bg_image_edit.setText("")
+
+    def copy_web_link(self):
+        QApplication.clipboard().setText(self.web_link_edit.text())
+
+    def open_web_link(self):
+        import webbrowser
+        webbrowser.open(self.web_link_edit.text())
+
     def browse_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Select Download Folder")
         if folder:
             self.download_folder_edit.setText(folder)
+
     def save_settings(self):
         self.settings.setValue("volume", self.volume_slider.value())
         self.settings.setValue("theme", self.theme_combo.currentText())
         # Appearance persistence (accent stored as hex; density lowercased)
         import theme as _theme
-        self.settings.setValue("ui/accent", _theme.accent_hex(self.accent_combo.currentText()))
+        self.settings.setValue("ui/accent", _theme.accent_hex(
+            self.accent_combo.currentText(), custom=self.custom_accent_hex))
         self.settings.setValue("ui/density", self.density_combo.currentText().lower())
+        self.settings.setValue("ui/bg_image", self.bg_image_edit.text())
+        self.settings.setValue("ui/bg_dim", self.bg_dim_slider.value())
         self.settings.setValue("download_folder", self.download_folder_edit.text())
         self.settings.setValue("web_interface", self.web_checkbox.isChecked())
         self.settings.setValue("web/host", "0.0.0.0" if self.lan_checkbox.isChecked() else "127.0.0.1")
+
     def open_cloud_accounts(self):
         if self.parent:
             dlg = CloudAccountsDialog(self, self.parent.clouds)
             dlg.exec()
-
-    pass
 
 
 class MusicPlayer(QMainWindow):
