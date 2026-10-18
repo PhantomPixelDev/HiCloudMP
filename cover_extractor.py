@@ -115,6 +115,56 @@ class CoverExtractor:
                 os.unlink(temp_path)
         return None
     
+    @staticmethod
+    def _sidecar_artwork_candidates(audio_path):
+        """Artwork commonly stored next to local audio files, most specific
+        first: an image named exactly like the track, then common album-cover
+        names (Cover.jpg, folder.jpg, front.png, albumart.jpg, ...).
+
+        Matching is case-insensitive; files with extra suffixes (e.g.
+        <track>_spectrogram.png) never match. Used only when a local file
+        carries no embedded art (e.g. archive.org downloads)."""
+        try:
+            directory = os.path.dirname(os.path.abspath(audio_path))
+            entries = os.listdir(directory)
+        except OSError:
+            return []
+        stem = os.path.splitext(os.path.basename(audio_path))[0].lower()
+        ranked = []
+        for name in entries:
+            base, ext = os.path.splitext(name)
+            if ext.lower() not in ('.jpg', '.jpeg', '.png', '.webp', '.bmp'):
+                continue
+            low = base.lower()
+            if low == stem:
+                ranked.append((0, name))
+            elif low in ('cover', 'folder', 'front', 'album', 'albumart',
+                         'artwork'):
+                ranked.append((1, name))
+        ranked.sort()
+        return [os.path.join(directory, name) for _, name in ranked]
+
+    @staticmethod
+    def _open_sidecar_artwork(audio_path):
+        """Open sidecar artwork next to local audio, preferring cover-shaped
+        images (roughly square). Wide/tall renders (waveform-like banners,
+        e.g. archive.org per-track 800x200 displays) defer to the album
+        cover and are used only when nothing cover-shaped exists.
+        Returns a PIL Image or None."""
+        last_resort = None
+        for art_path in CoverExtractor._sidecar_artwork_candidates(audio_path):
+            try:
+                img = Image.open(art_path)
+                width, height = img.size
+                ratio = width / float(height)
+            except Exception:
+                continue
+            if 0.45 <= ratio <= 2.2:
+                return img
+            if last_resort is None:
+                last_resort = img
+        return last_resort
+
     @classmethod
     def extract_cover(cls, file_path_or_url, is_url=False, max_size=2*1024*1024):  # 2MB max for remote files
         """
@@ -267,6 +317,12 @@ class CoverExtractor:
                         if cover:
                             return cover
                             
+                    # No embedded art: fall back to artwork files stored next
+                    # to the audio (per-track images, common cover names).
+                    sidecar = cls._open_sidecar_artwork(file_path_or_url)
+                    if sidecar:
+                        return sidecar
+
                     # If we get here, try to open as image directly
                     try:
                         return Image.open(file_path_or_url)
