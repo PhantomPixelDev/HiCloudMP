@@ -82,6 +82,24 @@ Landed with this commit (`feat: tray icon is an accent badge ...`):
   combined 13 passed; full suite cold `233 passed, 2 skipped`; real-album
   probe: 01/02/03 .mp3 -> 410x410 RGB (Cover.jpg).
 
-Next in line: EQ/visualizer + QThread-fatal fixes (investigations running),
-then performance round.
+`a016783` feat: playlist import/export engine (M3U/M3U8, PLS, XSPF)
+- Plan P2 core as a new-file island (agents were auditing player.py/
+  metadata.py read-only; no overlap). PlaylistIO: import m3u/m3u8
+  (EXTINF, utf-8 w/ cp1252 legacy fallback), pls (indexed File/Title/
+  Length, holes tolerated), xspf (ns-agnostic track walk - findall sees
+  only direct children, tracks live under trackList; file: URI decode);
+  export keyed by output ext, m3u relativizes inside base_dir with
+  forward slashes, pls spec-shaped, xspf v1; utf-8->cp1252 fallback.
+- Errors: FileNotFoundError / ValueError(unknown ext); order kept;
+  unknown duration = None; URLs verbatim.
+- Tests: tests/test_playlist_io.py 10 (collection RED - module missing
+  -> 7 passed first cut -> fix trackList walk + legacy test content ->
+  10/10); full suite cold `243 passed, 2 skipped`.
+- Ruling: executing-plans wants an SDD workspace/ledger; this session's
+  standing convention is repo-root progress.md as the ledger and direct
+  work on main per owner's explicit "go" - keeping that.
+
+Next in line: fold in agent reports (EQ/viz, QThread fatal) -> P0 fixes,
+then formats (P1), playlist UI hook (P2b), UX (P3), hardening (P4),
+perf (P5).
 
