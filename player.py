@@ -2036,11 +2036,8 @@ class MusicPlayer(QMainWindow):
         self.scan_cloud_btn.setEnabled(False)
         self.scan_threads = []
         self.scan_workers = []
-        self.progress_dialog = QProgressDialog("Scanning cloud accounts...", "Cancel", 0, 100, self)
-        self.progress_dialog.setWindowTitle("Cloud Scan Progress")
-        self.progress_dialog.setWindowModality(Qt.WindowModal)
-        self.progress_dialog.setValue(0)
-        self.progress_dialog.canceled.connect(self.cancel_cloud_scan)
+        self._scan_errors = []
+        self.status_bar.showMessage(f"Starting cloud scan ({len(self.clouds)} accounts)…")
         for idx, cloud in enumerate(self.clouds):
             thread = QThread()
             worker = ScanCloudWorker(idx, cloud)
@@ -2054,33 +2051,38 @@ class MusicPlayer(QMainWindow):
             thread.started.connect(worker.run)
             thread.finished.connect(lambda w=worker: w.deleteLater())
             thread.finished.connect(thread.deleteLater)
+            # handle_scan_complete runs BEFORE thread.quit is processed, so the
+            # not-running check needs a second chance on real thread exit.
+            thread.finished.connect(self._check_all_scans_complete)
             self.scan_threads.append(thread)
-        self.status_bar.showMessage("Starting cloud scan...")
         for thread in self.scan_threads:
             thread.start()
+
     def update_scan_progress(self, progress, status, cloud_name):
-        if hasattr(self, 'progress_dialog') and self.progress_dialog:
-            self.progress_dialog.setValue(progress)
-            self.progress_dialog.setLabelText(f"{cloud_name}: {status}")
-        QApplication.processEvents()
+        self.status_bar.showMessage(f"Scanning {cloud_name}: {status}", 0)
+
     def handle_scan_complete(self, cloud_idx, files):
-        if cloud_idx >= 0 and cloud_idx < len(self.clouds):
-            self.clouds[cloud_idx]["files"] = files
-            self.save_clouds()
-            self.update_library_tree()
-        self._check_all_scans_complete()
+        try:
+            if 0 <= cloud_idx < len(self.clouds):
+                self.clouds[cloud_idx]["files"] = files
+                self.save_clouds()
+                self.update_library_tree()
+                name = self.clouds[cloud_idx]["name"]
+                self.status_bar.showMessage(f"Scan: {name} — {len(files)} tracks", 0)
+        finally:
+            self._check_all_scans_complete()
+
     def handle_scan_error(self, cloud_idx, error_msg):
-        if cloud_idx >= 0 and cloud_idx < len(self.clouds):
-            cloud_name = self.clouds[cloud_idx]["name"]
-            QMessageBox.critical(self, "Cloud Scan Error", f"{cloud_name}:\n\n{error_msg}")
+        name = self.clouds[cloud_idx]["name"] if 0 <= cloud_idx < len(self.clouds) else "?"
+        self._scan_errors.append((name, error_msg))
+        self.status_bar.showMessage(f"Scan: {name} failed — {str(error_msg)[:120]}", 0)
         self._check_all_scans_complete()
+
     def cancel_cloud_scan(self):
         for worker in getattr(self, 'scan_workers', []):
             if hasattr(worker, 'abort'):
                 worker.abort()
         self.status_bar.showMessage("Cloud scan canceled")
-        if hasattr(self, 'progress_dialog') and self.progress_dialog:
-            self.progress_dialog.close()
     
     def new_playlist(self):
         """Create a new playlist"""
@@ -2619,15 +2621,23 @@ class MusicPlayer(QMainWindow):
 
     
     def _check_all_scans_complete(self):
-        all_done = all(not thread.isRunning() for thread in getattr(self, 'scan_threads', []))
-        if all_done:
-            self.scan_cloud_btn.setEnabled(True)
-            self.status_bar.showMessage("Cloud scan complete")
-            if hasattr(self, 'progress_dialog') and self.progress_dialog:
-                self.progress_dialog.close()
-            # Clear references
-            self.scan_threads = []
-            self.scan_workers = []
+        threads = list(getattr(self, 'scan_threads', []))
+        if not threads:
+            return
+        # Threads may not have finished their quit yet — recheck shortly.
+        if any(thread.isRunning() for thread in threads):
+            QTimer.singleShot(100, self._check_all_scans_complete)
+            return
+        self.scan_cloud_btn.setEnabled(True)
+        self.scan_threads = []
+        self.scan_workers = []
+        errors = list(getattr(self, '_scan_errors', []))
+        if errors:
+            summary = "\n\n".join(f"{name}: {msg}" for name, msg in errors[:6])
+            QMessageBox.critical(self, "Cloud Scan Finished With Errors",
+                                 f"{len(errors)} account scan(s) failed:\n\n{summary}")
+        else:
+            self.status_bar.showMessage("Cloud scan complete", 3000)
 
     def get_all_playlists(self):
         # Returns a list of dicts: {id, name}

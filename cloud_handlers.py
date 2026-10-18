@@ -538,32 +538,49 @@ class SubsonicHandler(_HTTPCloudHandler):
             offset += size
 
         self.total_items = len(albums) or 1
-        for i, alb in enumerate(albums):
-            album_data = self._get_json("getAlbum.view", id=alb.get("id"))
-            songs = album_data.get("album", {}).get("song", [])
-            artist = alb.get("artist") or "Unknown Artist"
-            album_name = alb.get("name") or "Unknown Album"
-            for s in songs:
-                title = s.get("title") or "Untitled"
-                stream_id = s.get("id")
-                url = (f"{self.rest_base}/stream.view?"
-                       + urllib.parse.urlencode({**self._common_params(), "id": stream_id}))
-                # Nextcloud Music / Subsonic servers expose artwork at
-                # getCoverArt.view; a direct image URL avoids re-downloading
-                # (and re-decoding) the whole track for its embedded art.
-                cover_id = s.get("coverArt") or alb.get("coverArt") or ""
-                cover_url = ""
-                if cover_id:
-                    cover_url = (f"{self.rest_base}/getCoverArt.view?"
-                                 + urllib.parse.urlencode({**self._common_params(),
-                                                           "id": cover_id}))
-                self._add_song(
-                    path=f"{artist}/{album_name}/{title}", url=url,
-                    name=title, artist=artist, album=album_name,
-                    cover_url=cover_url or None)
-            self.processed_items = i + 1
-            self.current_file = album_name
-            self.status_message = f"Subsonic: album {i + 1}/{len(albums)}"
+
+        # Fetch album song lists concurrently — sequential one-request-per-album
+        # made scans take minutes on big libraries; a bounded pool cuts this to
+        # roughly one "page" of round trips. Results stay in catalog order.
+        fetch_pool = concurrent.futures.ThreadPoolExecutor(max_workers=8)
+
+        def _fetch_album(payload):
+            i, alb = payload
+            try:
+                album_data = self._get_json("getAlbum.view", id=alb.get("id"))
+            except Exception:
+                return i, []
+            return i, album_data.get("album", {}).get("song", [])
+
+        try:
+            for i, songs in fetch_pool.map(_fetch_album, enumerate(albums)):
+                alb = albums[i]
+                artist = alb.get("artist") or "Unknown Artist"
+                album_name = alb.get("name") or "Unknown Album"
+                for s in songs:
+                    title = s.get("title") or "Untitled"
+                    stream_id = s.get("id")
+                    url = (f"{self.rest_base}/stream.view?"
+                           + urllib.parse.urlencode({**self._common_params(), "id": stream_id}))
+                    # Nextcloud Music / Subsonic servers expose artwork at
+                    # getCoverArt.view; a direct image URL avoids re-downloading
+                    # (and re-decoding) the whole track for its embedded art.
+                    cover_id = s.get("coverArt") or alb.get("coverArt") or ""
+                    cover_url = ""
+                    if cover_id:
+                        cover_url = (f"{self.rest_base}/getCoverArt.view?"
+                                     + urllib.parse.urlencode({**self._common_params(),
+                                                               "id": cover_id}))
+                    self._add_song(
+                        path=f"{artist}/{album_name}/{title}", url=url,
+                        name=title, artist=artist, album=album_name,
+                        cover_url=cover_url or None)
+                self.processed_items = i + 1
+                self.current_file = album_name
+                self.status_message = (f"Subsonic: {len(self.files)} tracks "
+                                       f"({i + 1}/{len(albums)} albums)")
+        finally:
+            fetch_pool.shutdown(wait=False)
 
         self.status_message = f"Subsonic scan complete. Found {len(self.files)} songs."
 
