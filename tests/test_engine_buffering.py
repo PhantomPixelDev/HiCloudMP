@@ -116,3 +116,11 @@ def test_late_buffer_ready_after_stop_is_ignored(qapp):
     from PySide6.QtWidgets import QApplication
     QApplication.processEvents()
     assert eng._pending.shape[0] == 0
+
+
+def test_position_duration_accessors_safe_when_idle(qapp):
+    from eq_engine import EQEngine
+    e = EQEngine()
+    assert e.position_ms() == 0
+    assert e.duration_ms() == 0
+

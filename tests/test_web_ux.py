@@ -50,6 +50,48 @@ def test_lan_ip_is_usable():
     ipaddress.ip_address(ip)  # raises if not a valid IPv4
 
 
+def test_progress_engine_aware():
+    """In EQ-engine mode the native player sits idle - the panel must
+    report the ENGINE's real position/duration instead of frozen zeros."""
+    class _Eng:
+        def position_ms(self):
+            return 1234
+
+        def duration_ms(self):
+            return 5000
+
+    class _Native:
+        def position(self):
+            return 0
+
+        def duration(self):
+            return 0
+
+    stub = type("P", (), {})()
+    stub._using_engine = True
+    stub.eq_engine = _Eng()
+    stub.player = _Native()
+    s = web_control.WebControlServer(player=stub, host="127.0.0.1",
+                                     port=5099, token="t")
+    assert s._get_progress() == {"position": 1234, "duration": 5000}
+
+
+def test_progress_native_when_engine_off():
+    class _Native:
+        def position(self):
+            return 42000
+
+        def duration(self):
+            return 180000
+
+    stub = type("P", (), {})()
+    stub._using_engine = False
+    stub.player = _Native()
+    s = web_control.WebControlServer(player=stub, host="127.0.0.1",
+                                     port=5099, token="t")
+    assert s._get_progress() == {"position": 42000, "duration": 180000}
+
+
 def test_start_web_interface_plain_message(music_player, qtbot, monkeypatch):
     """Status bar speaks help, not jargon, and includes the ready link."""
     class StubServer:

@@ -379,6 +379,22 @@ class EQEngine(QObject):
             ms = min(ms, self._duration_ms)
         self.position_changed.emit(max(0, ms))
 
+    def position_ms(self):
+        """Current playback position in ms (sink-derived; safe when idle)."""
+        if self._sink is None:
+            return self._base_ms
+        try:
+            us = self._sink.processedUSecs()
+        except Exception:
+            return self._base_ms
+        if us < self._prof_us_base:
+            us = self._prof_us_base
+        return self._base_ms + int((us - self._prof_us_base) / 1000)
+
+    def duration_ms(self):
+        """Track duration in ms as known by the engine (0 when unknown)."""
+        return self._duration_ms
+
     def _check_finished(self):
         if (not self._playing or self._finish_emitted or not self._decoding_done
                 or self._error_reported):
