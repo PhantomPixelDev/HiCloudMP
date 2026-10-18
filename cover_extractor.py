@@ -3,6 +3,7 @@ import json
 import io
 import logging
 import subprocess
+import sys
 import tempfile
 from base64 import b64decode
 from PIL import Image, UnidentifiedImageError
@@ -23,6 +24,33 @@ from io import BytesIO
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+
+def find_ffmpeg(exe_dir=None):
+    """Resolve the ffmpeg binary for subprocess calls.
+
+    Order: a bundled copy shipped next to the program (standalone/installed
+    builds), then one available on PATH. Returns a command string usable as
+    argv[0]; falls back to the bare name so PATH lookups still apply."""
+    import shutil
+    if exe_dir is None:
+        try:
+            if getattr(sys, "frozen", False):
+                exe_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+            else:
+                exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+        except Exception:
+            exe_dir = None
+    names = ("ffmpeg.exe", "ffmpeg") if os.name == "nt" else ("ffmpeg",)
+    if exe_dir:
+        for name in names:
+            cand = os.path.join(exe_dir, name)
+            if os.path.isfile(cand):
+                return cand
+    found = shutil.which("ffmpeg")
+    if found:
+        return found
+    return "ffmpeg" if os.name == "nt" else "ffmpeg"
+
 class CoverExtractor:
     """
     A class to extract cover art from audio files and streams.
@@ -37,7 +65,7 @@ class CoverExtractor:
                 temp_path = temp_file.name
         
             cmd = [
-                'ffmpeg',
+                find_ffmpeg(),
                 '-i', file_path,
                 '-an',              # Disable audio
                 '-vcodec', 'copy',  # Copy the video stream directly
