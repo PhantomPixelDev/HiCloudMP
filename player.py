@@ -17,6 +17,7 @@ from library_view import LibraryView
 # (player.SettingsDialog, monkeypatched player.CloudAccountsDialog) keep working
 from dialogs import CloudAccountsDialog, SettingsDialog  # noqa: F401
 from playback import PlaybackEngineMixin
+from visualizer import SFVisualizer
 import icons
 
 from PySide6.QtWidgets import (
@@ -143,6 +144,12 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
 
         # UI
         self.setup_ui()
+
+        # Visualizer polling (~20 Hz): engine spectrum or idle baseline.
+        self._viz_timer = QTimer(self)
+        self._viz_timer.setInterval(50)
+        self._viz_timer.timeout.connect(self._update_visualizer)
+        self._viz_timer.start()
         
         # Load saved data
         self.load_media_folders()
@@ -259,6 +266,11 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         """Apply the unified theme (theme/accent/density resolved from QSettings)."""
         import theme as _theme
         _theme.apply_theme(self)
+        try:
+            accent = _theme.icon_colors(self.settings)[0]
+            self.visualizer.set_palette(accent)
+        except Exception:
+            pass
         self._refresh_icon_colors()
 
     # === Accent icon helpers ===
@@ -324,6 +336,11 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
             # Apply the unified theme (Dark/Light, accent color, density)
             import theme as _theme
             _theme.apply_theme(self)
+            try:
+                accent = _theme.icon_colors(dialog.settings)[0]
+                self.visualizer.set_palette(accent)
+            except Exception:
+                pass
             self._refresh_icon_colors()
             # Apply volume
             volume = dialog.settings.value("volume", 70, int)
@@ -737,6 +754,11 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         buttons_layout.addWidget(self.repeat_btn)
         buttons_layout.addStretch(1)
 
+        # Spectrum visualizer (EQ-engine tap; calm baseline when EQ is off)
+        self.visualizer = SFVisualizer()
+        self.visualizer.setFixedSize(120, 32)
+        buttons_layout.addWidget(self.visualizer)
+
         # Volume (icon + compact slider in the transport bar)
         self.volume_icon = QToolButton()
         self.volume_icon.setIcon(self._icon("volume", size=18))
@@ -919,6 +941,20 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
             pass
 
             
+    def _update_visualizer(self):
+        """Feed the visualizer: engine spectrum when active, else idle."""
+        try:
+            if getattr(self, "_using_engine", False):
+                data = self.eq_engine.get_spectrum()
+            else:
+                data = None
+        except Exception:
+            data = None
+        try:
+            self.visualizer.set_spectrum(data)
+        except Exception:
+            pass
+
     def update_position(self, position):
         self.seek_slider.blockSignals(True)
         self.seek_slider.setValue(position)
