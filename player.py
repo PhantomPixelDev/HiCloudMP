@@ -827,7 +827,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
             # this track's media signals (EndOfMedia auto-advance, etc.)
             self._disconnect_stream_handlers()
             src = os.path.abspath(path)
-            if self._eq_active():
+            if self._route_through_engine():
                 self._engine_start('file', src)
             else:
                 # Set up and play the media
@@ -1295,7 +1295,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
             else:
                 # Ampache/Subsonic embed their session auth in the URL itself
                 # (action=stream / stream.view); stream directly.
-                if self._eq_active():
+                if self._route_through_engine():
                     self._engine_start('url', url, file_name)
                 else:
                     self._play_stream(url, file_name)
@@ -1599,7 +1599,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
                     raise FileNotFoundError(f"File not found at absolute path: {abs_path}")
                     
                 url = QUrl.fromLocalFile(abs_path)
-                if self._eq_active():
+                if self._route_through_engine():
                     self._engine_start('file', abs_path, file_name)
                     self.play_btn.setIcon(self._icon_pause())
                 else:

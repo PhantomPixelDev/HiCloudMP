@@ -31,6 +31,26 @@ class PlaybackEngineMixin:
             return QMediaPlayer.PlaybackState.StoppedState
         return self.player.playbackState()
 
+    def _route_through_engine(self):
+        """The engine takes the track when the EQ is active, or when the
+        user just wants the visualizer (flat gains = bit-transparent)."""
+        try:
+            if self._eq_active():
+                return True
+            return bool(self.settings.value("ui/visualizer_enabled",
+                                            False, type=bool))
+        except Exception:
+            return False
+
+    def _sync_engine_gains(self):
+        """Push routing-appropriate gains to the engine: the user's curve
+        when the EQ is on, flat otherwise (visualizer-only run must not
+        color the audio)."""
+        if self._eq_active():
+            self.eq_engine.set_gains(self._eq_gains())
+        else:
+            self.eq_engine.set_gains((0.0,) * 10)
+
     def _eq_active(self):
         """EQ drives playback only when enabled and gains are non-neutral."""
         try:
@@ -46,6 +66,7 @@ class PlaybackEngineMixin:
         self._disconnect_stream_handlers()
         self._using_engine = True
         self._engine_source = (kind, src, name)
+        self._sync_engine_gains()
         self.eq_engine.play(src)
 
     def _on_engine_state(self, state):

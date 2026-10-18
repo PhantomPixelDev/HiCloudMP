@@ -465,6 +465,16 @@ class SettingsDialog(QDialog):
         hint = QLabel("Used every time the app starts.")
         hint.setObjectName("hintLabel")
         form.addRow("", hint)
+        self.visualizer_checkbox = QCheckBox("Show spectrum visualizer while playing")
+        self.visualizer_checkbox.setChecked(
+            self.settings.value("ui/visualizer_enabled", False, type=bool))
+        form.addRow("", self.visualizer_checkbox)
+        viz_hint = QLabel("Routes audio through the equalizer engine "
+                          "(bit-identical with a flat EQ) so the spectrum "
+                          "shows real data even with the EQ disabled.")
+        viz_hint.setObjectName("hintLabel")
+        viz_hint.setWordWrap(True)
+        form.addRow("", viz_hint)
         return page
 
     def _build_appearance_page(self):
@@ -719,6 +729,8 @@ class SettingsDialog(QDialog):
 
     def save_settings(self):
         self.settings.setValue("volume", self.volume_slider.value())
+        self.settings.setValue("ui/visualizer_enabled",
+                               self.visualizer_checkbox.isChecked())
         self.settings.setValue("theme", self.theme_combo.currentText())
         # Appearance persistence (accent stored as hex; density lowercased)
         import theme as _theme
