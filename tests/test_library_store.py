@@ -122,6 +122,26 @@ def test_player_scans_library_in_background(music_player, tmp_path, monkeypatch)
         str(tmp_path / "sub" / "c.flac")]
 
 
+def test_file_menu_has_rescan_library(music_player):
+    """File > Rescan Library re-walks folders in the background."""
+    mp = music_player
+    mp.media_folders = []  # keep the scan trivial
+    names, targets = [], {}
+    for act in mp.menuBar().actions():      # top-level menus
+        m = act.menu()
+        if m is None:
+            continue
+        for a in m.actions():
+            if a.text().strip():
+                names.append(a.text())
+                targets[a.text()] = a
+    assert "Rescan Library" in names, f"menu items: {names}"
+    started = []
+    mp._start_local_scan = lambda: started.append(1)
+    targets["Rescan Library"].trigger()
+    assert started, "triggering Rescan Library must start a scan"
+
+
 def test_view_tree_and_search_use_store_not_walk(music_player, tmp_path, monkeypatch):
     """update_library_tree + search_music render from the store; os.walk
     in the library module is forbidden (UI-thread freeze regression)."""

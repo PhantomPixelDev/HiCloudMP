@@ -204,6 +204,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         file_menu.setTitle("File")
         file_menu.addAction("Add Folder", self.add_folder)
         file_menu.addAction("Add Files", self.add_files)
+        file_menu.addAction("Rescan Library", self.rescan_library)
         file_menu.addAction("Add Cloud Account...", self.add_cloud)
         file_menu.addAction("Scan Cloud Library", self.scan_clouds)
         file_menu.addSeparator()
@@ -2034,6 +2035,11 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         if self._local_scan_worker is not None:
             self._local_scan_worker.abort()
             self.status_bar.showMessage("Library scan canceled")
+
+    def rescan_library(self):
+        """File > Rescan Library: re-walk media folders in the background."""
+        self._start_local_scan()
+        self.status_bar.showMessage("Rescanning library…")
 
     def _refresh_local_section(self):
         """Re-render only the Local Media subtree from the store."""
