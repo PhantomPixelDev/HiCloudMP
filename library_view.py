@@ -1,7 +1,6 @@
 import os
 from PySide6.QtWidgets import QMenu, QTreeWidgetItem, QMessageBox, QStyle, QAbstractItemView
 from PySide6.QtCore import Qt
-from utils import is_music_file, scan_music_files
 
 class LibraryView:
     def __init__(self, app):
@@ -39,17 +38,68 @@ class LibraryView:
             self.app.new_playlist()
 
     def update_library_tree(self):
-        self.app.library_tree.clear()
-        self.app.library_tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        tree = self.app.library_tree
+        tree.clear()
+        tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self._insert_local_root(0)
+        self._insert_playlists_root(1)
+        self._insert_cloud_root(2)
+
+    def refresh_local_section(self):
+        """Re-render only the Local Media subtree from the store (cheap;
+        called per background-scan batch)."""
+        tree = self.app.library_tree
+        if self._in_search_mode():
+            return  # don't stomp on search results mid-typing
+        for i in range(tree.topLevelItemCount()):
+            data = tree.topLevelItem(i).data(0, Qt.UserRole)
+            if data and data.get("type") == "local_root":
+                tree.takeTopLevelItem(i)
+                self._insert_local_root(i)
+                return
+        self.update_library_tree()
+
+    def _in_search_mode(self):
+        try:
+            return bool(self.app.search_input.text().strip())
+        except Exception:
+            return False
+
+    def _insert_local_root(self, position):
+        tree = self.app.library_tree
         folder_icon = self.app.style().standardIcon(QStyle.SP_DirIcon)
         file_icon = self.app.style().standardIcon(QStyle.SP_FileIcon)
-        # Local folders
-        local_root = QTreeWidgetItem(self.app.library_tree, ["Local Media"])
+        local_root = QTreeWidgetItem(["Local Media"])
         local_root.setExpanded(True)
         local_root.setData(0, Qt.UserRole, {"type": "local_root"})
-        # Playlists
-        playlists_root = QTreeWidgetItem(self.app.library_tree, ["Playlists"])
+        tree.insertTopLevelItem(position, local_root)
+        # Folders and files come from the store - never walked here
+        data = self.app.library_store.local_tree_data()
+        for folder in self.app.media_folders:
+            folder_item = QTreeWidgetItem(local_root, [os.path.basename(folder)])
+            folder_item.setData(0, Qt.UserRole, {"type": "local_folder", "path": folder})
+            folder_item.setIcon(0, folder_icon)
+            entry = data.get(folder, {})
+            for dir_name in entry.get("subdirs", []):
+                dir_path = os.path.join(folder, dir_name)
+                subdir_item = QTreeWidgetItem(folder_item, [dir_name])
+                subdir_item.setData(0, Qt.UserRole, {"type": "local_folder", "path": dir_path})
+                subdir_item.setIcon(0, folder_icon)
+            for fpath in entry.get("files", []):
+                file_item = QTreeWidgetItem(folder_item, [os.path.basename(fpath)])
+                file_item.setData(0, Qt.UserRole, {"type": "local_file", "path": fpath})
+                file_item.setIcon(0, file_icon)
+        open_folder_item = QTreeWidgetItem(local_root, ["Open Folder..."])
+        open_folder_item.setData(0, Qt.UserRole, {"type": "open_folder"})
+        open_folder_item.setIcon(0, folder_icon)
+
+    def _insert_playlists_root(self, position):
+        tree = self.app.library_tree
+        folder_icon = self.app.style().standardIcon(QStyle.SP_DirIcon)
+        file_icon = self.app.style().standardIcon(QStyle.SP_FileIcon)
+        playlists_root = QTreeWidgetItem(["Playlists"])
         playlists_root.setExpanded(True)
+        tree.insertTopLevelItem(position, playlists_root)
         for playlist in self.app.playlists:
             playlist_item = QTreeWidgetItem(playlists_root, [playlist.name])
             playlist_item.setData(0, Qt.UserRole, {"type": "playlist", "id": playlist.id})
@@ -57,33 +107,14 @@ class LibraryView:
         new_playlist_item = QTreeWidgetItem(playlists_root, ["+ New Playlist"])
         new_playlist_item.setData(0, Qt.UserRole, {"type": "new_playlist"})
         new_playlist_item.setIcon(0, folder_icon)
-        # Local folders and files
-        for folder in self.app.media_folders:
-            folder_item = QTreeWidgetItem(local_root, [os.path.basename(folder)])
-            folder_item.setData(0, Qt.UserRole, {"type": "local_folder", "path": folder})
-            folder_item.setIcon(0, folder_icon)
-            try:
-                for root, dirs, files in os.walk(folder):
-                    if root == folder:
-                        for dir_name in dirs:
-                            dir_path = os.path.join(root, dir_name)
-                            subdir_item = QTreeWidgetItem(folder_item, [dir_name])
-                            subdir_item.setData(0, Qt.UserRole, {"type": "local_folder", "path": dir_path})
-                            subdir_item.setIcon(0, folder_icon)
-                        for file in files:
-                            if is_music_file(file):
-                                file_path = os.path.join(root, file)
-                                file_item = QTreeWidgetItem(folder_item, [file])
-                                file_item.setData(0, Qt.UserRole, {"type": "local_file", "path": file_path})
-                                file_item.setIcon(0, file_icon)
-            except Exception as e:
-                print(f"Error scanning subfolders: {e}")
-        open_folder_item = QTreeWidgetItem(local_root, ["Open Folder..."])
-        open_folder_item.setData(0, Qt.UserRole, {"type": "open_folder"})
-        open_folder_item.setIcon(0, folder_icon)
-        # Cloud section
-        cloud_root = QTreeWidgetItem(self.app.library_tree, ["Cloud Media"])
+
+    def _insert_cloud_root(self, position):
+        tree = self.app.library_tree
+        folder_icon = self.app.style().standardIcon(QStyle.SP_DirIcon)
+        file_icon = self.app.style().standardIcon(QStyle.SP_FileIcon)
+        cloud_root = QTreeWidgetItem(["Cloud Media"])
         cloud_root.setExpanded(True)
+        tree.insertTopLevelItem(position, cloud_root)
         for idx, cloud in enumerate(self.app.clouds):
             cloud_item = QTreeWidgetItem(cloud_root, [cloud["name"]])
             cloud_item.setData(0, Qt.UserRole, {"type": "cloud_account", "index": idx})
@@ -124,29 +155,28 @@ class LibraryView:
                         file_item.setIcon(0, file_icon)
 
     def search_music(self):
+        """Search the in-memory index (local) + cloud file lists.
+        Never walks the filesystem."""
         term = self.app.search_input.text().strip().lower()
         if not term:
             self.update_library_tree()
             return
         self.app.status_bar.showMessage(f"Searching for: {term}")
-        self.app.library_tree.clear()
-        search_root = QTreeWidgetItem(self.app.library_tree, ["Search Results"])
+        tree = self.app.library_tree
+        tree.clear()
+        search_root = QTreeWidgetItem(tree, ["Search Results"])
         search_root.setExpanded(True)
-        # Local search
+        # Local: from the store index
         local_results = QTreeWidgetItem(search_root, ["Local Media"])
         local_results.setExpanded(True)
         found_local = False
-        for folder in self.app.media_folders:
-            for root, _, files in os.walk(folder):
-                for file in files:
-                    if is_music_file(file) and term in file.lower():
-                        full_path = os.path.join(root, file)
-                        result_item = QTreeWidgetItem(local_results, [file])
-                        result_item.setData(0, Qt.UserRole, {"type": "local_file", "path": full_path})
-                        found_local = True
+        for path in self.app.library_store.search_local(term):
+            result_item = QTreeWidgetItem(local_results, [os.path.basename(path)])
+            result_item.setData(0, Qt.UserRole, {"type": "local_file", "path": path})
+            found_local = True
         if not found_local:
             QTreeWidgetItem(local_results, ["No matches found"])
-        # Cloud search
+        # Cloud: already in memory
         cloud_results = QTreeWidgetItem(search_root, ["Cloud Media"])
         cloud_results.setExpanded(True)
         found_cloud = False

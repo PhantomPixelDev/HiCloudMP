@@ -510,6 +510,21 @@ class MusicPlayer(QMainWindow):
         self.eq_engine.error_occurred.connect(self._engine_playback_error)
         self.eq_engine.state_changed.connect(self._on_engine_state)
         
+        # Library data model + background scanner (no os.walk on the UI
+        # thread) and the LibraryView delegate that renders from it. These
+        # must exist before setup_ui() connects search/tree signals.
+        try:
+            self.library_mgr = LibraryView(self)
+            self.update_library_tree = self.library_mgr.update_library_tree
+            self.on_library_item_clicked = self.library_mgr.on_library_item_clicked
+            self.search_music = self.library_mgr.search_music
+        except Exception as e:
+            print(f"Warning: LibraryView init failed: {e}")
+        from library_store import LibraryStore
+        self.library_store = LibraryStore()
+        self._local_scan_worker = None
+        self._local_scan_thread = None
+
         # UI
         self.setup_ui()
         
@@ -517,6 +532,7 @@ class MusicPlayer(QMainWindow):
         self.load_media_folders()
         self.load_clouds()
         self.load_playlists()
+        self._start_local_scan()
         
         # Playlists manager (delegate playlist operations)
         try:
@@ -531,15 +547,6 @@ class MusicPlayer(QMainWindow):
             self.delete_playlist = self.playlists_mgr.delete_playlist
         except Exception as e:
             print(f"Warning: PlaylistsManager init failed: {e}")
-        
-        # Library view (delegate library tree and search)
-        try:
-            self.library_mgr = LibraryView(self)
-            self.update_library_tree = self.library_mgr.update_library_tree
-            self.on_library_item_clicked = self.library_mgr.on_library_item_clicked
-            self.search_music = self.library_mgr.search_music
-        except Exception as e:
-            print(f"Warning: LibraryView init failed: {e}")
         
         self.web_server = None
         self.web_port = 5000
@@ -2215,156 +2222,6 @@ class MusicPlayer(QMainWindow):
             self.new_playlist()
         # For folders, just expand/collapse (default QTreeWidget behavior)
     
-    def update_library_tree(self):
-        """Update the library tree with current data"""
-        self.library_tree.clear()
-        self.library_tree.setSelectionMode(QTreeWidget.ExtendedSelection)
-        folder_icon = self._icon("folder", role="dim", size=16)
-        file_icon = self._icon("music", role="dim", size=16)
-        # Local folders section
-        local_root = QTreeWidgetItem(self.library_tree, ["Local Media"])
-        local_root.setExpanded(True)
-        local_root.setData(0, Qt.UserRole, {"type": "local_root"})
-        # Add playlists section
-        playlists_root = QTreeWidgetItem(self.library_tree, ["Playlists"])
-        playlists_root.setExpanded(True)
-        for playlist in self.playlists:
-            playlist_item = QTreeWidgetItem(playlists_root, [playlist.name])
-            playlist_item.setData(0, Qt.UserRole, {"type": "playlist", "id": playlist.id})
-            playlist_item.setIcon(0, file_icon)
-        new_playlist_item = QTreeWidgetItem(playlists_root, ["+ New Playlist"])
-        new_playlist_item.setData(0, Qt.UserRole, {"type": "new_playlist"})
-        new_playlist_item.setIcon(0, folder_icon)
-        # Local folders and files
-        for folder in self.media_folders:
-            folder_item = QTreeWidgetItem(local_root, [os.path.basename(folder)])
-            folder_item.setData(0, Qt.UserRole, {"type": "local_folder", "path": folder})
-            folder_item.setIcon(0, folder_icon)
-            try:
-                for root, dirs, files in os.walk(folder):
-                    if root == folder:
-                        # Add subfolders
-                        for dir_name in dirs:
-                            dir_path = os.path.join(root, dir_name)
-                            subdir_item = QTreeWidgetItem(folder_item, [dir_name])
-                            subdir_item.setData(0, Qt.UserRole, {"type": "local_folder", "path": dir_path})
-                            subdir_item.setIcon(0, folder_icon)
-                        # Add files
-                        for file in files:
-                            if is_music_file(file):
-                                file_path = os.path.join(root, file)
-                                file_item = QTreeWidgetItem(folder_item, [file])
-                                file_item.setData(0, Qt.UserRole, {"type": "local_file", "path": file_path})
-                                file_item.setIcon(0, file_icon)
-            except Exception as e:
-                print(f"Error scanning subfolders: {e}")
-        open_folder_item = QTreeWidgetItem(local_root, ["Open Folder..."])
-        open_folder_item.setData(0, Qt.UserRole, {"type": "open_folder"})
-        open_folder_item.setIcon(0, folder_icon)
-        # Cloud section
-        cloud_root = QTreeWidgetItem(self.library_tree, ["Cloud Media"])
-        cloud_root.setExpanded(True)
-        for idx, cloud in enumerate(self.clouds):
-            cloud_item = QTreeWidgetItem(cloud_root, [cloud["name"]])
-            cloud_item.setData(0, Qt.UserRole, {"type": "cloud_account", "index": idx})
-            cloud_item.setIcon(0, folder_icon)
-            if "files" in cloud and cloud["files"]:
-                # Group files by folder structure
-                folder_structure = {}
-                for file_idx, file in enumerate(cloud["files"]):
-                    path = file["path"]
-                    path = path.replace('//', '/').strip('/')
-                    parts = path.split("/")
-                    if len(parts) > 1:
-                        folder = "/".join(parts[:-1]) or "/"
-                        filename = parts[-1]
-                    else:
-                        folder = "/"
-                        filename = path
-                    if folder not in folder_structure:
-                        folder_structure[folder] = []
-                    folder_structure[folder].append({
-                        "name": filename,
-                        "file_index": file_idx
-                    })
-                # Add folders and files to tree
-                for folder, files in folder_structure.items():
-                    if not folder:
-                        continue
-                    folder_item = QTreeWidgetItem(cloud_item, [folder])
-                    folder_item.setData(0, Qt.UserRole, {
-                        "type": "cloud_folder",
-                        "cloud_index": idx,
-                        "folder": folder,
-                        "file_indices": [f["file_index"] for f in files]
-                    })
-                    folder_item.setIcon(0, folder_icon)
-                    # Add files in this folder
-                    for f in files:
-                        file_info = cloud["files"][f["file_index"]]
-                        file_item = QTreeWidgetItem(folder_item, [f["name"]])
-                        file_item.setData(0, Qt.UserRole, {
-                            "type": "cloud_file",
-                            "cloud_index": idx,
-                            "file_index": f["file_index"]
-                        })
-                        file_item.setIcon(0, file_icon)
-
-    def search_music(self):
-        """Search for music in local and cloud libraries"""
-        search_term = self.search_input.text().strip().lower()
-        if not search_term:
-            # If search is empty, restore original tree
-            self.update_library_tree()
-            return
-            
-        self.status_bar.showMessage(f"Searching for: {search_term}")
-        
-        # Clear and setup search results tree
-        self.library_tree.clear()
-        search_root = QTreeWidgetItem(self.library_tree, ["Search Results"])
-        search_root.setExpanded(True)
-        
-        # Search local folders
-        local_results = QTreeWidgetItem(search_root, ["Local Media"])
-        local_results.setExpanded(True)
-        
-        found_local = False
-        for folder in self.media_folders:
-            for root, _, files in os.walk(folder):
-                for file in files:
-                    if is_music_file(file) and search_term in file.lower():
-                        full_path = os.path.join(root, file)
-                        result_item = QTreeWidgetItem(local_results, [file])
-                        result_item.setData(0, Qt.UserRole, {"type": "local_file", "path": full_path})
-                        found_local = True
-        
-        if not found_local:
-            QTreeWidgetItem(local_results, ["No matches found"])
-        
-        # Search cloud files
-        cloud_results = QTreeWidgetItem(search_root, ["Cloud Media"])
-        cloud_results.setExpanded(True)
-        
-        found_cloud = False
-        for cloud_idx, cloud in enumerate(self.clouds):
-            if "files" in cloud and cloud["files"]:
-                for file_idx, file in enumerate(cloud["files"]):
-                    file_name = os.path.basename(file["path"])
-                    if search_term in file_name.lower():
-                        result_item = QTreeWidgetItem(cloud_results, [f"{file_name} ({cloud['name']})"])
-                        result_item.setData(0, Qt.UserRole, {
-                            "type": "cloud_file", 
-                            "cloud_index": cloud_idx, 
-                            "file_index": file_idx
-                        })
-                        found_cloud = True
-        
-        if not found_cloud:
-            QTreeWidgetItem(cloud_results, ["No matches found"])
-            
-        self.status_bar.showMessage(f"Search complete: {search_term}")
-    
     def add_folder(self):
         """Add a folder to the media library"""
         folder = QFileDialog.getExistingDirectory(self, "Add Media Folder")
@@ -2372,6 +2229,7 @@ class MusicPlayer(QMainWindow):
             self.media_folders.append(folder)
             self.save_media_folders()
             self.update_library_tree()
+            self._start_local_scan()
     
     def add_files(self):
         """Add individual music files to the library or playlist"""
@@ -2427,6 +2285,7 @@ class MusicPlayer(QMainWindow):
                 self.media_folders.extend(unique_folders)
                 self.save_media_folders()
                 self.update_library_tree()
+                self._start_local_scan()
                 self.status_bar.showMessage(f"Added {len(files)} files to library")
             else:
                 self.status_bar.showMessage("Files already in library")
@@ -2513,7 +2372,7 @@ class MusicPlayer(QMainWindow):
             worker.moveToThread(thread)
             thread.started.connect(worker.run)
             thread.finished.connect(lambda w=worker: w.deleteLater())
-            thread.finished.connect(thread.deleteLater)
+            # (no thread.deleteLater-on-own-finished: aborts mid-teardown)
             # handle_scan_complete runs BEFORE thread.quit is processed, so the
             # not-running check needs a second chance on real thread exit.
             thread.finished.connect(self._check_all_scans_complete)
@@ -2546,7 +2405,85 @@ class MusicPlayer(QMainWindow):
             if hasattr(worker, 'abort'):
                 worker.abort()
         self.status_bar.showMessage("Cloud scan canceled")
-    
+
+    # ------------------------------------------------ local library scan
+    def _start_local_scan(self):
+        """(Re)scan local media folders in a background QThread."""
+        from workers import LibraryScanWorker
+        # one scan at a time: abort the previous, start fresh
+        if self._local_scan_worker is not None:
+            self._local_scan_worker.abort()
+            self._local_scan_worker = None
+        self.library_store.reset()
+        if not self.media_folders:
+            self.update_library_tree()
+            return
+        worker = LibraryScanWorker(self.media_folders)
+        thread = QThread()
+        self._local_scan_worker = worker
+        self._local_scan_thread = thread
+        worker.folder_scanned.connect(self._on_local_folder_scanned)
+        worker.files_scanned.connect(self._on_local_files_scanned)
+        worker.indexed.connect(self._on_local_indexed)
+        worker.finished.connect(self._on_local_scan_finished)
+        worker.finished.connect(thread.quit)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        thread.finished.connect(worker.deleteLater)
+        # NOTE: never thread.deleteLater-on-its-own-finished: it destroys the
+        # C++ QThread mid-teardown (native 0xC0000409 abort). The thread
+        # object stays referenced in _scan_refs_keepalive instead.
+        thread.start()
+
+    def _on_local_folder_scanned(self, folder, subdirs):
+        if not self._signal_is_current():
+            return
+        self.library_store.add_folder(folder, subdirs)
+        self._refresh_local_section()
+
+    def _on_local_files_scanned(self, folder, chunk):
+        if not self._signal_is_current():
+            return
+        self.library_store.add_tree_files(folder, chunk)
+        self._refresh_local_section()
+
+    def _on_local_indexed(self, paths):
+        if not self._signal_is_current():
+            return
+        self.library_store.add_indexed(paths)
+        self.status_bar.showMessage(f"Library: {self.library_store.local_count()} tracks", 3000)
+
+    def _signal_is_current(self):
+        """Drop signals from a superseded (aborted) scan worker."""
+        try:
+            return self.sender() is self._local_scan_worker
+        except Exception:
+            return True
+
+    def _on_local_scan_finished(self, total):
+        # Keep the finished worker/thread referenced until the next scan
+        # replaces them: dropping the last Python reference here destroys
+        # a QThread that may still be exiting (native 0xC0000409 abort).
+        if self._local_scan_worker is not None:
+            self._scan_refs_keepalive = getattr(self, "_scan_refs_keepalive", [])
+            self._scan_refs_keepalive.append(
+                (self._local_scan_worker, self._local_scan_thread))
+        self._local_scan_worker = None
+        self._local_scan_thread = None
+        self.status_bar.showMessage(f"Library scan complete: {total} tracks", 5000)
+
+    def cancel_local_scan(self):
+        if self._local_scan_worker is not None:
+            self._local_scan_worker.abort()
+            self.status_bar.showMessage("Library scan canceled")
+
+    def _refresh_local_section(self):
+        """Re-render only the Local Media subtree from the store."""
+        try:
+            self.library_mgr.refresh_local_section()
+        except Exception:
+            pass
+
     def new_playlist(self):
         """Create a new playlist"""
         name, ok = QInputDialog.getText(self, "New Playlist", "Playlist name:")

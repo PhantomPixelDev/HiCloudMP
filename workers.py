@@ -7,6 +7,70 @@ from io import BytesIO
 from urllib.parse import urlparse
 from cover_extractor import CoverExtractor
 from cloud_handlers import CLOUD_TYPES
+from utils import is_music_file
+
+class LibraryScanWorker(QObject):
+    """Walks media folders OFF the UI thread, feeding LibraryStore.
+
+    Signals (all from the worker thread; Qt queues them to the receiver):
+      folder_scanned(folder, subdirs)  - folder registered, depth-0 dirs
+      files_scanned(folder, chunk)     - depth-0 music files, chunked
+      indexed(paths)                   - recursive music paths for search
+      finished(total_indexed)          - clean end (also after abort)
+    """
+    folder_scanned = Signal(str, list)
+    files_scanned = Signal(str, list)
+    indexed = Signal(list)
+    finished = Signal(int)
+
+    CHUNK = 500
+
+    def __init__(self, folders):
+        super().__init__()
+        self.folders = list(folders or [])
+        self._abort = False
+
+    def run(self):
+        self._indexed_total = 0
+        try:
+            for folder in self.folders:
+                if self._abort:
+                    break
+                try:
+                    self._walk_folder(folder)
+                except Exception as e:
+                    print(f"Library scan error in {folder}: {e}")
+        finally:
+            self.finished.emit(self._indexed_total)
+
+    def _walk_folder(self, folder):
+        subdirs = []
+        top_files = []
+        for root, dirs, files in os.walk(folder):
+            if self._abort:
+                return
+            if root == folder:
+                subdirs = list(dirs)
+                top_files = [os.path.join(folder, f) for f in files
+                             if is_music_file(f)]
+            else:
+                # deeper levels only feed the search index
+                chunk = [os.path.join(root, f) for f in files if is_music_file(f)]
+                if chunk:
+                    self._indexed_total += len(chunk)
+                    self.indexed.emit(chunk)
+        self.folder_scanned.emit(folder, subdirs)
+        self._indexed_total += len(top_files)
+        if top_files:
+            self.indexed.emit(top_files)
+        for i in range(0, len(top_files), self.CHUNK):
+            if self._abort:
+                return
+            self.files_scanned.emit(folder, top_files[i:i + self.CHUNK])
+
+    def abort(self):
+        self._abort = True
+
 
 class DownloadWorker(QObject):
     """Worker for downloading files from cloud storage"""
