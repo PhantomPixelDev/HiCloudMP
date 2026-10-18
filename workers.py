@@ -9,26 +9,27 @@ from cover_extractor import CoverExtractor
 from cloud_handlers import CLOUD_TYPES
 from utils import is_music_file
 
-class LibraryScanWorker(QObject):
-    """Walks media folders OFF the UI thread, feeding LibraryStore.
+class LibraryScanWorker:
+    """Walks media folders and hands every result to `dispatch`.
 
-    Signals (all from the worker thread; Qt queues them to the receiver):
-      folder_scanned(folder, subdirs)  - folder registered, depth-0 dirs
-      files_scanned(folder, chunk)     - depth-0 music files, chunked
-      indexed(paths)                   - recursive music paths for search
-      finished(total_indexed)          - clean end (also after abort)
+    Deliberately NOT a QObject on a QThread: results reach the UI thread
+    through MusicPlayer.run_on_ui (a queued callable bridge), so there is
+    no Qt object affinity on a second thread and none of the
+    deleteLater/destroy-while-running races that abort native processes.
+    Runs as a plain daemon thread; abort() is checked per folder/chunk.
     """
-    folder_scanned = Signal(str, list)
-    files_scanned = Signal(str, list)
-    indexed = Signal(list)
-    finished = Signal(int)
 
     CHUNK = 500
 
-    def __init__(self, folders):
-        super().__init__()
+    def __init__(self, folders, dispatch):
         self.folders = list(folders or [])
+        self._dispatch = dispatch    # fn(callable) -> run on the UI thread
         self._abort = False
+        self._indexed_total = 0
+        self.on_folder = None        # fn(folder, subdirs)
+        self.on_files = None         # fn(folder, tree_chunk)
+        self.on_indexed = None       # fn(paths)
+        self.on_finished = None      # fn(total)
 
     def run(self):
         self._indexed_total = 0
@@ -41,7 +42,7 @@ class LibraryScanWorker(QObject):
                 except Exception as e:
                     print(f"Library scan error in {folder}: {e}")
         finally:
-            self.finished.emit(self._indexed_total)
+            self._emit(self.on_finished, self._indexed_total)
 
     def _walk_folder(self, folder):
         subdirs = []
@@ -58,15 +59,19 @@ class LibraryScanWorker(QObject):
                 chunk = [os.path.join(root, f) for f in files if is_music_file(f)]
                 if chunk:
                     self._indexed_total += len(chunk)
-                    self.indexed.emit(chunk)
-        self.folder_scanned.emit(folder, subdirs)
+                    self._emit(self.on_indexed, chunk)
+        self._emit(self.on_folder, folder, subdirs)
         self._indexed_total += len(top_files)
         if top_files:
-            self.indexed.emit(top_files)
+            self._emit(self.on_indexed, list(top_files))
         for i in range(0, len(top_files), self.CHUNK):
             if self._abort:
                 return
-            self.files_scanned.emit(folder, top_files[i:i + self.CHUNK])
+            self._emit(self.on_files, folder, top_files[i:i + self.CHUNK])
+
+    def _emit(self, cb, *args):
+        if cb is not None:
+            self._dispatch(lambda cb=cb, a=args: cb(*a))
 
     def abort(self):
         self._abort = True

@@ -66,14 +66,20 @@ def test_worker_walks_and_emits(tmp_path):
     (root / "noise.txt").write_bytes(b"x")
     (root / "sub" / "02 song.flac").write_bytes(b"x")
 
-    w = LibraryScanWorker([str(root)])
     folders, tree_files, indexed, totals = [], [], [], []
-    w.folder_scanned.connect(lambda f, s: folders.append((f, s)))
-    w.files_scanned.connect(lambda f, c: tree_files.append((f, list(c))))
-    w.indexed.connect(lambda c: indexed.extend(c))
-    w.finished.connect(totals.append)
+    executed = []
+    w = LibraryScanWorker([str(root)], dispatch=executed.append)
+    w.on_folder = lambda f, s: folders.append((f, s))
+    w.on_files = lambda f, c: tree_files.append((f, list(c)))
+    w.on_indexed = lambda c: indexed.extend(c)
+    w.on_finished = lambda t: totals.append(t)
     w.run()
 
+    assert totals == [], "callbacks must be dispatched, not run inline"
+    assert executed, "walk must hand its callbacks to dispatch"
+    assert folders == []          # nothing ran until the UI thread does
+    for fn in executed:           # simulate the UI thread pumping
+        fn()
     assert totals == [2]  # both music files, recursive
     assert folders == [(str(root), ["sub"])]
     flat_tree = [p for _, chunk in tree_files for p in chunk]
@@ -89,11 +95,14 @@ def test_worker_respects_abort(tmp_path):
     root = tmp_path / "lib"
     root.mkdir()
     (root / "a.mp3").write_bytes(b"x")
-    w = LibraryScanWorker([str(root)])
-    w.abort()
+    executed = []
     totals = []
-    w.finished.connect(totals.append)
+    w = LibraryScanWorker([str(root)], dispatch=executed.append)
+    w.on_finished = lambda t: totals.append(t)
+    w.abort()
     w.run()
+    for fn in executed:
+        fn()
     assert totals == [0]  # aborted: nothing walked, clean finish
 
 

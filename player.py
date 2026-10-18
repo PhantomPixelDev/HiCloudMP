@@ -2003,66 +2003,56 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
 
     # ------------------------------------------------ local library scan
     def _start_local_scan(self):
-        """(Re)scan local media folders in a background QThread."""
+        """(Re)scan local media folders on a daemon thread; results arrive
+        on the UI thread via run_on_ui. One scan at a time."""
+        import threading as _threading
         from workers import LibraryScanWorker
-        # one scan at a time: abort the previous, start fresh
+        self._scan_generation = getattr(self, "_scan_generation", 0) + 1
+        gen = self._scan_generation
         if self._local_scan_worker is not None:
             self._local_scan_worker.abort()
-            self._local_scan_worker = None
+        self._local_scan_worker = None
+        self._local_scan_thread = None
         self.library_store.reset()
+        self.update_library_tree()
         if not self.media_folders:
-            self.update_library_tree()
             return
-        worker = LibraryScanWorker(self.media_folders)
-        thread = QThread()
+        worker = LibraryScanWorker(self.media_folders, self.run_on_ui.emit)
+        worker.on_folder = lambda f, s: self._on_local_folder_scanned(gen, f, s)
+        worker.on_files = lambda f, c: self._on_local_files_scanned(gen, f, c)
+        worker.on_indexed = lambda p: self._on_local_indexed(gen, p)
+        worker.on_finished = lambda t: self._on_local_scan_finished(gen, t)
         self._local_scan_worker = worker
+        thread = _threading.Thread(target=worker.run, daemon=True,
+                                   name="library-scan")
         self._local_scan_thread = thread
-        worker.folder_scanned.connect(self._on_local_folder_scanned)
-        worker.files_scanned.connect(self._on_local_files_scanned)
-        worker.indexed.connect(self._on_local_indexed)
-        worker.finished.connect(self._on_local_scan_finished)
-        worker.finished.connect(thread.quit)
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
-        thread.finished.connect(worker.deleteLater)
-        # NOTE: never thread.deleteLater-on-its-own-finished: it destroys the
-        # C++ QThread mid-teardown (native 0xC0000409 abort). The thread
-        # object stays referenced in _scan_refs_keepalive instead.
         thread.start()
 
-    def _on_local_folder_scanned(self, folder, subdirs):
-        if not self._signal_is_current():
+    def _superseded(self, gen):
+        """True when a newer scan replaced this one (drop stale batches)."""
+        return gen != getattr(self, "_scan_generation", 0)
+
+    def _on_local_folder_scanned(self, gen, folder, subdirs):
+        if self._superseded(gen):
             return
         self.library_store.add_folder(folder, subdirs)
         self._refresh_local_section()
 
-    def _on_local_files_scanned(self, folder, chunk):
-        if not self._signal_is_current():
+    def _on_local_files_scanned(self, gen, folder, chunk):
+        if self._superseded(gen):
             return
         self.library_store.add_tree_files(folder, chunk)
         self._refresh_local_section()
 
-    def _on_local_indexed(self, paths):
-        if not self._signal_is_current():
+    def _on_local_indexed(self, gen, paths):
+        if self._superseded(gen):
             return
         self.library_store.add_indexed(paths)
         self.status_bar.showMessage(f"Library: {self.library_store.local_count()} tracks", 3000)
 
-    def _signal_is_current(self):
-        """Drop signals from a superseded (aborted) scan worker."""
-        try:
-            return self.sender() is self._local_scan_worker
-        except Exception:
-            return True
-
-    def _on_local_scan_finished(self, total):
-        # Keep the finished worker/thread referenced until the next scan
-        # replaces them: dropping the last Python reference here destroys
-        # a QThread that may still be exiting (native 0xC0000409 abort).
-        if self._local_scan_worker is not None:
-            self._scan_refs_keepalive = getattr(self, "_scan_refs_keepalive", [])
-            self._scan_refs_keepalive.append(
-                (self._local_scan_worker, self._local_scan_thread))
+    def _on_local_scan_finished(self, gen, total):
+        if self._superseded(gen):
+            return
         self._local_scan_worker = None
         self._local_scan_thread = None
         self.status_bar.showMessage(f"Library scan complete: {total} tracks", 5000)
