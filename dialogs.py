@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QTabWidget, QWidget, QLabel, QDialogButtonBox, QComboBox,
     QStackedWidget, QCheckBox, QSlider, QListWidget, QListWidgetItem,
     QGroupBox, QScrollArea, QFrame, QToolButton, QColorDialog, QFileDialog,
-    QApplication
+    QApplication, QMessageBox
 )
 from PySide6.QtCore import Qt, QSettings
 from PySide6.QtGui import QColor
@@ -578,6 +578,17 @@ class SettingsDialog(QDialog):
         hint.setObjectName("hintLabel")
         hint.setWordWrap(True)
         form.addRow("", hint)
+
+        updates_box = QGroupBox("Updates")
+        v.addWidget(updates_box)
+        uf = QFormLayout(updates_box)
+        self.update_btn = QPushButton("Check for updates…")
+        self.update_btn.clicked.connect(self.check_for_updates)
+        uf.addRow("", self.update_btn)
+        self.update_result_label = QLabel("")
+        self.update_result_label.setObjectName("hintLabel")
+        self.update_result_label.setWordWrap(True)
+        uf.addRow("", self.update_result_label)
         return page
 
     def _build_web_page(self):
@@ -724,4 +735,58 @@ class SettingsDialog(QDialog):
         if self.parent:
             dlg = CloudAccountsDialog(self, self.parent.clouds)
             dlg.exec()
+
+    # ------------------------------------------------------------ updates
+    def check_for_updates(self):
+        """Manual check against GitHub releases, off the UI thread."""
+        import threading
+
+        import updates_check
+        self.update_btn.setEnabled(False)
+        self.update_result_label.setText("Checking…")
+        parent = self.parent
+        dispatch = (parent.run_on_ui.emit
+                    if parent is not None and hasattr(parent, "run_on_ui")
+                    else (lambda fn: fn()))
+
+        def work():
+            data = error = None
+            try:
+                data = updates_check.latest_release()
+            except Exception as e:
+                error = str(e)
+            dispatch(lambda: self._on_update_result(data, error))
+
+        threading.Thread(target=work, daemon=True,
+                         name="update-check").start()
+
+    def _on_update_result(self, data, error):
+        import updates_check
+        self.update_btn.setEnabled(True)
+        latest = (data or {}).get("tag", "")
+        url = (data or {}).get("url", "") or updates_check.RELEASES_PAGE
+        if error is not None:
+            self.update_result_label.setText(f"Update check failed: {error}")
+            return
+        from updates_check import APP_VERSION, compare_versions
+        verdict = None
+        if latest:
+            verdict = compare_versions(APP_VERSION, latest)
+        if verdict == -1:
+            self.update_result_label.setText(
+                f"A new version is available: {latest} (you have {APP_VERSION}).")
+            QMessageBox.information(
+                self, "Update available",
+                f"HiCloudMP {latest} is available (you have {APP_VERSION}).\n"
+                f"Download it from:\n{url}",
+                QMessageBox.StandardButton.Ok)
+        elif verdict == 0:
+            self.update_result_label.setText(
+                f"HiCloudMP {APP_VERSION} — you're up to date.")
+        elif verdict == 1:
+            self.update_result_label.setText(
+                f"Running {APP_VERSION} (newer than the latest release {latest}).")
+        else:
+            self.update_result_label.setText(
+                f"Latest release: {latest or RELEASES_PAGE}")
 
