@@ -5,6 +5,12 @@ from PySide6.QtGui import QPixmap, QPainter
 
 from cover_extractor import CoverExtractor
 
+# Cover-art QThreads that are still running when the app closes must keep a
+# strong reference until they finish: destroying a running QThread from
+# Python (refcount drop -> C++ ~QThread) calls qFatal and fastfails the
+# process with 0xC0000409.
+_ORPHAN_THREADS = []
+
 
 class CoverArtWorker(QThread):
     finished = Signal(bytes)  # PNG-encoded image payload (may be empty)
@@ -245,6 +251,50 @@ class MetadataController:
             self.set_default_cover()
 
     # --- Internal ---
+    def _post_to_ui(self, fn):
+        """Execute fn on the UI thread; safe to call from worker threads.
+
+        Completion handlers for cover fetches run in the emitting context
+        (the cover QThread, see on_finished), so every QPixmap/widget
+        operation must be marshalled back to the UI thread - touching Qt GUI
+        objects from a worker thread corrupts Qt state and later kills the
+        process with an access violation (0xC0000005) while the UI thread
+        processes events.
+        """
+        try:
+            signal = getattr(self.app, "run_on_ui", None)
+        except Exception:
+            signal = None
+        if signal is not None:
+            try:
+                signal.emit(fn)
+                return
+            except Exception:
+                pass
+        try:
+            fn()
+        except Exception:
+            pass
+
+    def _apply_cover_result(self, png_bytes):
+        """Apply an extracted cover payload on the UI thread."""
+        try:
+            if png_bytes:
+                pm = QPixmap()
+                if pm.loadFromData(png_bytes):
+                    scaled = pm.scaled(self.app.cover_art_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                    self.app.cover_art_label.setPixmap(scaled)
+                    self.app.cover_art_label.setAlignment(Qt.AlignCenter)
+                else:
+                    self.set_default_cover()
+            else:
+                self.set_default_cover()
+        except Exception:
+            try:
+                self.set_default_cover()
+            except Exception:
+                pass
+
     def _start_cover_art_fetch(self, source, is_url):
         try:
             # Stop existing
@@ -261,54 +311,54 @@ class MetadataController:
                 except Exception:
                     pass
                 return
-            self._cover_thread = QThread(self.app)
-            self._cover_worker = CoverArtWorker(source, is_url=is_url)
-            self._cover_worker.moveToThread(self._cover_thread)
-            self._cover_thread.started.connect(self._cover_worker.run)
-            def _cleanup():
-                try:
-                    self._cover_worker.deleteLater()
-                except Exception:
-                    pass
-                try:
-                    self._cover_thread.deleteLater()
-                except Exception:
-                    pass
-                self._cover_thread = None
-                self._cover_worker = None
+            self._cover_thread = thread = QThread(self.app)
+            self._cover_worker = worker = CoverArtWorker(source, is_url=is_url)
+            worker.moveToThread(thread)
+            thread.started.connect(worker.run)
+            def _cleanup(thread=thread, worker=worker):
+                # Do NOT deleteLater() the worker or thread here: the worker's
+                # deferred delete would be posted into the cover thread's
+                # (already dead) event queue, and stale deferred-delete events
+                # referencing destroyed objects crash Qt's event dispatch
+                # (0xC0000005 in Qt6Core while the UI thread pumps events).
+                # The thread is parented to the widget tree and both objects
+                # are owned by their Python wrappers, so dropping every
+                # reference here is enough: the worker wrapper frees the
+                # never-started QThread safely, and the finished thread is
+                # destroyed with its parent.
+                # Release only THIS fetch's state; a stale cleanup from an
+                # older thread must never clobber a newer fetch's objects.
+                if self._cover_thread is thread:
+                    self._cover_thread = None
+                if self._cover_worker is worker:
+                    self._cover_worker = None
                 self._cover_inflight_source = None
                 if self._pending_cover:
                     src, pending_is_url = self._pending_cover
                     self._pending_cover = None
-                    QTimer.singleShot(0, lambda: self._start_cover_art_fetch(src, pending_is_url))
-            self._cover_thread.finished.connect(_cleanup)
+                    # Create the replacement fetch on the UI thread only, so
+                    # the QThread it spawns is parented to a main-thread object.
+                    self._post_to_ui(lambda: self._start_cover_art_fetch(src, pending_is_url))
+            thread.finished.connect(_cleanup)
             def on_finished(png_bytes):
-                try:
-                    if png_bytes:
-                        pm = QPixmap()
-                        if pm.loadFromData(png_bytes):
-                            scaled = pm.scaled(self.app.cover_art_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                            self.app.cover_art_label.setPixmap(scaled)
-                            self.app.cover_art_label.setAlignment(Qt.AlignCenter)
-                        else:
-                            self.set_default_cover()
-                    else:
-                        self.set_default_cover()
-                finally:
-                    self._cover_inflight_source = None
+                # This handler runs in the cover QThread's context (plain
+                # callable connection); GUI work must be marshalled back to
+                # the UI thread.
+                self._cover_inflight_source = None
+                self._post_to_ui(lambda: self._apply_cover_result(png_bytes))
             def on_error(msg):
                 self._cover_inflight_source = None
             try:
-                self._cover_worker.finished.connect(self._cover_thread.quit)
+                worker.finished.connect(thread.quit)
             except Exception:
                 pass
-            self._cover_worker.finished.connect(on_finished)
+            worker.finished.connect(on_finished)
             try:
-                self._cover_worker.error.connect(on_error)
+                worker.error.connect(on_error)
             except Exception:
                 pass
             self._cover_inflight_source = source
-            self._cover_thread.start()
+            thread.start()
         except Exception:
             self.set_default_cover()
 
@@ -329,6 +379,54 @@ class MetadataController:
                     self._cover_thread.wait(100)
                 except Exception:
                     pass
+                if self._cover_thread.isRunning():
+                    # A running extraction cannot be interrupted. Detach the
+                    # thread from the widget tree and keep a strong reference
+                    # until it finishes: destroying a running QThread aborts
+                    # the process (qFatal in ~QThread).
+                    thread, worker = self._cover_thread, self._cover_worker
+                    try:
+                        thread.setParent(None)
+                    except Exception:
+                        pass
+                    pair = (thread, worker)
+                    if pair not in _ORPHAN_THREADS:
+                        _ORPHAN_THREADS.append(pair)
+
+                    def _done(pair=pair):
+                        # Runs as a queued delivery while thread.finished is
+                        # being dispatched. Never release the references
+                        # synchronously here: the last reference drop can
+                        # destroy the detached thread and the wrapper-owned
+                        # worker, and destroying signal machinery while that
+                        # very delivery frame is still on the C++ stack
+                        # corrupts Qt state - later event processing then
+                        # crashes (0xC0000005 in Qt6Core). Defer the release
+                        # to a fresh event-loop step instead.
+                        def _release(pair=pair):
+                            try:
+                                if pair[0].isRunning():
+                                    # The thread is in its final teardown;
+                                    # retry on a later step. Destroying a
+                                    # still-running QThread aborts the
+                                    # process (qFatal -> 0xC0000409).
+                                    QTimer.singleShot(50, lambda p=pair: _release(p))
+                                    return
+                            except RuntimeError:
+                                pass  # underlying C++ object already gone
+                            try:
+                                pair[0].finished.disconnect()
+                            except Exception:
+                                pass
+                            try:
+                                _ORPHAN_THREADS.remove(pair)
+                            except ValueError:
+                                pass
+                        QTimer.singleShot(0, _release)
+                    try:
+                        thread.finished.connect(_done)
+                    except Exception:
+                        pass
             self._pending_cover = None
             self._cover_inflight_source = None
         except Exception:

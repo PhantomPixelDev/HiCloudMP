@@ -47,6 +47,15 @@ from workers import DownloadWorker, ScanCloudWorker, CoverArtWorker
 
 from web_control import WebControlServer
 
+# QThread objects whose threads outlive the code path that owned them must
+# keep a strong reference, otherwise PySide destroys the C++ QThread while it
+# is still running; ~QThread() then calls qFatal("QThread: Destroyed while
+# thread ... is still running") which fastfails the process with
+# STATUS_STACK_BUFFER_OVERRUN (0xC0000409). Entries are added by
+# MusicPlayer._retire_qthread() and dropped on the thread's finished signal.
+_ORPHAN_QTHREADS = []
+
+
 class MusicPlayer(QMainWindow, PlaybackEngineMixin):
     cloud_file_downloaded = Signal(str)
     run_on_ui = Signal(object)  # pass a callable to execute on UI thread
@@ -92,6 +101,9 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         self.temp_files_to_cleanup = set()
         self.clouds = []
         self.original_playlist_order = []
+        # (thread, worker) pairs kept alive until their thread finishes; see
+        # _retire_qthread(). Destroying a running QThread aborts the process.
+        self._retired_qthreads = []
         
         # Media player
         self.player = QMediaPlayer()
@@ -1459,17 +1471,67 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
             self.status_bar.showMessage(error_msg)
             QMessageBox.critical(self, "Streaming Error", error_msg)
     
+    def _retire_qthread(self, thread, worker=None):
+        """Keep references to a still-running QThread (and its worker) until
+        the thread actually finishes.
+
+        Dropping the last Python reference to a RUNNING QThread makes PySide
+        destroy the C++ object; ~QThread() calls qFatal("QThread: Destroyed
+        while thread ... is still running") which fastfails the whole process
+        with 0xC0000409. A replaced reference therefore must never be the
+        last one while isRunning() is true.
+        """
+        if thread is None:
+            return
+        try:
+            if not thread.isRunning():
+                return
+        except RuntimeError:
+            return  # underlying C++ object already gone
+        try:
+            retired = self._retired_qthreads
+        except AttributeError:
+            self._retired_qthreads = retired = []
+        pair = (thread, worker)
+        if pair not in retired:
+            retired.append(pair)
+        if pair not in _ORPHAN_QTHREADS:
+            _ORPHAN_QTHREADS.append(pair)
+
+        def _done(pair=pair):
+            for lst in (retired, _ORPHAN_QTHREADS):
+                try:
+                    lst.remove(pair)
+                except ValueError:
+                    pass
+        try:
+            thread.finished.connect(_done)
+        except Exception:
+            pass
+
     def _download_and_play(self, url, cloud_type, config, display_name, auth=None):
         """Download the cloud track to a temporary file then play locally.
         This avoids intermittent TLS resets that can break streaming demux.
         """
         try:
-            # Ensure previous downloads are stopped
-            if hasattr(self, 'download_worker') and self.download_worker:
+            # Stop any previous download. Its thread may still be running
+            # (a network read is in flight); retire it instead of dropping
+            # the last reference, which would destroy a live QThread and
+            # abort the process (qFatal: "QThread: Destroyed while thread
+            # ... is still running").
+            prev_thread = getattr(self, 'download_thread', None)
+            prev_worker = getattr(self, 'download_worker', None)
+            if prev_worker is not None:
                 try:
-                    self.download_worker.abort()
+                    prev_worker.abort()
                 except Exception:
                     pass
+            if prev_thread is not None:
+                try:
+                    prev_thread.quit()
+                except Exception:
+                    pass
+                self._retire_qthread(prev_thread, prev_worker)
             # Prepare temp file path
             safe_name = os.path.basename(display_name) or 'track'
             fd, temp_path = tempfile.mkstemp(prefix='hicloud_', suffix='_' + safe_name, dir=self.temp_dir)
@@ -1477,51 +1539,76 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
             # Track for later cleanup on failures
             self.temp_files_to_cleanup.add(temp_path)
 
-            # Setup worker in its own thread
-            self.download_thread = QThread()
-            self.download_worker = DownloadWorker(url, temp_path, auth=auth)
-            self.download_worker.moveToThread(self.download_thread)
+            # Setup worker in its own thread. The handlers below capture
+            # THEIR OWN thread/worker: a late completion from a replaced
+            # download must never touch the newer download's thread.
+            self.download_thread = dl_thread = QThread()
+            self.download_worker = dl_worker = DownloadWorker(url, temp_path, auth=auth)
+            dl_worker.moveToThread(dl_thread)
 
             # UI: show progress
             self.progress_bar.setValue(0)
             self.progress_bar.show()
             self.status_bar.showMessage(f"Downloading: {display_name}")
 
+            def _stop_thread():
+                try:
+                    dl_thread.quit()
+                    dl_thread.wait(1000)
+                except Exception:
+                    pass
+                self._retire_qthread(dl_thread, dl_worker)
+
             # Connect signals
-            self.download_thread.started.connect(self.download_worker.run)
-            self.download_worker.progress.connect(lambda p: self.progress_bar.setValue(max(0, min(100, p))))
+            dl_thread.started.connect(dl_worker.run)
+
+            def _on_progress(p):
+                # Emitted from the download thread; widget access must run on
+                # the UI thread.
+                self.run_on_ui.emit(lambda p=p: self.progress_bar.setValue(max(0, min(100, p))))
+
+            dl_worker.progress.connect(_on_progress)
+
             def on_finished(path):
                 try:
-                    self.progress_bar.hide()
-                    self.status_bar.showMessage(f"Download complete: {display_name}")
-                    # Remove from cleanup set now that it's a valid file
-                    if path in self.temp_files_to_cleanup:
-                        self.temp_files_to_cleanup.remove(path)
-                    # Play on UI thread
-                    self.run_on_ui.emit(lambda: self.play_downloaded_file(path))
+                    def _apply_finished():
+                        # Runs on the UI thread. QStatusBar.showMessage(msg)
+                        # with NO timeout deletes the status bar's running
+                        # message QTimer right here; doing that from the
+                        # download thread makes Qt skip the timer
+                        # deregistration (it only warns), leaving a stale
+                        # timer in the main dispatcher that later fires into
+                        # freed memory (0xC0000005).
+                        self.progress_bar.hide()
+                        self.status_bar.showMessage(f"Download complete: {display_name}")
+                        # Remove from cleanup set now that it's a valid file
+                        if path in self.temp_files_to_cleanup:
+                            self.temp_files_to_cleanup.remove(path)
+                        self.play_downloaded_file(path)
+                    self.run_on_ui.emit(_apply_finished)
                 finally:
-                    try:
-                        self.download_thread.quit()
-                        self.download_thread.wait(1000)
-                    except Exception:
-                        pass
-            self.download_worker.finished.connect(on_finished)
+                    _stop_thread()
+
+            dl_worker.finished.connect(on_finished)
+
             def on_error(err):
                 try:
-                    self.progress_bar.hide()
-                    self.status_bar.showMessage(f"Download failed: {err}")
-                    QMessageBox.warning(self, "Download Error", f"Failed to download: {err}\nAttempting to stream directly…")
-                    # Fallback to stream
-                    self._play_stream(url, display_name)
+                    def _apply_error():
+                        # Runs on the UI thread (see _apply_finished): the
+                        # modal warning and the status message must never be
+                        # created inside the download thread.
+                        self.progress_bar.hide()
+                        self.status_bar.showMessage(f"Download failed: {err}")
+                        QMessageBox.warning(self, "Download Error", f"Failed to download: {err}\nAttempting to stream directly…")
+                        # Fallback to stream
+                        self._play_stream(url, display_name)
+                    self.run_on_ui.emit(_apply_error)
                 finally:
-                    try:
-                        self.download_thread.quit()
-                        self.download_thread.wait(1000)
-                    except Exception:
-                        pass
-            self.download_worker.error.connect(on_error)
+                    _stop_thread()
 
-            self.download_thread.start()
+            dl_worker.error.connect(on_error)
+
+            dl_thread.start()
         except Exception as e:
             # As a last resort, try to stream directly
             self.status_bar.showMessage(f"Download setup failed: {e}. Streaming instead…")
@@ -2108,6 +2195,23 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         if not self.clouds:
             self.status_bar.showMessage("No cloud accounts configured")
             return
+        # Retire still-running threads from a previous scan (the File-menu
+        # action bypasses the disabled button). Dropping the last reference
+        # to a running QThread would destroy it -> qFatal -> process abort.
+        old_threads = list(getattr(self, 'scan_threads', []) or [])
+        old_workers = list(getattr(self, 'scan_workers', []) or [])
+        for i, old_thread in enumerate(old_threads):
+            old_worker = old_workers[i] if i < len(old_workers) else None
+            if old_worker is not None and hasattr(old_worker, 'abort'):
+                try:
+                    old_worker.abort()
+                except Exception:
+                    pass
+            try:
+                old_thread.quit()
+            except Exception:
+                pass
+            self._retire_qthread(old_thread, old_worker)
         self.scan_cloud_btn.setEnabled(False)
         self.scan_threads = []
         self.scan_workers = []
@@ -2461,9 +2565,33 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         except Exception:
             pass
         try:
-            if getattr(self, 'download_thread', None) is not None:
-                self.download_thread.quit()
-                self.download_thread.wait(2000)
+            dl_thread = getattr(self, 'download_thread', None)
+            if dl_thread is not None:
+                dl_thread.quit()
+                dl_thread.wait(2000)
+                # If it is still running (stalled read), keep it strongly
+                # referenced: destroying a running QThread aborts the process.
+                self._retire_qthread(
+                    dl_thread, getattr(self, 'download_worker', None))
+        except Exception:
+            pass
+        # Flush running cloud-scan threads (retire any that outlive the wait)
+        try:
+            scan_threads = list(getattr(self, 'scan_threads', []) or [])
+            scan_workers = list(getattr(self, 'scan_workers', []) or [])
+            for i, scan_thread in enumerate(scan_threads):
+                scan_worker = scan_workers[i] if i < len(scan_workers) else None
+                try:
+                    if scan_worker is not None and hasattr(scan_worker, 'abort'):
+                        scan_worker.abort()
+                except Exception:
+                    pass
+                try:
+                    scan_thread.quit()
+                    if not scan_thread.wait(1000):
+                        self._retire_qthread(scan_thread, scan_worker)
+                except Exception:
+                    pass
         except Exception:
             pass
         # Abort pending cover-art workers
