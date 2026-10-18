@@ -94,8 +94,9 @@ def test_all_routing_sites_use_the_gate():
     src = (Path(__file__).resolve().parents[1] / "player.py").read_text(
         encoding="utf-8")
     # the three play()-family routing sites must call the combined gate;
-    # _eq_active survives only inside the gate definition
-    assert src.count("if self._eq_active():") == 0
+    # _eq_active survives only inside _route_through_engine and the
+    # visualizer-toggle's EQ-stays-on-the-engine guard
+    assert src.count("if self._eq_active():") == 1
     assert src.count("if self._route_through_engine():") >= 3
 
 

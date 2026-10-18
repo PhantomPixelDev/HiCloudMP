@@ -1055,6 +1055,75 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         if abs(self.player.position() - position) > 100:  # 100ms threshold
             self.player.setPosition(position)
     
+    def _current_local_source(self):
+        """Absolute file path of the current queue item, or None when the
+        current track is a cloud stream / nothing is loaded."""
+        try:
+            item = self.playlist[self.current_index]
+        except Exception:
+            return None
+        if isinstance(item, dict):
+            return None
+        try:
+            src = os.path.abspath(str(item))
+            if os.path.exists(src):
+                return src
+        except Exception:
+            pass
+        return None
+
+    def apply_visualizer_toggle(self, on):
+        """Switch visualizer routing live (Settings checkbox apply).
+
+        on:  route the CURRENT track through the engine (flat gains,
+             position preserved) so the spectrum starts immediately.
+        off: hand the current track back to native at the same position -
+             unless the EQ is on, which keeps the engine route.
+        Cloud streams always switch at the next track start.
+        """
+        try:
+            if on and not getattr(self, "_using_engine", False):
+                src = self._current_local_source()
+                if src is None:
+                    return   # nothing local playing: next play() routes
+                from PySide6.QtMultimedia import QMediaPlayer
+                was_playing = (self.effective_playback_state()
+                               == QMediaPlayer.PlaybackState.PlayingState)
+                pos = self.player.position()
+                self._engine_start("file", src,
+                                   os.path.basename(src))
+                if pos > 0:
+                    self.eq_engine.seek(int(pos))
+                if was_playing is False:
+                    self.eq_engine.pause()
+                self.status_bar.showMessage(
+                    "Visualizer on - audio now routes through the EQ engine",
+                    4000)
+                return
+            if not on and getattr(self, "_using_engine", False):
+                if self._eq_active():
+                    return   # EQ is on: the engine route stays
+                src = (getattr(self, "_engine_source", None)
+                       or (None, None, ""))[1]
+                if not src:
+                    src = self._current_local_source()
+                if src is None:
+                    self._using_engine = False
+                    return
+                was_playing = self.eq_engine.is_playing()
+                pos = max(0, int(self.eq_engine.position_ms()))
+                self.eq_engine.stop()
+                self._using_engine = False
+                self.player.setSource(QUrl.fromLocalFile(str(src)))
+                self.player.play()
+                if was_playing or pos > 0:
+                    QTimer.singleShot(
+                        150, lambda: self.player.setPosition(max(0, int(pos))))
+                self.status_bar.showMessage(
+                    "Visualizer off - native playback restored", 4000)
+        except Exception as e:
+            print(f"visualizer toggle failed: {e}")
+
     def set_volume(self, volume):
         self.audio_output.setVolume(volume / 100.0)
         if getattr(self, '_using_engine', False):

@@ -741,8 +741,15 @@ class SettingsDialog(QDialog):
 
     def save_settings(self):
         self.settings.setValue("volume", self.volume_slider.value())
-        self.settings.setValue("ui/visualizer_enabled",
-                               self.visualizer_checkbox.isChecked())
+        old_viz = bool(self.settings.value("ui/visualizer_enabled",
+                                           False, type=bool))
+        new_viz = self.visualizer_checkbox.isChecked()
+        self.settings.setValue("ui/visualizer_enabled", new_viz)
+        if new_viz != old_viz and self.parent is not None:
+            try:
+                self.parent.apply_visualizer_toggle(new_viz)
+            except Exception:
+                pass
         self.settings.setValue(
             "audio/output_device",
             str(self.output_combo.currentData() or ""))
