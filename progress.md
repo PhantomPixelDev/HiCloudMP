@@ -99,7 +99,55 @@ Landed with this commit (`feat: tray icon is an accent badge ...`):
   standing convention is repo-root progress.md as the ledger and direct
   work on main per owner's explicit "go" - keeping that.
 
-Next in line: fold in agent reports (EQ/viz, QThread fatal) -> P0 fixes,
-then formats (P1), playlist UI hook (P2b), UX (P3), hardening (P4),
-perf (P5).
+`62bf01e` feat: one supported-formats list + embedded art for wma/aiff/wav/oga
+- Plan P1. SUPPORTED_EXTS was a third opinion vs the add-files dialog
+  (mp3/flac/wav/ogg vs +aac/m4a/wma): ffmpeg-decodable formats invisible
+  to scan/cloud rows. Now one list adding .oga .opus .m4a .mp4 .aac .wma
+  .aiff .aif .mka; scan/is_music_file/cloud filter read it.
+- Cover fallback for the new containers: _extract_asf_cover (WM/Picture),
+  _extract_aiff_cover/_extract_wav_cover (ID3 APIC chunks in AIFF/WAVE),
+  .oga -> ogg branch; mutagen imported function-locally (broken installs
+  degrade to the ffmpeg layer instead of killing module import).
+- Tests: tests/test_supported_formats.py + tests/test_cover_formats.py
+  red->green (fixture fixes: mutagen.wave is the module, wma/aiff branch
+  tests had not created target files); full suite cold `265 passed,
+  2 skipped`.
+
+`1afdfc8` perf(web): panel progress poll skips remaining fetches while hidden
+- Plan P5a: the web remote emitted socket get_progress at 1000 ms
+  forever - background tabs kept the single-threaded server busy for
+  nothing; emit is now gated on document.hidden.
+- Test: tests/test_web_assets.py::test_progress_poll_skips_while_hidden
+  (anchored on the last get_progress emit site) red->green.
+
+`5ed140d` fix: 0xC0000409 was interpreter exit destroying a retired running QThread
+- Root cause from the probe investigation (deterministic, headless):
+  the fatal fired at PROCESS EXIT. closeEvent retires still-running
+  uninterruptible threads (download requests.get 30s / ffmpeg cover /
+  scan clouds) into module-global retention lists and the app just
+  exits; interpreter finalization then CLEARS those globals - the
+  pair's last reference drops, ~QThread sees running==true, qFatal,
+  fastfail 0xC0000409. Existing gates never saw it: they ended with
+  os._exit(0), skipping exactly this teardown.
+- Fix: each owner module registers an exit guard
+  (thread_teardown.register_exit_guard) over its retention lists -
+  atexit runs BEFORE globals are cleared (proven); near-finished
+  threads get 1 s grace; still-unstoppable at exit -> os._exit(0).
+- Forensics: setObjectName at every QThread creation site (download,
+  scan-cloud-{idx}, cover-art/worker) - fatals carry names now.
+- Defense-in-depth: _retire_qthread._done mirrors metadata._release
+  (deferred, isRunning-guarded retry, disconnect).
+- Tests: tests/_qthread_teardown_child.py drives the real closeEvent
+  detach path through normal finalization; unfixed -> exit 0xC0000409
+  watched red, fixed -> 0; full suite cold `266 passed, 2 skipped`.
+- Ruled out by the investigation (kept for the record):
+  _retire_qthread._done sync-removal and metadata._cleanup pointer
+  clears are delivered queued on finished with isRunning()==False on
+  PySide6 6.10.3 - not the crash trigger (now hardened anyway).
+- Deferred minor: player.py scan thread deleteLater-on-own-finished
+  posts to a finished thread's queue (leak class, not fatal) - left
+  untouched, tracked here.
+
+Next in line: EQ/viz inline investigation (agent cancelled), P2b
+playlist UI hook, P3, P4, P5b.
 
