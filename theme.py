@@ -360,6 +360,20 @@ def build_qss(theme="Dark", accent=None, density="comfortable"):
     """
 
 
+def icon_colors(settings=None, theme=None, accent=None):
+    """(accent_hex, text_hex, dim_hex) for icon tinting, theme-consistent."""
+    if theme is None or accent is None:
+        from PySide6.QtCore import QSettings as _QSettings
+        q = settings
+        if q is None:
+            q = _QSettings("HiCloudMP", "HiCloudMP")
+        theme = theme if theme is not None else q.value("theme", _DEFAULTS["theme"])
+        accent = accent if accent is not None else q.value("ui/accent", _DEFAULTS["accent"])
+    _, accent, _ = _resolve(theme, accent, None)
+    tk = _DARK if theme == "Dark" else _LIGHT
+    return accent, tk["text"], tk["text_dim"]
+
+
 def apply_theme(widget, settings=None, theme=None, accent=None, density=None):
     """Resolve appearance values (explicit args win) and setStyleSheet on widget."""
     if theme is None or accent is None or density is None:

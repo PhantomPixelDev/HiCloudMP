@@ -13,6 +13,7 @@ from tray import TrayController
 from metadata import MetadataController
 from playlists_manager import PlaylistsManager
 from library_view import LibraryView
+import icons
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
@@ -217,7 +218,12 @@ class MusicPlayer(QMainWindow):
         
         # Initialize settings
         self.settings = QSettings("HiCloudMP", "HiCloudMP")
-        
+
+        # Themed icon factory (accent-tinted Feather glyphs; stock QStyle
+        # icons are fully replaced). Colors refresh with every theme change.
+        self.icon_factory = icons.IconFactory()
+        self._refresh_icon_colors()
+
         # Set up temporary directory for downloads
         self.temp_dir = os.path.join(self.cache_dir, "temp")
         os.makedirs(self.temp_dir, exist_ok=True)
@@ -378,6 +384,62 @@ class MusicPlayer(QMainWindow):
         """Apply the unified theme (theme/accent/density resolved from QSettings)."""
         import theme as _theme
         _theme.apply_theme(self)
+        self._refresh_icon_colors()
+
+    # === Accent icon helpers ===
+    def _refresh_icon_colors(self):
+        """Bind the icon factory to the live theme (accent/text/dim) and
+        re-render every themed icon."""
+        if not hasattr(self, 'icon_factory'):
+            return
+        try:
+            import theme as _theme
+            accent, text, dim = _theme.icon_colors(self.settings)
+            self.icon_factory.set_colors(accent, text, dim)
+        except Exception:
+            pass
+        self._apply_icons()
+
+    def _icon(self, name, role="text", size=20):
+        return self.icon_factory.icon(name, size=size, role=role)
+
+    def _icon_play(self):
+        return self._icon("play", role="onaccent", size=28)
+
+    def _icon_pause(self):
+        return self._icon("pause", role="onaccent", size=28)
+
+    def _apply_icons(self):
+        """Set themed glyph icons on every button (font-size independent)."""
+        f = getattr(self, 'icon_factory', None)
+        if f is None:
+            return
+        try:
+            self.play_btn.setIcon(self._icon_play())
+            self.play_btn.setIconSize(QSize(28, 28))
+            self.stop_btn.setIcon(self._icon("stop", size=20))
+            self.prev_btn.setIcon(self._icon("skip-back", size=20))
+            self.next_btn.setIcon(self._icon("skip-forward", size=20))
+            for btn, glyph in ((self.stop_btn, "stop"),
+                               (self.prev_btn, "skip-back"),
+                               (self.next_btn, "skip-forward")):
+                btn.setIconSize(QSize(20, 20))
+            self._apply_toggle_icons()
+            vbtn = getattr(self, 'volume_icon', None)
+            if vbtn is not None:
+                vbtn.setIcon(self._icon("volume", size=20))
+                vbtn.setIconSize(QSize(20, 20))
+        except AttributeError:
+            pass  # setup_ui() still building; icons apply once others land
+
+    def _apply_toggle_icons(self):
+        """Shuffle/Repeat glyphs follow their accentActive toggle state."""
+        self.shuffle_btn.setIcon(self._icon(
+            "shuffle", role="accent" if self.shuffle_btn.isChecked() else "dim"))
+        self.shuffle_btn.setIconSize(QSize(20, 20))
+        self.repeat_btn.setIcon(self._icon(
+            "repeat", role="accent" if self.repeat_btn.isChecked() else "dim"))
+        self.repeat_btn.setIconSize(QSize(20, 20))
 
     def open_settings_dialog(self):
         """Open the settings dialog and apply any changes"""
@@ -387,6 +449,7 @@ class MusicPlayer(QMainWindow):
             # Apply the unified theme (Dark/Light, accent color, density)
             import theme as _theme
             _theme.apply_theme(self)
+            self._refresh_icon_colors()
             # Apply volume
             volume = dialog.settings.value("volume", 70, int)
             self.audio_output.setVolume(volume / 100.0)
@@ -645,17 +708,17 @@ class MusicPlayer(QMainWindow):
         playlist_header.addWidget(self.playlist_selector, 1)
 
         playlist_new_btn = QToolButton()
-        playlist_new_btn.setIcon(self.style().standardIcon(QStyle.SP_FileIcon))
+        playlist_new_btn.setIcon(self._icon("plus", size=16))
         playlist_new_btn.setToolTip("New Playlist")
         playlist_new_btn.clicked.connect(self.new_playlist)
 
         playlist_save_btn = QToolButton()
-        playlist_save_btn.setIcon(self.style().standardIcon(QStyle.SP_DialogSaveButton))
+        playlist_save_btn.setIcon(self._icon("save", size=16))
         playlist_save_btn.setToolTip("Save Playlist")
         playlist_save_btn.clicked.connect(self.save_current_playlist)
 
         playlist_delete_btn = QToolButton()
-        playlist_delete_btn.setIcon(self.style().standardIcon(QStyle.SP_TrashIcon))
+        playlist_delete_btn.setIcon(self._icon("trash", size=16))
         playlist_delete_btn.setToolTip("Delete Playlist")
         playlist_delete_btn.clicked.connect(self.delete_current_playlist)
 
@@ -750,32 +813,31 @@ class MusicPlayer(QMainWindow):
         buttons_layout.addStretch(1)
 
         self.prev_btn = QToolButton()
-        self.prev_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaSkipBackward))
+        self.prev_btn.setIcon(self._icon("skip-back", size=24))
         self.prev_btn.setIconSize(QSize(24, 24))
         self.prev_btn.setFixedSize(44, 44)
         self.prev_btn.clicked.connect(self.prev_track)
 
         self.play_btn = QToolButton()
         self.play_btn.setObjectName("playBtn")
-        self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+        self.play_btn.setIcon(self._icon_play())
         self.play_btn.setIconSize(QSize(28, 28))
         self.play_btn.setFixedSize(56, 56)
         self.play_btn.clicked.connect(self.toggle_play)
 
         self.stop_btn = QToolButton()
-        self.stop_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaStop))
+        self.stop_btn.setIcon(self._icon("stop", size=20))
         self.stop_btn.setIconSize(QSize(20, 20))
         self.stop_btn.setFixedSize(40, 40)
         self.stop_btn.clicked.connect(self.stop)
 
         self.next_btn = QToolButton()
-        self.next_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaSkipForward))
+        self.next_btn.setIcon(self._icon("skip-forward", size=24))
         self.next_btn.setIconSize(QSize(24, 24))
         self.next_btn.setFixedSize(44, 44)
         self.next_btn.clicked.connect(self.next_track)
 
         self.shuffle_btn = QToolButton()
-        self.shuffle_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaSeekForward))
         self.shuffle_btn.setCheckable(True)
         self.shuffle_btn.setIconSize(QSize(20, 20))
         self.shuffle_btn.setFixedSize(40, 40)
@@ -783,11 +845,11 @@ class MusicPlayer(QMainWindow):
         self.shuffle_btn.clicked.connect(self.toggle_shuffle)
 
         self.repeat_btn = QToolButton()
-        self.repeat_btn.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
         self.repeat_btn.setCheckable(True)
         self.repeat_btn.setIconSize(QSize(20, 20))
         self.repeat_btn.setFixedSize(40, 40)
         self.repeat_btn.clicked.connect(self.toggle_repeat)
+        self._apply_toggle_icons()
 
         buttons_layout.addWidget(self.shuffle_btn)
         buttons_layout.addWidget(self.prev_btn)
@@ -799,7 +861,7 @@ class MusicPlayer(QMainWindow):
 
         # Volume (icon + compact slider in the transport bar)
         self.volume_icon = QToolButton()
-        self.volume_icon.setIcon(self.style().standardIcon(QStyle.SP_MediaVolume))
+        self.volume_icon.setIcon(self._icon("volume", size=18))
         self.volume_icon.setIconSize(QSize(18, 18))
         self.volume_icon.setFixedSize(32, 32)
         self.volume_icon.setEnabled(False)  # purely a visual marker
@@ -868,7 +930,7 @@ class MusicPlayer(QMainWindow):
             item = self.playlist_widget.item(self.current_index)
             if item:
                 self.playlist_widget.scrollToItem(item)
-            self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+            self.play_btn.setIcon(self._icon_pause())
             
             # Force an immediate metadata update
             QTimer.singleShot(100, self.update_metadata_display)
@@ -893,13 +955,13 @@ class MusicPlayer(QMainWindow):
             return
         if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             self.player.pause()
-            self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+            self.play_btn.setIcon(self._icon_play())
         else:
             if self.player.mediaStatus() == QMediaPlayer.MediaStatus.NoMedia and self.current_index >= 0:
                 self.play()
             else:
                 self.player.play()
-                self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+                self.play_btn.setIcon(self._icon_pause())
         # Update tray UI
         if hasattr(self, 'update_tray_ui'):
             self.update_tray_ui()
@@ -913,7 +975,7 @@ class MusicPlayer(QMainWindow):
             self.position_label.setText("0:00")
         else:
             self.player.stop()
-        self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+        self.play_btn.setIcon(self._icon_play())
         # Update tray UI
         if hasattr(self, 'update_tray_ui'):
             self.update_tray_ui()
@@ -1065,6 +1127,7 @@ class MusicPlayer(QMainWindow):
         self.shuffle_btn.style().unpolish(self.shuffle_btn)
         self.shuffle_btn.style().polish(self.shuffle_btn)
         self.shuffle_btn.setChecked(enabled)
+        self._apply_toggle_icons()
         # keep the Playback menu checkbox in sync (guard against recursion)
         if hasattr(self, 'shuffle_action') and self.shuffle_action.isChecked() != enabled:
             self.shuffle_action.setChecked(enabled)
@@ -1079,6 +1142,7 @@ class MusicPlayer(QMainWindow):
         self.repeat_btn.style().unpolish(self.repeat_btn)
         self.repeat_btn.style().polish(self.repeat_btn)
         self.repeat_btn.setChecked(enabled)
+        self._apply_toggle_icons()
         if hasattr(self, 'repeat_action') and self.repeat_action.isChecked() != enabled:
             self.repeat_action.setChecked(enabled)
     
@@ -1173,10 +1237,10 @@ class MusicPlayer(QMainWindow):
         if status in [QMediaPlayer.MediaStatus.LoadedMedia, 
                      QMediaPlayer.MediaStatus.BufferedMedia,
                      QMediaPlayer.MediaStatus.BufferingMedia]:
-            self.play_btn.setIcon(self.style().standardIcon(
-                QStyle.SP_MediaPause if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState 
-                else QStyle.SP_MediaPlay
-            ))
+            self.play_btn.setIcon(self._icon_pause()
+                if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState 
+                else self._icon_play()
+            )
 
     def retry_current_playback(self):
         """Retry playing the current track, with a maximum number of retries."""
@@ -1245,9 +1309,8 @@ class MusicPlayer(QMainWindow):
 
     def _on_engine_state(self, state):
         try:
-            icon = (QStyle.SP_MediaPause
-                    if state == 'playing' else QStyle.SP_MediaPlay)
-            self.play_btn.setIcon(self.style().standardIcon(icon))
+            self.play_btn.setIcon(self._icon_pause()
+                                  if state == 'playing' else self._icon_play())
         except Exception:
             pass
 
@@ -1282,7 +1345,7 @@ class MusicPlayer(QMainWindow):
             elif kind == 'file' and src:
                 self.player.setSource(QUrl.fromLocalFile(src))
                 self.player.play()
-            self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+            self.play_btn.setIcon(self._icon_pause())
         except Exception:
             pass
 
@@ -1357,7 +1420,7 @@ class MusicPlayer(QMainWindow):
                 else:
                     self._play_stream(url, file_name)
 
-            self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+            self.play_btn.setIcon(self._icon_pause())
             # Update metadata shortly after starting stream
             QTimer.singleShot(200, self.update_metadata_display)
             
@@ -1658,11 +1721,11 @@ class MusicPlayer(QMainWindow):
                 url = QUrl.fromLocalFile(abs_path)
                 if self._eq_active():
                     self._engine_start('file', abs_path, file_name)
-                    self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+                    self.play_btn.setIcon(self._icon_pause())
                 else:
                     self.player.setSource(url)
                     # Update UI
-                    self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+                    self.play_btn.setIcon(self._icon_pause())
                     # Start playback with a small delay to prevent race conditions
                     QTimer.singleShot(100, self.player.play)
                 
@@ -1902,8 +1965,8 @@ class MusicPlayer(QMainWindow):
         """Update the library tree with current data"""
         self.library_tree.clear()
         self.library_tree.setSelectionMode(QTreeWidget.ExtendedSelection)
-        folder_icon = self.style().standardIcon(QStyle.SP_DirIcon)
-        file_icon = self.style().standardIcon(QStyle.SP_FileIcon)
+        folder_icon = self._icon("folder", role="dim", size=16)
+        file_icon = self._icon("music", role="dim", size=16)
         # Local folders section
         local_root = QTreeWidgetItem(self.library_tree, ["Local Media"])
         local_root.setExpanded(True)
