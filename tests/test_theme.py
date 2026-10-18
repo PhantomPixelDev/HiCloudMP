@@ -109,6 +109,16 @@ def test_build_qss_with_bg_embeds_image_and_glass_surfaces():
     assert tail.count("sidebar") >= 1
 
 
+def test_playbutton_accent_circle_outranks_transportbar_rule():
+    """Regression: 'QFrame#transportBar QToolButton' (transparent bg) outranked
+    'QToolButton#playBtn {background-color: accent}' in Qt's QSS specificity,
+    so the play circle never painted - white Feather glyph on a light button
+    was invisible in Light mode. The play rule must carry TWO ids."""
+    for accent in ("#f43f5e", "#10b981"):
+        qss = theme_mod.build_qss(theme="Light", accent=accent, density="compact")
+        assert f"QFrame#transportBar QToolButton#playBtn {{\n        background-color: {accent};" in qss
+
+
 def test_prepare_background_dims_and_caches(qapp, tmp_path):
     from PySide6.QtGui import QColor, QImage
 

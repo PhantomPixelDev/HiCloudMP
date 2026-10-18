@@ -411,17 +411,22 @@ def build_qss(theme="Dark", accent=None, density="comfortable", bg=None):
     }}
     QFrame#transportBar QLabel {{ color: {tk['text_dim']}; font-size: 11px; }}
     QFrame#transportBar QSlider {{ min-height: 28px; }}
-    QToolButton#playBtn {{
+    /* Double-ID rule: must outrank the generic transportBar QToolButton
+       rule below (Qt QSS specificity), so the accent circle really paints. */
+    QFrame#transportBar QToolButton#playBtn {{
         background-color: {accent};
         border: none;
         border-radius: 28px;
         padding: 0px;
     }}
-    QToolButton#playBtn:hover {{
+    QFrame#transportBar QToolButton#playBtn:hover {{
         background-color: {accent};
         border: none;
     }}
-    QToolButton#playBtn:pressed {{ background-color: {acc_hover}; border: none; }}
+    QFrame#transportBar QToolButton#playBtn:pressed {{
+        background-color: {acc_hover};
+        border: none;
+    }}
     QFrame#transportBar QToolButton {{
         background: transparent;
         border: none;
