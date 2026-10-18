@@ -86,6 +86,8 @@ def test_disabling_viz_returns_current_track_to_native(
     monkeypatch.setattr(mp.player, "play", lambda: play.append(1), raising=False)
     monkeypatch.setattr(mp, "player_position_ms", lambda: 4321, raising=False)
 
+    # production order: save_settings persists the new value, then applies
+    mp.settings.setValue("ui/visualizer_enabled", False)
     mp.apply_visualizer_toggle(False)
     qtbot.wait(250)   # the 150 ms position-restore singleShot
     assert engine_state.get("stopped"), "engine must be stopped"
