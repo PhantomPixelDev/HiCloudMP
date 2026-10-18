@@ -36,6 +36,21 @@ def test_workflow_bundles_ffmpeg():
     assert "main.dist\\ffmpeg.exe" in wf
 
 
+def test_workflow_bundles_qt_multimedia_backend():
+    """v1.0.0 regression: Nuitka ships qt6multimedia.dll but NOT the
+    qt-plugins\\multimedia ffmpeg backend (the only audio decoder since
+    Qt 6.8) - the packaged app played nothing."""
+    wf = _wf()
+    assert "qt-plugins\\multimedia" in wf
+    assert "ffmpegmediaplugin" in wf
+    # the backend's ffmpeg libs must ride along
+    for lib in ("avcodec-*.dll", "avformat-*.dll", "avutil-*.dll",
+                "swresample-*.dll", "swscale-*.dll"):
+        assert lib in wf, lib
+    # both artifacts derive from main.dist; keep that contract explicit
+    assert "plugins\\multimedia\\*.dll" in wf
+
+
 def test_workflow_uploads_artifact_and_releases_on_tags():
     wf = _wf()
     assert "upload-artifact" in wf
@@ -87,3 +102,15 @@ def test_find_ffmpeg_falls_back_to_path(monkeypatch, tmp_path):
 def test_extract_uses_find_ffmpeg():
     src = (ROOT / "cover_extractor.py").read_text(encoding="utf-8")
     assert "find_ffmpeg()" in src, "_extract_with_ffmpeg must resolve via helper"
+
+
+def test_subprocesses_never_flash_console():
+    """v1.0.0 regression: packaged GUI app flashed a console window on
+    every play (ffmpeg cover extraction). All spawns must pass
+    CREATE_NO_WINDOW on Windows."""
+    src = (ROOT / "cover_extractor.py").read_text(encoding="utf-8")
+    assert "CREATE_NO_WINDOW" in src
+    runs = src.count("creationflags=_NO_WINDOW")
+    assert runs >= 2, f"expected every ffmpeg/ffprobe spawn flagged, got {runs}"
+    # the helper must be a no-op off Windows
+    assert 'os.name == "nt"' in src

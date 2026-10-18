@@ -39,6 +39,18 @@ jobs:
           --include-data-file=icon.ico=icon.ico
           main.py
 
+      - name: Bundle Qt multimedia backend (ffmpegmediaplugin)
+        run: |
+          # Nuitka's PySide6 plugin ships qt6multimedia.dll/QtMultimedia.pyd but
+          # NOT the qt-plugins\multimedia backend - and since Qt 6.8 the ffmpeg
+          # plugin is the ONLY audio decoder. Without it the packaged app plays
+          # nothing (the engine AND the native fallback both need it).
+          $ps = python -c "import PySide6, os; print(os.path.dirname(PySide6.__file__))"
+          $dst = "build\main.dist\PySide6\qt-plugins\multimedia"
+          New-Item -ItemType Directory -Force $dst | Out-Null
+          Copy-Item "$ps\plugins\multimedia\*.dll" $dst -ErrorAction Stop
+          Copy-Item "$ps\avcodec-*.dll","$ps\avformat-*.dll","$ps\avutil-*.dll","$ps\swresample-*.dll","$ps\swscale-*.dll" build\main.dist -ErrorAction Stop
+
       - name: Bundle ffmpeg for cover extraction
         run: |
           curl -L -o ffmpeg.zip https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip
