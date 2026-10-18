@@ -116,3 +116,106 @@ def test_theme_change_retints_icons(music_player, qapp):
     c = img.pixelColor(img.width() * 6 // 24, img.height() // 2)
     assert c.alpha() > 150 and (c.red() > 100 or c.green() > 100), \
         "violet tint visible after retint"
+
+
+def test_tray_badge_is_accent_filled_with_contrast_glyph(qapp):
+    """Tray icon = accent-filled round badge (not a stock QStyle glyph) whose
+    glyph is white when the fill is dark enough."""
+    import icons
+
+    ico = icons.tray_icon("pause", "#10b981")
+    assert not ico.isNull()
+    img = ico.pixmap(48, 48).toImage()
+    assert not img.isNull()
+
+    fill = light = 0
+    for x in range(0, img.width(), 2):
+        for y in range(0, img.height(), 2):
+            c = img.pixelColor(x, y)
+            if c.alpha() <= 150:
+                continue
+            if c.green() > 110 and c.green() > c.red() + 50 \
+                    and c.green() > c.blue() + 20:
+                fill += 1  # emerald accent fill
+            elif c.red() > 200 and c.green() > 200 and c.blue() > 200:
+                light += 1  # white glyph ink
+    assert fill > 60, f"badge must be accent-filled (fill={fill})"
+    assert light > 12, f"white glyph ink on the dark accent fill (light={light})"
+    # round badge: corners stay transparent
+    assert img.pixelColor(0, 0).alpha() < 20
+    assert img.pixelColor(img.width() - 1, img.height() - 1).alpha() < 20
+
+
+def test_tray_badge_glyph_darkens_on_light_accents(qapp):
+    import icons
+
+    img = icons.tray_icon("play", "#fde047").pixmap(48, 48).toImage()
+    assert not img.isNull()
+    dark = light = 0
+    for x in range(0, img.width(), 2):
+        for y in range(0, img.height(), 2):
+            c = img.pixelColor(x, y)
+            if c.alpha() <= 150:
+                continue
+            if c.red() < 80 and c.green() < 80 and c.blue() < 80:
+                dark += 1
+            if c.red() > 230 and c.green() > 230 and c.blue() > 230:
+                light += 1
+    assert dark > 12, "glyph must go near-black on a light accent fill"
+    assert light < 5, "no white glyph ink on a light accent fill"
+
+
+def test_tray_badge_cache_and_invalidate(qapp):
+    import icons
+    assert icons.tray_icon("no-such-glyph", "#10b981").isNull()  # honest null
+    icons.invalidate()
+    first = icons.tray_icon("stop", "#10b981")
+    assert first is icons.tray_icon("stop", "#10b981")  # cached identity
+    icons.invalidate()
+    assert icons.tray_icon("stop", "#10b981") is not first
+
+
+def test_tray_controller_uses_accent_badges(qapp):
+    """TrayController swaps in accent badges for play/pause/stop states
+    instead of stock QStyle icons, tinted from the live factory accent."""
+    import icons
+    from PySide6.QtWidgets import QSystemTrayIcon
+    from tray import TrayController
+
+    class _Player:
+        class PlaybackState:
+            PlayingState = 1
+            PausedState = 2
+            StoppedState = 0
+
+    class _App:
+        def __init__(self):
+            self.player = _Player()
+            self.icon_factory = icons.IconFactory()
+            self.icon_factory.set_colors("#7c3aed", "#e6e9ef", "#9aa3b2")
+            self._state = _Player.PlaybackState.PlayingState
+
+        def effective_playback_state(self):
+            return self._state
+
+    app = _App()
+    tc = TrayController(app)
+    tc.tray_icon = QSystemTrayIcon()
+    tc.update_tray_ui()
+
+    img = tc.tray_icon.icon().pixmap(48, 48).toImage()
+    assert not img.isNull()
+    violet = 0
+    for x in range(0, img.width(), 2):
+        for y in range(0, img.height(), 2):
+            c = img.pixelColor(x, y)
+            if c.alpha() > 150 and c.blue() > 140 and 80 < c.red() < 180 \
+                    and c.green() < 110:
+                violet += 1
+    assert violet > 60, "tray badge must carry the factory accent (violet)"
+
+    app._state = _Player.PlaybackState.PausedState
+    tc.update_tray_ui()
+    paused_img = tc.tray_icon.icon().pixmap(48, 48).toImage()
+    assert not paused_img.isNull()
+    assert paused_img != img, "pause and play badges must differ"

@@ -43,3 +43,22 @@ Landed with this commit (`feat: keep the crash-forensics logger ...`):
   Qt-side warnings seen during the investigation.
 
 Next in line: tray icon color fix, performance round.
+
+## 2026-10-18 — feat: accent-badged tray icon (contrast-safe)
+
+Landed with this commit (`feat: tray icon is an accent badge ...`):
+
+- `icons.py`: `tray_icon()` renders a round accent-filled badge with a
+  play/pause/stop glyph; the glyph flips white/near-black by the fill's
+  relative luminance (contrast-safe on every accent) with a hairline rim so
+  the badge reads on light and dark taskbars; rendered at 2x, size ladder
+  16/24/32/48, cached per (glyph, accent), cleared by `invalidate()`.
+- `tray.py`: `_tray_badge()` uses the live factory accent with one honest
+  stock-icon fallback; init and every state update go through it;
+  `_apply_icons()` re-tints the tray on theme/accent changes.
+- Tests: 4 new in `tests/test_icons.py` (fill + contrast glyph, dark glyph on
+  light accents, cache identity + honest null, TrayController state badges).
+- Evidence: full suite `227 passed, 2 skipped` ×3.
+
+Next in line: performance round.
+

@@ -7,7 +7,7 @@ play button render white; toggle glyphs use the accent; utility glyphs use
 theme text. Calculated to be crisp by rendering at 2x device pixel ratio.
 """
 from PySide6.QtCore import QByteArray, QRectF, Qt
-from PySide6.QtGui import QIcon, QImage, QPainter, QPixmap
+from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPen, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 
 # Feather geometry: (kind, inner-markup) where kind is 'stroke' or 'fill'.
@@ -74,6 +74,7 @@ _FILL_SVG = (
 
 _RENDER_SCALE = 2  # device pixels per logical pixel for crisp hidpi glyphs
 _cache = {}
+_tray_cache = {}
 
 
 def _svg_markup(name, color):
@@ -122,9 +123,78 @@ def icon(name, size=20, color="#e6e9ef"):
     return QIcon(pix)
 
 
+def _contrast_glyph_color(fill_hex):
+    """'#ffffff' or '#111111' - whichever contrasts with the fill color."""
+    c = QColor(fill_hex)
+    if not c.isValid():
+        c = QColor("#10b981")
+    luminance = 0.2126 * c.redF() + 0.7152 * c.greenF() + 0.0722 * c.blueF()
+    return "#111111" if luminance > 0.6 else "#ffffff"
+
+
+def _badge_pixmap(name, accent_color, size):
+    """Accent-filled round badge with a contrast-safe glyph, rendered at
+    _RENDER_SCALE device pixels. Null pixmap for unknown glyph names."""
+    markup_color = _contrast_glyph_color(accent_color)
+    markup = _svg_markup(name, markup_color)
+    if markup is None:
+        return QPixmap()
+    renderer = QSvgRenderer(QByteArray(markup.encode("utf-8")))
+    if not renderer.isValid():
+        return QPixmap()
+
+    device_px = max(int(size), 1) * _RENDER_SCALE
+    img = QImage(device_px, device_px, QImage.Format.Format_ARGB32_Premultiplied)
+    img.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(img)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+    accent = QColor(accent_color)
+    if not accent.isValid():
+        accent = QColor("#10b981")
+    # Hairline rim keeps the badge defined on light AND dark taskbars.
+    rim = QColor(0, 0, 0, 46) if markup_color == "#111111" \
+        else QColor(255, 255, 255, 60)
+    stroke = max(1.0, device_px * 0.045)
+    margin = stroke / 2.0
+    painter.setBrush(accent)
+    painter.setPen(QPen(rim, stroke))
+    painter.drawEllipse(QRectF(margin, margin,
+                               device_px - 2 * margin, device_px - 2 * margin))
+
+    # Glyph centred at ~52% of the badge.
+    side = device_px * 0.52
+    renderer.render(painter, QRectF((device_px - side) / 2.0,
+                                    (device_px - side) / 2.0, side, side))
+    painter.end()
+
+    out = QPixmap.fromImage(img)
+    out.setDevicePixelRatio(_RENDER_SCALE)
+    return out
+
+
+def tray_icon(name, accent_color, sizes=(16, 24, 32, 48)):
+    """QSystemTrayIcon-ready icon: accent-filled round badge with a
+    contrast-safe play/pause/stop glyph (white on dark fills, near-black on
+    light fills). Null QIcon for unknown glyph names (honest fallback)."""
+    if name not in _GLYPHS:
+        return QIcon()
+    key = (name, str(accent_color), tuple(int(s) for s in sizes))
+    hit = _tray_cache.get(key)
+    if hit is not None:
+        return hit
+    accent = accent_color if QColor(accent_color).isValid() else "#10b981"
+    out = QIcon()
+    for size in sizes:
+        out.addPixmap(_badge_pixmap(name, accent, size))
+    _tray_cache[key] = out
+    return out
+
+
 def invalidate():
     """Drop the cache — call whenever the theme/accent colors change."""
     _cache.clear()
+    _tray_cache.clear()
 
 
 class IconFactory:

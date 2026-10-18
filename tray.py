@@ -4,6 +4,7 @@ from PySide6.QtWidgets import QStyle
 import os
 import subprocess
 
+import icons as _icons
 from utils import open_folder
 
 
@@ -21,7 +22,7 @@ class TrayController:
         if self.tray_icon:
             return
         self.tray_icon = QSystemTrayIcon(self.app)
-        self.tray_icon.setIcon(self.app.style().standardIcon(QStyle.SP_MediaPlay))
+        self.tray_icon.setIcon(self._tray_badge("play"))
         self.tray_icon.setToolTip("HiCloud MP")
 
         tray_menu = QMenu()
@@ -112,6 +113,29 @@ class TrayController:
         self.tray_icon.show()
         self.update_tray_ui()
 
+    def _tray_badge(self, name):
+        """Accent-filled round badge with a contrast-safe glyph (white on dark
+        fills, near-black on light fills), tinted from the live theme accent.
+        Falls back to the stock style icon only if icon rendering is
+        unavailable."""
+        accent = "#10b981"
+        try:
+            accent = self.app.icon_factory.accent_color or accent
+        except Exception:
+            pass
+        try:
+            ico = _icons.tray_icon(name, accent)
+            if not ico.isNull():
+                return ico
+        except Exception:
+            pass
+        fallback = {
+            "play": QStyle.SP_MediaPlay,
+            "pause": QStyle.SP_MediaPause,
+            "stop": QStyle.SP_MediaStop,
+        }.get(name, QStyle.SP_MediaPlay)
+        return self.app.style().standardIcon(fallback)
+
     def update_tray_ui(self):
         if not self.tray_icon:
             return
@@ -124,11 +148,11 @@ class TrayController:
             except Exception:
                 state = self.app.player.PlaybackState.StoppedState
         if state == self.app.player.PlaybackState.PlayingState:
-            self.tray_icon.setIcon(self.app.style().standardIcon(QStyle.SP_MediaPause))
+            self.tray_icon.setIcon(self._tray_badge("pause"))
         elif state == self.app.player.PlaybackState.PausedState:
-            self.tray_icon.setIcon(self.app.style().standardIcon(QStyle.SP_MediaPlay))
+            self.tray_icon.setIcon(self._tray_badge("play"))
         else:
-            self.tray_icon.setIcon(self.app.style().standardIcon(QStyle.SP_MediaStop))
+            self.tray_icon.setIcon(self._tray_badge("stop"))
 
         # Now Playing text and tooltip
         title = "-"

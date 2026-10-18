@@ -331,6 +331,13 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
                 vbtn.setIconSize(QSize(20, 20))
         except AttributeError:
             pass  # setup_ui() still building; icons apply once others land
+        # The tray badge follows the accent color too (theme changes).
+        try:
+            tray = getattr(self, 'tray', None)
+            if tray is not None:
+                tray.update_tray_ui()
+        except Exception:
+            pass
 
     def _apply_toggle_icons(self):
         """Shuffle/Repeat glyphs follow their accentActive toggle state."""
