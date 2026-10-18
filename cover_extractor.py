@@ -8,6 +8,10 @@ import tempfile
 from base64 import b64decode
 from PIL import Image, UnidentifiedImageError
 import mutagen
+
+# Windows: child processes (ffmpeg/ffprobe) must never flash a console
+# window in the packaged GUI build.
+_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 from mutagen import MutagenError
 from mutagen.id3 import ID3, APIC, ID3NoHeaderError
 from mutagen.flac import Picture, FLAC, FLACNoHeaderError
@@ -82,7 +86,8 @@ class CoverExtractor:
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
-                    timeout=8  # seconds
+                    timeout=8,  # seconds
+                    creationflags=_NO_WINDOW,
                 )
             except subprocess.TimeoutExpired:
                 logger.warning("FFmpeg extraction timed out")
@@ -315,7 +320,14 @@ class CoverExtractor:
             cmd.append(target)
 
             try:
-                result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout)
+                result = subprocess.run(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=timeout,
+                    creationflags=_NO_WINDOW,
+                )
             except subprocess.TimeoutExpired:
                 logger.warning("ffprobe metadata extraction timed out")
                 return {}
