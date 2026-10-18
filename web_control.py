@@ -272,6 +272,18 @@ class WebControlServer:
         return playlist
 
     def _get_progress(self):
+        # In engine mode (EQ active) the native player sits idle - report
+        # the engine's real position/duration so the panel keeps moving.
+        if getattr(self.player, '_using_engine', False):
+            try:
+                eng = self.player.eq_engine
+                pos = int(eng.position_ms())
+                dur = int(eng.duration_ms())
+                if dur <= 0:
+                    dur = int(self.player.player.duration())
+                return {'position': pos, 'duration': dur}
+            except Exception:
+                pass
         pos = int(self.player.player.position())
         dur = int(self.player.player.duration())
         return {'position': pos, 'duration': dur}
