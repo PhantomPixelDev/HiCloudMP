@@ -29,7 +29,9 @@ class EQEngine(QObject):
     CHANNELS = 2
     _BYTES_PER_SAMPLE = 2               # int16
     _SINK_BUFFER_BYTES = 192 * 1024     # ~1.1 s cushion against UI hiccups
-    _MAX_PENDING_SECONDS = 3.0
+    _MAX_PENDING_SECONDS = 6.0          # deep EQ'd cushion: network jitter +
+                                        # decoder single-slot refills must not
+                                        # starve the sink (playback 'hops')
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -56,6 +58,15 @@ class EQEngine(QObject):
         self._pump_timer = QTimer(self)
         self._pump_timer.setInterval(40)
         self._pump_timer.timeout.connect(self._pump)
+        # bufferReady wake: the decoder holds ONE buffer slot; waiting for
+        # the next 40ms tick after every buffer throttles decoding to
+        # just-in-time. The slot must never be read here (single-consumer
+        # rule) — this timer only wakes the pump immediately.
+        self._wake_scheduled = False
+        self._wake_timer = QTimer(self)
+        self._wake_timer.setInterval(0)
+        self._wake_timer.setSingleShot(True)
+        self._wake_timer.timeout.connect(self._wake_pump)
 
     # ------------------------------------------------------------------ API
     def set_gains(self, gains_db):
@@ -190,6 +201,8 @@ class EQEngine(QObject):
     def _teardown(self):
         self._pump_timer.stop()
         self._fallback_timer.stop()
+        self._wake_timer.stop()
+        self._wake_scheduled = False
         if self._decoder is not None:
             try:
                 self._decoder.stop()
@@ -219,8 +232,16 @@ class EQEngine(QObject):
 
     def _on_buffer_ready(self):
         # The 40ms pump is the ONLY reader (single-consumer keeps every
-        # buffer on the EQ path); this slot just marks decoder progress.
+        # buffer on the EQ path); this slot just marks decoder progress
+        # and wakes the pump so the pending cushion fills immediately.
         self._got_first_buffer = True
+        if not self._wake_scheduled:
+            self._wake_scheduled = True
+            self._wake_timer.start()
+
+    def _wake_pump(self):
+        self._wake_scheduled = False
+        self._pump()
 
     def _on_decoder_finished(self):
         self._decoding_done = True
