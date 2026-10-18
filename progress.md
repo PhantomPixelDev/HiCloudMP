@@ -60,5 +60,28 @@ Landed with this commit (`feat: tray icon is an accent badge ...`):
   light accents, cache identity + honest null, TrayController state badges).
 - Evidence: full suite `227 passed, 2 skipped` ×3.
 
-Next in line: performance round.
+`4077823` fix: local covers fall back to artwork stored next to the audio
+- User report: "local cover not loading". Real-library forensics: the
+  archive.org album "Tede – Ścieżka Dźwiękowa" was playing
+  (02. 22 Gibony...mp3) and the extractor logged "Unsupported image
+  format" for its MP3s. Hard facts from the folder: FLACs embed a
+  410x410 cover and extract fine; the MP3s have NO embedded art at all
+  (mutagen pictures=0, no attached_pic stream); the album ships
+  Cover.jpg + per-track 800x200 banner renders on disk; the local path
+  of extract_cover() tried only embedded art and ended at
+  Image.open(<the mp3>) -> UnidentifiedImageError -> default cover.
+- Fix: for local files, after embedded attempts fail,
+  `_open_sidecar_artwork()` now uses artwork next to the audio,
+  case-insensitive: `<track>.<img>` first, then cover/folder/front/
+  album/albumart/artwork (.jpg/.jpeg/.png/.webp/.bmp). Cover-shaped
+  (aspect 0.45-2.2) beats wide/tall renders (banner-like archive.org
+  per-track displays defer to square Cover.jpg, last resort otherwise);
+  corrupt candidates fall through; embedded art keeps priority;
+  *_spectrogram.png never matches; URLs untouched.
+- Tests: `tests/test_cover_sidecar.py` 6 tests red->green; cover files
+  combined 13 passed; full suite cold `233 passed, 2 skipped`; real-album
+  probe: 01/02/03 .mp3 -> 410x410 RGB (Cover.jpg).
+
+Next in line: EQ/visualizer + QThread-fatal fixes (investigations running),
+then performance round.
 
