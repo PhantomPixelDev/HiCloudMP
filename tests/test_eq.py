@@ -118,3 +118,78 @@ def test_engine_probe_zero_gains_bypass_is_transparent():
     x[100] = (1000, -1000)
     out = proc.process(x)
     assert int(out[100, 0]) == 1000 and int(out[100, 1]) == -1000
+
+
+class _FakeIO:
+    """Push device returned by QAudioSink.start() in PySide6 6.10."""
+
+    def __init__(self):
+        self.chunks = []
+
+    def write(self, data):
+        self.chunks.append(bytes(data))
+        return len(data)
+
+
+class _FakeSink:
+    def __init__(self, io):
+        self._io = io
+        self.started = False
+        self.free = 96000
+
+    def start(self):
+        self.started = True
+        return self._io
+
+    def bytesFree(self):
+        return self.free
+
+    def processedUSecs(self):
+        return 0
+
+    def suspend(self):
+        pass
+
+    def resume(self):
+        pass
+
+    def stop(self):
+        self.started = False
+
+
+def test_pump_writes_via_push_device_and_consumes_pending(qtbot):
+    import numpy as np
+    from eq_engine import EQEngine
+
+    engine = EQEngine()
+    io = _FakeIO()
+    engine._sink = _FakeSink(io)
+    engine._io = io                      # as play() will install it
+    engine._playing = True
+    engine._proc = dsp.EQProcessor(44100, 2, (0,) * 10)
+    engine._pending = np.zeros((4096, 2), dtype=np.int16)
+
+    engine._pump()
+
+    assert len(io.chunks) == 1
+    assert len(io.chunks[0]) == 4096 * 2 * 2
+    assert engine._pending.shape[0] == 0, "all pending samples consumed"
+
+
+def test_pump_exception_reports_error_for_native_fallback(qtbot):
+    import numpy as np
+    from eq_engine import EQEngine
+
+    engine = EQEngine()
+    engine._sink = _FakeSink(None)
+    engine._io = None                    # broken install: no push device
+    engine._sink.write = lambda d: (_ for _ in ()).throw(
+        AttributeError('no attribute write'))
+    engine._playing = True
+    engine._proc = dsp.EQProcessor(44100, 2, (0,) * 10)
+    engine._pending = np.zeros((2048, 2), dtype=np.int16)
+
+    with qtbot.waitSignal(engine.error_occurred, timeout=3000):
+        engine._pump()
+
+    assert engine._sink is None, "engine tears down before reporting"

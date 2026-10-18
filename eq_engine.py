@@ -35,6 +35,7 @@ class EQEngine(QObject):
         super().__init__(parent)
         self._decoder = None
         self._sink = None
+        self._io = None
         self._proc = None
         self._gains = (0.0,) * 10
         self._playing = False
@@ -112,7 +113,16 @@ class EQEngine(QObject):
             self._sink = QAudioSink(fmt, self)
         self._sink.setBufferSize(self._SINK_BUFFER_BYTES)
         self._sink.setVolume(self._volume)
-        self._sink.start()
+        # PySide6 6.10: push mode returns the QIODevice to write into; the
+        # sink object itself no longer exposes .write(). Older builds expose
+        # sink.write — _write_bytes handles both.
+        self._io = self._sink.start()
+        if self._io is None and not hasattr(self._sink, 'write'):
+            msg = "audio sink exposes no push-write API"
+            self._teardown()
+            self._playing = False
+            self.error_occurred.emit(msg)
+            return
 
         self._decoder.start()
         self._playing = True
@@ -178,6 +188,7 @@ class EQEngine(QObject):
             except Exception:
                 pass
             self._sink = None
+        self._io = None
         self._proc = None
         self._pending = np.zeros((0, self.CHANNELS), dtype=np.int16)
 
@@ -241,7 +252,16 @@ class EQEngine(QObject):
     def _pump(self):
         if self._sink is None or self._proc is None or not self._playing:
             return
-        # Refill from the decoder while behind our cap.
+        try:
+            self._refill()
+            self._flush_to_sink()
+        except Exception as e:
+            # A broken sink must surface (player falls back to native
+            # playback) instead of looping silently tick after tick.
+            self._report_error(f"Audio sink error: {e}")
+
+    def _refill(self):
+        """Pull decoded buffers through the EQ while behind the pending cap."""
         max_pending = int(self._MAX_PENDING_SECONDS * self.SAMPLE_RATE)
         try:
             while (self._decoder is not None
@@ -264,25 +284,37 @@ class EQEngine(QObject):
                     self._pending = np.concatenate(
                         [self._pending, out], axis=0)
         except Exception as e:
-            self._report_error(f"Decode error: {e}")
-            return
+            raise RuntimeError(f"decode error: {e}")
 
+    def _flush_to_sink(self):
         try:
             free = self._sink.bytesFree()
         except Exception:
-            return
+            free = 0
         if free > 0 and self._pending.shape[0]:
-            bytes_needed = self._pending.shape[0] * self.CHANNELS * self._BYTES_PER_SAMPLE
             take_samples = min(self._pending.shape[0], free //
                                (self.CHANNELS * self._BYTES_PER_SAMPLE))
             if take_samples > 0:
                 chunk = self._pending[:take_samples]
-                written = self._sink.write(chunk.tobytes())
+                written = self._write_bytes(chunk.tobytes())
                 if written > 0:
                     consumed = written // (self.CHANNELS * self._BYTES_PER_SAMPLE)
                     self._pending = self._pending[consumed:]
         self._emit_position()
         self._check_finished()
+
+    def _write_bytes(self, data):
+        """Push s16 bytes to the sink. PySide6 6.10 exposes push mode via the
+        QIODevice returned by start(); older builds expose sink.write()."""
+        if self._io is not None:
+            try:
+                return self._io.write(data)
+            except Exception as e:
+                raise RuntimeError(f"push device write failed: {e}")
+        sink = self._sink
+        if sink is not None and hasattr(sink, 'write'):
+            return sink.write(data)
+        raise RuntimeError("audio sink exposes no push-write API")
 
     def _emit_position(self):
         if self._sink is None:
