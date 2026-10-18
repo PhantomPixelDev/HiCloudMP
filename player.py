@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QTreeWidgetItem, QSplitter, QLineEdit, QDialog, QFormLayout, QTabWidget, 
     QToolButton, QStatusBar, QStyle, QFrame, QMenu, QProgressBar, QSystemTrayIcon,
     QComboBox, QInputDialog, QListWidgetItem, QRadioButton, QDialogButtonBox, QProgressDialog,
-    QCheckBox, QWidgetAction
+    QCheckBox, QWidgetAction, QGroupBox
 )
 from PySide6.QtGui import QPainter
 from PySide6.QtCore import Qt, QTimer, Signal, QObject, QThread, QUrl, QSize, QEvent, QSettings
@@ -116,11 +116,28 @@ class SettingsDialog(QDialog):
         self.volume_slider.setValue(self.settings.value("volume", 70, int))
         layout.addWidget(QLabel("Default Volume"))
         layout.addWidget(self.volume_slider)
+        # --- Appearance (unified theme system in theme.py) ---
+        appearance_box = QGroupBox("Appearance")
+        appearance_form = QFormLayout(appearance_box)
         self.theme_combo = QComboBox()
         self.theme_combo.addItems(["Dark", "Light"])
         self.theme_combo.setCurrentText(self.settings.value("theme", "Dark"))
-        layout.addWidget(QLabel("Theme"))
-        layout.addWidget(self.theme_combo)
+        appearance_form.addRow("Theme", self.theme_combo)
+        import theme as _theme
+        self.accent_combo = QComboBox()
+        self.accent_combo.addItems(list(_theme.ACCENTS.keys()))
+        stored_accent = self.settings.value("ui/accent", _theme.ACCENTS["Emerald"])
+        default_accent_name = next(
+            (n for n, h in _theme.ACCENTS.items() if h.lower() == str(stored_accent).lower()),
+            "Emerald")
+        self.accent_combo.setCurrentText(default_accent_name)
+        appearance_form.addRow("Accent color", self.accent_combo)
+        self.density_combo = QComboBox()
+        self.density_combo.addItems(["Comfortable", "Compact"])
+        self.density_combo.setCurrentText(
+            str(self.settings.value("ui/density", "comfortable")).capitalize())
+        appearance_form.addRow("UI density", self.density_combo)
+        layout.addWidget(appearance_box)
         self.download_folder_edit = QLineEdit(self.settings.value("download_folder", ""))
         browse_btn = QPushButton("Browse...")
         browse_btn.clicked.connect(self.browse_folder)
@@ -162,6 +179,10 @@ class SettingsDialog(QDialog):
     def save_settings(self):
         self.settings.setValue("volume", self.volume_slider.value())
         self.settings.setValue("theme", self.theme_combo.currentText())
+        # Appearance persistence (accent stored as hex; density lowercased)
+        import theme as _theme
+        self.settings.setValue("ui/accent", _theme.accent_hex(self.accent_combo.currentText()))
+        self.settings.setValue("ui/density", self.density_combo.currentText().lower())
         self.settings.setValue("download_folder", self.download_folder_edit.text())
         self.settings.setValue("web_interface", self.web_checkbox.isChecked())
         self.settings.setValue("web/host", "0.0.0.0" if self.lan_checkbox.isChecked() else "127.0.0.1")
@@ -290,60 +311,18 @@ class MusicPlayer(QMainWindow):
         # (autostart handled above once)
         
     def set_dark_theme(self):
-        """Apply dark theme to the application"""
-        self.setStyleSheet("""
-            QMainWindow, QDialog {
-                background-color: #2b2b2b;
-                color: #ffffff;
-            }
-            QLabel, QPushButton, QCheckBox, QRadioButton, QLineEdit, QListWidget, QComboBox {
-                color: #ffffff;
-            }
-            QPushButton {
-                background-color: #3a3a3a;
-                border: 1px solid #555;
-                padding: 5px;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #4a4a4a;
-            }
-            QPushButton:pressed {
-                background-color: #2a2a2a;
-            }
-            QListWidget, QLineEdit, QComboBox {
-                background-color: #3a3a3a;
-                border: 1px solid #555;
-                padding: 5px;
-                border-radius: 4px;
-            }
-            QScrollBar:vertical {
-                background: #3a3a3a;
-                width: 12px;
-                margin: 0px;
-            }
-            QScrollBar::handle:vertical {
-                background: #555;
-                min-height: 20px;
-                border-radius: 6px;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                height: 0px;
-            }
-        """)
+        """Apply the unified theme (theme/accent/density resolved from QSettings)."""
+        import theme as _theme
+        _theme.apply_theme(self)
 
     def open_settings_dialog(self):
         """Open the settings dialog and apply any changes"""
         dialog = SettingsDialog(self)
         if dialog.exec() == QDialog.Accepted:
             dialog.save_settings()
-            # Apply theme
-            theme = dialog.settings.value("theme", "Dark")
-            if theme == "Dark":
-                self.set_dark_theme()
-            else:
-                # Reset to default light theme
-                self.setStyleSheet("")
+            # Apply the unified theme (Dark/Light, accent color, density)
+            import theme as _theme
+            _theme.apply_theme(self)
             # Apply volume
             volume = dialog.settings.value("volume", 70, int)
             self.audio_output.setVolume(volume / 100.0)
@@ -1021,19 +1000,20 @@ class MusicPlayer(QMainWindow):
         self.audio_output.setVolume(volume / 100.0)
     
     def toggle_shuffle(self, enabled):
-        # Only update the button style and state
+        # Accent highlight handled by stylesheet property (theme.py accentActive)
+        self.shuffle_btn.setProperty("accentActive", enabled)
+        self.shuffle_btn.style().unpolish(self.shuffle_btn)
+        self.shuffle_btn.style().polish(self.shuffle_btn)
         if enabled:
-            self.shuffle_btn.setStyleSheet("background-color: #007bff; color: white;")
             self.status_bar.showMessage("Shuffle mode enabled: random song will play after each track.")
         else:
-            self.shuffle_btn.setStyleSheet("")
             self.status_bar.showMessage("Shuffle mode disabled: normal order.")
         self.highlight_current_track()
     
     def toggle_repeat(self, enabled):
-        self.repeat_btn.setStyleSheet(
-            "background-color: #007bff; color: white;" if enabled else ""
-        )
+        self.repeat_btn.setProperty("accentActive", enabled)
+        self.repeat_btn.style().unpolish(self.repeat_btn)
+        self.repeat_btn.style().polish(self.repeat_btn)
     
     def on_media_status_changed(self, status):
         # Update status bar with current media status
