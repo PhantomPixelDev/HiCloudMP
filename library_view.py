@@ -1,5 +1,5 @@
 import os
-from PySide6.QtWidgets import QMenu, QTreeWidgetItem, QMessageBox, QStyle
+from PySide6.QtWidgets import QMenu, QTreeWidgetItem, QMessageBox, QStyle, QAbstractItemView
 from PySide6.QtCore import Qt
 from utils import is_music_file, scan_music_files
 
@@ -40,7 +40,7 @@ class LibraryView:
 
     def update_library_tree(self):
         self.app.library_tree.clear()
-        self.app.library_tree.setSelectionMode(self.app.library_tree.ExtendedSelection)
+        self.app.library_tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         folder_icon = self.app.style().standardIcon(QStyle.SP_DirIcon)
         file_icon = self.app.style().standardIcon(QStyle.SP_FileIcon)
         # Local folders
