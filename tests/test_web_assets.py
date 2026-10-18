@@ -35,3 +35,16 @@ def test_ping_pill_present_and_wired():
         assert needle in src_txt, needle
     assert "Offline" in src_txt, "broken connection must read Offline, not blank"
     assert "Connected" in src_txt, "healthy connection shows ms latency"
+
+
+def test_progress_poll_skips_while_hidden():
+    """The 1 Hz get_progress poll must not fetch while the tab is hidden —
+    a background tab otherwise keeps the server busy for nothing."""
+    src_txt = _panel_source()
+    hits = [m.start() for m in re.finditer(re.escape("'get_progress'"),
+                                           src_txt)]
+    assert hits, "progress poll missing"
+    poll_idx = hits[-1]  # the setInterval poll is the last emit site
+    near = src_txt[max(0, poll_idx - 700):poll_idx]
+    assert re.search(r"document\.hidden", near), (
+        "1 Hz poll must check document.hidden before emitting")

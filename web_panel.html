@@ -652,8 +652,10 @@
             ping();
         })();
 
-        // Poll progress every second
-        setInterval(function() { socket.emit('get_progress'); }, 1000);
+        // Poll progress every second; a hidden tab must not keep the server busy
+        setInterval(function() {
+            if (!document.hidden) { socket.emit('get_progress'); }
+        }, 1000);
         // Playlist search
         document.getElementById('playlist-search').addEventListener('input', function() {
             playlistFilter = this.value;
