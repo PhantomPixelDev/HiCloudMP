@@ -58,6 +58,9 @@ class EQEngine(QObject):
         # Spectrum tap (visualizer): rolling mono tail + latest band data.
         self._spectrum = None
         self._spec_buf = np.zeros((0,), dtype=np.float32)
+        # Output device: None = system default (re-choosable in Settings;
+        # applied when the next sink is created).
+        self._out_device = None
         self._pump_timer = QTimer(self)
         self._pump_timer.setInterval(40)
         self._pump_timer.timeout.connect(self._pump)
@@ -81,6 +84,25 @@ class EQEngine(QObject):
         self._volume = max(0.0, min(1.0, float(volume)))
         if self._sink is not None:
             self._sink.setVolume(self._volume)
+
+    def set_output_device(self, device):
+        """Pick the sink endpoint for the NEXT track (None/garbage = default)."""
+        self._out_device = device
+
+    def _choose_output_device(self):
+        try:
+            dev = self._out_device
+            if dev is not None and not dev.isNull():
+                return dev
+        except Exception:
+            pass
+        try:
+            d = QMediaDevices().defaultAudioOutput()
+            if d is not None and not d.isNull():
+                return d
+        except Exception:
+            pass
+        return None
 
     def is_playing(self):
         return self._playing
@@ -126,9 +148,7 @@ class EQEngine(QObject):
 
         self._proc = dsp.EQProcessor(self.SAMPLE_RATE, self.CHANNELS, self._gains)
 
-        device = QMediaDevices().defaultAudioOutput()
-        if device is not None and device.isNull():
-            device = None
+        device = self._choose_output_device()
         if device is not None:
             self._sink = QAudioSink(device, fmt, self)
         else:

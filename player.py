@@ -155,6 +155,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         self.load_media_folders()
         self.load_clouds()
         self.load_playlists()
+        self.apply_output_device_setting()
         self._start_local_scan()
         
         # Playlists manager (delegate playlist operations)
@@ -2080,6 +2081,42 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         self._local_scan_worker = None
         self._local_scan_thread = None
         self.status_bar.showMessage(f"Library scan complete: {total} tracks", 5000)
+
+    # ------------------------------------------------ audio output device
+    def _make_native_output(self, device):
+        """Build the QAudioOutput for `device` (None = system default)."""
+        from PySide6.QtMultimedia import QAudioOutput
+        if device is None:
+            return QAudioOutput()
+        return QAudioOutput(device)
+
+    def apply_output_device_setting(self):
+        """Resolve audio/output_device and apply to native + engine."""
+        try:
+            import audio_devices
+            device = audio_devices.resolve_output(
+                str(self.settings.value("audio/output_device", "", type=str)
+                    or ""))
+        except Exception as e:
+            print(f"audio output device: resolve failed: {e}")
+            device = None
+        # Engine first: it only takes effect at the next sink creation,
+        # and must not be skipped by a native-swap hiccup.
+        try:
+            self.eq_engine.set_output_device(device)
+        except Exception as e:
+            print(f"audio output device: engine push failed: {e}")
+        try:
+            output = self._make_native_output(device)
+            self.player.setAudioOutput(output)
+            self.audio_output = output
+            try:
+                volume = self.settings.value("volume", 70, int)
+                output.setVolume(volume / 100.0)
+            except Exception:
+                pass
+        except Exception as e:
+            print(f"audio output device: native apply failed: {e}")
 
     def cancel_local_scan(self):
         if self._local_scan_worker is not None:

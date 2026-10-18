@@ -475,6 +475,18 @@ class SettingsDialog(QDialog):
         viz_hint.setObjectName("hintLabel")
         viz_hint.setWordWrap(True)
         form.addRow("", viz_hint)
+        self.output_combo = QComboBox()
+        import audio_devices
+        for did, desc in audio_devices.list_output_devices():
+            self.output_combo.addItem(desc, did)
+        stored = str(self.settings.value("audio/output_device", "", type=str)
+                     or "")
+        idx = self.output_combo.findData(stored) if stored else 0
+        self.output_combo.setCurrentIndex(max(0, idx))
+        form.addRow("Output device", self.output_combo)
+        out_hint = QLabel("The equalizer engine switches at the next track.")
+        out_hint.setObjectName("hintLabel")
+        form.addRow("", out_hint)
         return page
 
     def _build_appearance_page(self):
@@ -731,6 +743,9 @@ class SettingsDialog(QDialog):
         self.settings.setValue("volume", self.volume_slider.value())
         self.settings.setValue("ui/visualizer_enabled",
                                self.visualizer_checkbox.isChecked())
+        self.settings.setValue(
+            "audio/output_device",
+            str(self.output_combo.currentData() or ""))
         self.settings.setValue("theme", self.theme_combo.currentText())
         # Appearance persistence (accent stored as hex; density lowercased)
         import theme as _theme
