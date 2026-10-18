@@ -50,6 +50,8 @@ class EQEngine(QObject):
         self._base_ms = 0
         self._prof_us_base = 0
         self._duration_ms = 0
+        self._skip_until_ms = 0
+        self._skip_done = True
         self._volume = 1.0
         self._pump_timer = QTimer(self)
         self._pump_timer.setInterval(40)
@@ -83,6 +85,8 @@ class EQEngine(QObject):
         self._error_reported = False
         self._got_first_buffer = False
         self._duration_ms = 0
+        self._skip_until_ms = 0
+        self._skip_done = True
 
         fmt = QAudioFormat()
         fmt.setSampleRate(self.SAMPLE_RATE)
@@ -150,13 +154,30 @@ class EQEngine(QObject):
             self.state_changed.emit("playing")
 
     def seek(self, ms):
-        if self._decoder is not None and self._proc is not None:
-            self._pending = np.zeros((0, self.CHANNELS), dtype=np.int16)
-            self._proc.reset()
-            self._base_ms = int(ms)
-            if self._sink is not None:
+        """PySide6 6.10 QAudioDecoder has no setPosition: restart from the top
+        and discard decoded frames until decoder.position() reaches the target."""
+        if self._decoder is None or self._proc is None:
+            return
+        ms = max(0, int(ms))
+        self._pending = np.zeros((0, self.CHANNELS), dtype=np.int16)
+        self._proc.reset()
+        self._skip_until_ms = ms
+        self._skip_done = False
+        self._base_ms = ms
+        if self._sink is not None:
+            try:
+                self._sink.reset()          # drop buffered old audio: honest jump
                 self._prof_us_base = self._sink.processedUSecs()
-            self._decoder.setPosition(int(ms))
+            except Exception:
+                pass
+        try:
+            url = self._decoder.source()
+            self._decoder.stop()
+            self._decoder.setSource(QUrl())
+            self._decoder.setSource(url)
+            self._decoder.start()
+        except Exception as e:
+            raise RuntimeError(f"seek restart failed: {e}")
 
     def stop(self):
         was_active = self._decoder is not None
@@ -197,23 +218,9 @@ class EQEngine(QObject):
         self.duration_changed.emit(self._duration_ms)
 
     def _on_buffer_ready(self):
-        if self._decoder is None or self._proc is None:
-            return
-        try:
-            buf = self._decoder.read()
-            if buf is None or buf.byteCount() <= 0:
-                return
-            data = bytes(buf.constData())
-            arr = np.frombuffer(data, dtype=np.int16)
-            if arr.size == 0:
-                return
-            self._got_first_buffer = True
-            frames = arr.size // self.CHANNELS
-            self._pending = np.concatenate(
-                [self._pending, arr[:frames * self.CHANNELS].reshape(
-                    frames, self.CHANNELS)], axis=0)
-        except Exception as e:
-            self._report_error(f"Decode error: {e}")
+        # The 40ms pump is the ONLY reader (single-consumer keeps every
+        # buffer on the EQ path); this slot just marks decoder progress.
+        self._got_first_buffer = True
 
     def _on_decoder_finished(self):
         self._decoding_done = True
@@ -260,9 +267,20 @@ class EQEngine(QObject):
             # playback) instead of looping silently tick after tick.
             self._report_error(f"Audio sink error: {e}")
 
+    def _process_or_discard(self, arr, buffer_end_position_ms):
+        """During a seek-skip, drop buffers that end before the target."""
+        if self._skip_done:
+            return arr
+        if buffer_end_position_ms is not None and \
+                buffer_end_position_ms < self._skip_until_ms:
+            return np.zeros((0, self.CHANNELS), dtype=np.int16)
+        self._skip_done = True
+        return arr
+
     def _refill(self):
         """Pull decoded buffers through the EQ while behind the pending cap."""
         max_pending = int(self._MAX_PENDING_SECONDS * self.SAMPLE_RATE)
+        skip_pos = None
         try:
             while (self._decoder is not None
                    and self._decoder.bufferAvailable()
@@ -270,6 +288,11 @@ class EQEngine(QObject):
                 buf = self._decoder.read()
                 if buf is None or buf.byteCount() <= 0:
                     break
+                if not self._skip_done:
+                    try:
+                        skip_pos = self._decoder.position()
+                    except Exception:
+                        skip_pos = None
                 data = bytes(buf.constData())
                 arr = np.frombuffer(data, dtype=np.int16)
                 frames = arr.size // self.CHANNELS
@@ -278,8 +301,13 @@ class EQEngine(QObject):
                 self._got_first_buffer = True
                 if self._proc is None:
                     return
-                out = self._proc.process(arr[:frames * self.CHANNELS].reshape(
-                    frames, self.CHANNELS))
+                arr = arr[:frames * self.CHANNELS].reshape(
+                    frames, self.CHANNELS)
+                arr = self._process_or_discard(arr, skip_pos)
+                skip_pos = None
+                if arr.shape[0] == 0:
+                    continue
+                out = self._proc.process(arr)
                 if out.shape[0]:
                     self._pending = np.concatenate(
                         [self._pending, out], axis=0)

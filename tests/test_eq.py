@@ -193,3 +193,72 @@ def test_pump_exception_reports_error_for_native_fallback(qtbot):
         engine._pump()
 
     assert engine._sink is None, "engine tears down before reporting"
+
+
+class _FakeDecoder:
+    """Mimics the PySide6 6.10 QAudioDecoder surface (no setPosition)."""
+
+    def __init__(self):
+        self.starts = 0
+        self.stops = 0
+        self.sources = []
+        self.decode_pos = 0
+        self.bufferAvail = False
+
+    def source(self):
+        return self.sources[0] if self.sources else None
+
+    def stop(self):
+        self.stops += 1
+
+    def setSource(self, url):
+        self.sources.append(url)
+
+    def start(self):
+        self.starts += 1
+
+    def position(self):
+        return self.decode_pos
+
+    def bufferAvailable(self):
+        return self.bufferAvail
+
+
+def test_seek_restarts_decoder_and_discards_until_target(qtbot):
+    from eq_engine import EQEngine
+
+    engine = EQEngine()
+    dec = _FakeDecoder()
+    dec.decode_pos = 5000        # after restart it fast-decodes from the top
+    engine._decoder = dec
+    engine._proc = dsp.EQProcessor(44100, 2, (0,) * 10)
+    import numpy as np
+    engine._pending = np.zeros((1000, 2), dtype=np.int16)
+
+    engine.seek(5000)            # must NOT raise AttributeError
+
+    assert dec.stops >= 1 and dec.starts >= 1, "seek restarts the decoder"
+    assert engine._skip_until_ms == 5000
+    assert engine._base_ms == 5000
+    assert engine._pending.shape[0] == 0, "pending audio dropped on seek"
+    assert engine._skip_done is False
+
+
+def test_process_or_discard_drops_pretarget_buffers(qtbot):
+    import numpy as np
+    from eq_engine import EQEngine
+
+    engine = EQEngine()
+    engine._proc = dsp.EQProcessor(44100, 2, (0,) * 10)
+    engine._skip_until_ms = 4000
+    engine._skip_done = False
+
+    out = engine._process_or_discard(
+        np.zeros((1000, 2), dtype=np.int16), buffer_end_position_ms=3500)
+    assert out is not None and out.shape[0] == 0, "pre-target audio discarded"
+    assert engine._skip_done is False
+
+    out = engine._process_or_discard(
+        np.zeros((2048, 2), dtype=np.int16), buffer_end_position_ms=4200)
+    assert out is not None and out.shape[0] == 2048, "post-target processed"
+    assert engine._skip_done is True
