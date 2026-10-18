@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QTreeWidgetItem, QSplitter, QLineEdit, QDialog, QFormLayout, QTabWidget, 
     QToolButton, QStatusBar, QStyle, QFrame, QMenu, QProgressBar, QSystemTrayIcon,
     QComboBox, QInputDialog, QListWidgetItem, QRadioButton, QDialogButtonBox, QProgressDialog,
-    QCheckBox, QWidgetAction, QGroupBox
+    QCheckBox, QWidgetAction, QGroupBox, QGridLayout
 )
 from PySide6.QtGui import QPainter
 from PySide6.QtCore import Qt, QTimer, Signal, QObject, QThread, QUrl, QSize, QEvent, QSettings
@@ -201,7 +201,8 @@ class MusicPlayer(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("HiCloud MP")
-        self.resize(1000, 600)
+        self.resize(1120, 720)
+        self.setMinimumSize(960, 640)
         self.setWindowIcon(QIcon("icon.ico"))
         
         # Set up application directories
@@ -294,21 +295,9 @@ class MusicPlayer(QMainWindow):
         # Auto-start web interface if enabled in settings
         if self.settings.value("web_interface", False, bool):
             self.start_web_interface()
-        
-        # Create menu bar
-        menubar = self.menuBar()
-        
-        # Add Web Panel action
-        web_panel_action = QAction("Web Panel", self)
-        web_panel_action.triggered.connect(self.open_web_panel)
-        menubar.addAction(web_panel_action)
-        
-        # Add Settings action
-        settings_action = QAction("Settings", self)
-        settings_action.triggered.connect(self.open_settings_dialog)
-        menubar.addAction(settings_action)
-        
-        # (autostart handled above once)
+
+        # Web Panel / Settings live in the sidebar footer (setup_ui) — no
+        # legacy menu bar.
         
     def set_dark_theme(self):
         """Apply the unified theme (theme/accent/density resolved from QSettings)."""
@@ -512,103 +501,152 @@ class MusicPlayer(QMainWindow):
             pass
     
     def setup_ui(self):
-        """Set up the user interface"""
+        """Modern two-zone layout: navigation sidebar + content stage with
+        transport bar. All widget attribute names are preserved (tests and the
+        web-control bridge depend on them)."""
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-        
-        main_layout = QHBoxLayout(central_widget)
-        
-        # Left panel - library
-        library_panel = QWidget()
-        library_layout = QVBoxLayout(library_panel)
-        
-        # Search box
-        search_layout = QHBoxLayout()
+        central_widget.setObjectName("central")
+        root = QHBoxLayout(central_widget)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # ================= Sidebar =================
+        self.sidebar = QWidget()
+        self.sidebar.setObjectName("sidebar")
+        self.sidebar.setFixedWidth(250)
+        side = QVBoxLayout(self.sidebar)
+        side.setContentsMargins(14, 14, 14, 10)
+        side.setSpacing(10)
+
+        self.nav_brand = QLabel("HiCloud")
+        self.nav_brand.setObjectName("brandTitle")
+        brand_sub = QLabel("Music Player")
+        brand_sub.setObjectName("brandSub")
+        side.addWidget(self.nav_brand)
+        side.addWidget(brand_sub)
+
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search music...")
+        self.search_input.setClearButtonEnabled(True)
         self.search_input.returnPressed.connect(self.search_music)
-        self.search_btn = QToolButton()
-        self.search_btn.setIcon(self.style().standardIcon(QStyle.SP_FileDialogContentsView))
-        self.search_btn.clicked.connect(self.search_music)
-        search_layout.addWidget(self.search_input)
-        search_layout.addWidget(self.search_btn)
-        library_layout.addLayout(search_layout)
-        
-        # Library tree
+        side.addWidget(self.search_input)
+
         self.library_tree = QTreeWidget()
         self.library_tree.setHeaderHidden(True)
         self.library_tree.itemDoubleClicked.connect(self.on_library_item_clicked)
         self.library_tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.library_tree.customContextMenuRequested.connect(self.show_library_context_menu)
-        library_layout.addWidget(self.library_tree)
-        
-        # Library buttons
-        lib_buttons_layout = QHBoxLayout()
+        side.addWidget(self.library_tree, 1)
+
+        # Library actions (2x2 grid)
         self.add_folder_btn = QPushButton("Add Folder")
         self.add_files_btn = QPushButton("Add Files")
         self.add_cloud_btn = QPushButton("Add Cloud")
         self.scan_cloud_btn = QPushButton("Scan Cloud")
-        
+
         self.add_folder_btn.clicked.connect(self.add_folder)
         self.add_files_btn.clicked.connect(self.add_files)
         self.add_cloud_btn.clicked.connect(self.add_cloud)
         self.scan_cloud_btn.clicked.connect(self.scan_clouds)
-        
-        lib_buttons_layout.addWidget(self.add_folder_btn)
-        lib_buttons_layout.addWidget(self.add_files_btn)
-        lib_buttons_layout.addWidget(self.add_cloud_btn)
-        lib_buttons_layout.addWidget(self.scan_cloud_btn)
-        
-        library_layout.addLayout(lib_buttons_layout)
-        
-        # Right panel - player
-        player_panel = QWidget()
-        player_layout = QVBoxLayout(player_panel)
-        
-        # Playlist management
+
+        actions_grid = QGridLayout()
+        actions_grid.setSpacing(6)
+        actions_grid.addWidget(self.add_folder_btn, 0, 0)
+        actions_grid.addWidget(self.add_files_btn, 0, 1)
+        actions_grid.addWidget(self.add_cloud_btn, 1, 0)
+        actions_grid.addWidget(self.scan_cloud_btn, 1, 1)
+        side.addLayout(actions_grid)
+
+        # Sidebar footer: quick access (replaces the old menu bar)
+        footer = QHBoxLayout()
+        self.web_panel_btn = QPushButton("Web Panel")
+        self.web_panel_btn.clicked.connect(self.open_web_panel)
+        self.settings_btn = QPushButton("Settings")
+        self.settings_btn.clicked.connect(self.open_settings_dialog)
+        footer.addWidget(self.web_panel_btn)
+        footer.addWidget(self.settings_btn)
+        side.addLayout(footer)
+
+        root.addWidget(self.sidebar)
+
+        # ================= Stage =================
+        stage = QWidget()
+        stage_col = QVBoxLayout(stage)
+        stage_col.setContentsMargins(12, 12, 12, 8)
+        stage_col.setSpacing(10)
+
+        # Top bar: playlist selector + manage buttons
         playlist_header = QHBoxLayout()
-        
-        # Playlist selector
         self.playlist_selector = QComboBox()
         self.playlist_selector.currentIndexChanged.connect(self.on_playlist_changed)
         playlist_header.addWidget(self.playlist_selector, 1)
-        
-        # Playlist buttons
+
         playlist_new_btn = QToolButton()
         playlist_new_btn.setIcon(self.style().standardIcon(QStyle.SP_FileIcon))
         playlist_new_btn.setToolTip("New Playlist")
         playlist_new_btn.clicked.connect(self.new_playlist)
-        
+
         playlist_save_btn = QToolButton()
         playlist_save_btn.setIcon(self.style().standardIcon(QStyle.SP_DialogSaveButton))
         playlist_save_btn.setToolTip("Save Playlist")
         playlist_save_btn.clicked.connect(self.save_current_playlist)
-        
+
         playlist_delete_btn = QToolButton()
         playlist_delete_btn.setIcon(self.style().standardIcon(QStyle.SP_TrashIcon))
         playlist_delete_btn.setToolTip("Delete Playlist")
         playlist_delete_btn.clicked.connect(self.delete_current_playlist)
-        
+
         playlist_header.addWidget(playlist_new_btn)
         playlist_header.addWidget(playlist_save_btn)
         playlist_header.addWidget(playlist_delete_btn)
-        
-        player_layout.addLayout(playlist_header)
-        
-        # Playlist search/filter/sort controls
-        playlist_controls_layout = QHBoxLayout()
+        stage_col.addLayout(playlist_header)
+
+        # Filter / sort row
+        playlist_controls = QHBoxLayout()
         self.playlist_search_input = QLineEdit()
-        self.playlist_search_input.setPlaceholderText("Search playlist...")
+        self.playlist_search_input.setPlaceholderText("Filter playlist...")
+        self.playlist_search_input.setClearButtonEnabled(True)
         self.playlist_search_input.textChanged.connect(self.filter_playlist)
         self.playlist_sort_combo = QComboBox()
         self.playlist_sort_combo.addItems(["Original", "Title", "Artist", "Album"])
         self.playlist_sort_combo.currentIndexChanged.connect(self.sort_playlist)
-        playlist_controls_layout.addWidget(QLabel("Playlist:"))
-        playlist_controls_layout.addWidget(self.playlist_search_input)
-        playlist_controls_layout.addWidget(self.playlist_sort_combo)
-        player_layout.addLayout(playlist_controls_layout)
-        
-        # Playlist
+        playlist_controls.addWidget(self.playlist_search_input, 1)
+        playlist_controls.addWidget(self.playlist_sort_combo)
+        stage_col.addLayout(playlist_controls)
+
+        # Content row: now-playing card + playlist
+        content_row = QHBoxLayout()
+        content_row.setSpacing(12)
+
+        now_card = QFrame()
+        now_card.setObjectName("nowCard")
+        now_card.setFixedWidth(300)
+        card_col = QVBoxLayout(now_card)
+        card_col.setContentsMargins(16, 16, 16, 16)
+        card_col.setSpacing(8)
+
+        self.cover_art_label = QLabel()
+        self.cover_art_label.setObjectName("coverCard")
+        self.cover_art_label.setAlignment(Qt.AlignCenter)
+        self.cover_art_label.setFixedSize(256, 256)
+        card_col.addWidget(self.cover_art_label, 0, Qt.AlignHCenter)
+
+        self.track_title_label = QLabel("Title: -")
+        self.track_title_label.setObjectName("trackTitle")
+        self.track_artist_label = QLabel("Artist: -")
+        self.track_artist_label.setObjectName("trackDim")
+        self.track_album_label = QLabel("Album: -")
+        self.track_album_label.setObjectName("trackDim")
+        card_col.addWidget(self.track_title_label)
+        card_col.addWidget(self.track_artist_label)
+        card_col.addWidget(self.track_album_label)
+        card_col.addStretch(1)
+
+        self.set_default_cover()
+
+        content_row.addWidget(now_card)
+
         self.playlist_widget = QListWidget()
         self.playlist_widget.itemDoubleClicked.connect(self.play_selected)
         self.playlist_widget.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -616,103 +654,18 @@ class MusicPlayer(QMainWindow):
         # Enable drag-and-drop reordering and multi-select
         self.playlist_widget.setDragDropMode(QListWidget.InternalMove)
         self.playlist_widget.setSelectionMode(QListWidget.ExtendedSelection)
-        player_layout.addWidget(self.playlist_widget)
-        
-        # Cover art and metadata display
-        meta_container = QWidget()
-        meta_layout = QHBoxLayout(meta_container)
-        
-        # Cover art with frame
-        cover_frame = QFrame()
-        cover_frame.setFixedSize(220, 220)  # Slightly larger to accommodate the frame
-        cover_frame.setStyleSheet("""
-            QFrame {
-                background-color: #2d2d2d;
-                border: 2px solid #444;
-                border-radius: 8px;
-                padding: 10px;
-            }
-        """)
-        
-        # Create a layout for the cover art
-        cover_layout = QVBoxLayout(cover_frame)
-        cover_layout.setContentsMargins(0, 0, 0, 0)
-        cover_layout.setSpacing(0)
-        
-        # Cover art label
-        self.cover_art_label = QLabel()
-        self.cover_art_label.setFixedSize(200, 200)  # Fixed size for cover art
-        self.cover_art_label.setAlignment(Qt.AlignCenter)
-        self.cover_art_label.setStyleSheet("""
-            QLabel {
-                background-color: #1a1a1a;
-                border: 1px solid #333;
-                border-radius: 4px;
-            }
-        """)
-        
-        # Add cover art to its frame
-        cover_layout.addWidget(self.cover_art_label)
-        
-        # Debug: Print cover art label info
-        print("\n=== Cover Art Label Info ===")
-        print(f"Size: {self.cover_art_label.size().width()}x{self.cover_art_label.size().height()}")
-        print(f"Is visible: {self.cover_art_label.isVisible()}")
-        print(f"Is enabled: {self.cover_art_label.isEnabled()}")
-        
-        # Set default cover art
-        self.set_default_cover()
-        
-        # Metadata text
-        meta_text_layout = QVBoxLayout()
-        self.track_title_label = QLabel("Title: -")
-        self.track_artist_label = QLabel("Artist: -")
-        self.track_album_label = QLabel("Album: -")
-        
-        # Style metadata labels
-        for label in [self.track_title_label, self.track_artist_label, self.track_album_label]:
-            label.setStyleSheet("font-size: 12px; margin: 2px;")
-        
-        meta_text_layout.addWidget(self.track_title_label)
-        meta_text_layout.addWidget(self.track_artist_label)
-        meta_text_layout.addWidget(self.track_album_label)
-        meta_text_layout.addStretch(1)
-        
-        # Add widgets to layout with proper spacing and alignment
-        meta_layout.addWidget(cover_frame, 0, Qt.AlignTop | Qt.AlignLeft)  # Add the framed cover art
-        meta_layout.addLayout(meta_text_layout)
-        meta_layout.setStretch(0, 0)  # Don't stretch cover art
-        meta_layout.setStretch(1, 1)  # Stretch metadata text
-        meta_layout.setSpacing(20)  # Add some spacing between cover art and text
-        
-        # Force update the layout
-        meta_layout.update()
-        meta_layout.activate()
-        
-        # Debug: Print layout info
-        print("\n=== Cover Art Layout Info ===")
-        print(f"Cover art in layout: {meta_layout.itemAt(0).widget() is self.cover_art_label}")
-        print(f"Layout contents rect: {meta_layout.contentsRect()}")
-        
-        # Create a container widget for metadata
-        meta_widget = QWidget()
-        meta_widget.setLayout(meta_layout)
-        meta_widget.setMinimumHeight(240)  # Increased to fit the cover art
-        meta_widget.setMaximumHeight(240)  # Fixed height to prevent layout jumps
-        player_layout.addWidget(meta_widget)
-        
-        # Force a style refresh
-        meta_widget.style().unpolish(meta_widget)
-        meta_widget.style().polish(meta_widget)
-        meta_widget.update()
-        
-        # Playback controls
-        controls_frame = QFrame()
-        controls_frame.setFrameShape(QFrame.StyledPanel)
-        controls_layout = QVBoxLayout(controls_frame)
-        
-        # Time and seek
+        content_row.addWidget(self.playlist_widget, 1)
+        stage_col.addLayout(content_row, 1)
+
+        # Transport bar
+        self.transport_bar = QFrame()
+        self.transport_bar.setObjectName("transportBar")
+        transport_col = QVBoxLayout(self.transport_bar)
+        transport_col.setContentsMargins(16, 10, 16, 12)
+        transport_col.setSpacing(6)
+
         seek_layout = QHBoxLayout()
+        seek_layout.setSpacing(10)
         self.position_label = QLabel("00:00")
         self.duration_label = QLabel("00:00")
         self.seek_slider = QSlider(Qt.Horizontal)
@@ -724,87 +677,98 @@ class MusicPlayer(QMainWindow):
         self.seek_slider.mouseMoveEvent = self.seek_slider_mouse_move
         self.seek_slider.setSingleStep(1000)  # 1 second step
         self.seek_slider.setPageStep(10000)   # 10 second step
-        
+
         seek_layout.addWidget(self.position_label)
-        seek_layout.addWidget(self.seek_slider)
+        seek_layout.addWidget(self.seek_slider, 1)
         seek_layout.addWidget(self.duration_label)
-        controls_layout.addLayout(seek_layout)
-        
-        # Control buttons
+        transport_col.addLayout(seek_layout)
+
         buttons_layout = QHBoxLayout()
-        
-        # Use QToolButton with icons from QStyle
+        buttons_layout.setSpacing(8)
+        buttons_layout.addStretch(1)
+
         self.prev_btn = QToolButton()
         self.prev_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaSkipBackward))
-        self.prev_btn.setIconSize(QSize(32, 32))
+        self.prev_btn.setIconSize(QSize(24, 24))
+        self.prev_btn.setFixedSize(44, 44)
         self.prev_btn.clicked.connect(self.prev_track)
-        
+
         self.play_btn = QToolButton()
+        self.play_btn.setObjectName("playBtn")
         self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
-        self.play_btn.setIconSize(QSize(48, 48))
+        self.play_btn.setIconSize(QSize(28, 28))
+        self.play_btn.setFixedSize(56, 56)
         self.play_btn.clicked.connect(self.toggle_play)
-        
+
         self.stop_btn = QToolButton()
         self.stop_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaStop))
-        self.stop_btn.setIconSize(QSize(32, 32))
+        self.stop_btn.setIconSize(QSize(20, 20))
+        self.stop_btn.setFixedSize(40, 40)
         self.stop_btn.clicked.connect(self.stop)
-        
+
         self.next_btn = QToolButton()
         self.next_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaSkipForward))
-        self.next_btn.setIconSize(QSize(32, 32))
+        self.next_btn.setIconSize(QSize(24, 24))
+        self.next_btn.setFixedSize(44, 44)
         self.next_btn.clicked.connect(self.next_track)
-        
+
         self.shuffle_btn = QToolButton()
         self.shuffle_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaSeekForward))
         self.shuffle_btn.setCheckable(True)
+        self.shuffle_btn.setIconSize(QSize(20, 20))
+        self.shuffle_btn.setFixedSize(40, 40)
         self.shuffle_btn.setToolTip("Shuffle: Play random song each time")
         self.shuffle_btn.clicked.connect(self.toggle_shuffle)
-        
+
         self.repeat_btn = QToolButton()
         self.repeat_btn.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
         self.repeat_btn.setCheckable(True)
+        self.repeat_btn.setIconSize(QSize(20, 20))
+        self.repeat_btn.setFixedSize(40, 40)
         self.repeat_btn.clicked.connect(self.toggle_repeat)
-        
+
         buttons_layout.addWidget(self.shuffle_btn)
         buttons_layout.addWidget(self.prev_btn)
         buttons_layout.addWidget(self.play_btn)
         buttons_layout.addWidget(self.stop_btn)
         buttons_layout.addWidget(self.next_btn)
         buttons_layout.addWidget(self.repeat_btn)
-        
-        # Volume
-        volume_layout = QHBoxLayout()
-        volume_label = QLabel("Volume:")
+        buttons_layout.addStretch(1)
+
+        # Volume (icon + compact slider in the transport bar)
+        self.volume_icon = QToolButton()
+        self.volume_icon.setIcon(self.style().standardIcon(QStyle.SP_MediaVolume))
+        self.volume_icon.setIconSize(QSize(18, 18))
+        self.volume_icon.setFixedSize(32, 32)
+        self.volume_icon.setEnabled(False)  # purely a visual marker
+
         self.volume_slider = QSlider(Qt.Horizontal)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(70)
+        self.volume_slider.setFixedWidth(150)
         self.volume_slider.valueChanged.connect(self.set_volume)
-        
-        volume_layout.addWidget(volume_label)
-        volume_layout.addWidget(self.volume_slider)
-        
-        buttons_layout.addLayout(volume_layout)
-        controls_layout.addLayout(buttons_layout)
-        
-        player_layout.addWidget(controls_frame)
-        
-        # Add panels to main layout with splitter
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.addWidget(library_panel)
-        splitter.addWidget(player_panel)
-        splitter.setSizes([300, 700])  # Set initial sizes
-        
-        main_layout.addWidget(splitter)
-        
+
+        volume_h = QHBoxLayout()
+        volume_h.setSpacing(6)
+        volume_h.setContentsMargins(20, 0, 0, 5)
+        volume_h.addWidget(self.volume_icon)
+        volume_h.addWidget(self.volume_slider)
+        buttons_layout.addLayout(volume_h)
+
+        transport_col.addLayout(buttons_layout)
+        stage_col.addWidget(self.transport_bar)
+
+        root.addWidget(stage, 1)
+
         # Status bar with progress bar
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        
+
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setFixedWidth(200)
         self.progress_bar.hide()
-        
+
         self.status_bar.addPermanentWidget(self.progress_bar)
 
     def _run_on_ui(self, fn):

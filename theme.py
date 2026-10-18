@@ -273,6 +273,90 @@ def build_qss(theme="Dark", accent=None, density="comfortable"):
         border-top: 1px solid {tk['border']};
     }}
     QDialogButtonBox QPushButton {{ min-width: 76px; }}
+
+    /* ================ Structural layout (UI overhaul) ================ */
+    QWidget#sidebar {{
+        background-color: {tk['surface']};
+        border-right: 1px solid {tk['border']};
+    }}
+    QLabel#brandTitle {{
+        font-size: 20px;
+        font-weight: 800;
+        color: {tk['text']};
+        letter-spacing: 0.5px;
+    }}
+    QLabel#brandSub {{
+        font-size: 11px;
+        color: {tk['text_dim']};
+        margin-top: -6px;
+        margin-left: 2px;
+    }}
+    QWidget#sidebar QPushButton {{
+        background: transparent;
+        border: none;
+        text-align: left;
+        color: {tk['text_dim']};
+        padding: {d['ctrl_pad']};
+        border-radius: 6px;
+    }}
+    QWidget#sidebar QPushButton:hover {{
+        background: {tk['hover']};
+        color: {tk['text']};
+        border: none;
+    }}
+    QWidget#sidebar QLineEdit {{ margin: 0px; }}
+
+    QFrame#nowCard {{
+        background-color: {tk['surface']};
+        border: 1px solid {tk['border']};
+        border-radius: 12px;
+    }}
+    QLabel#coverCard {{
+        background-color: {tk['input_bg']};
+        border: 1px solid {tk['border']};
+        border-radius: 12px;
+    }}
+    QLabel#trackTitle {{
+        font-size: 18px;
+        font-weight: 700;
+        color: {tk['text']};
+        font-family: "Segoe UI";
+    }}
+    QLabel#trackDim {{
+        font-size: 12px;
+        color: {tk['text_dim']};
+    }}
+    QFrame#transportBar {{
+        background-color: {tk['surface']};
+        border: 1px solid {tk['border']};
+        border-radius: 12px;
+    }}
+    QFrame#transportBar QLabel {{ color: {tk['text_dim']}; font-size: 11px; }}
+    QFrame#transportBar QSlider {{ min-height: 28px; }}
+    QToolButton#playBtn {{
+        background-color: {accent};
+        border: none;
+        border-radius: 28px;
+        padding: 0px;
+    }}
+    QToolButton#playBtn:hover {{
+        background-color: {accent};
+        border: none;
+    }}
+    QToolButton#playBtn:pressed {{ background-color: {acc_hover}; border: none; }}
+    QFrame#transportBar QToolButton {{
+        background: transparent;
+        border: none;
+        border-radius: 8px;
+        padding: {d['ctrl_pad']};
+        color: {tk['text']};
+    }}
+    QFrame#transportBar QToolButton:hover {{ background: {tk['hover']}; border: none; }}
+    QFrame#transportBar QToolButton[accentActive="true"] {{
+        background: {acc_trans};
+        color: {accent};
+        border: none;
+    }}
     """
 
 
