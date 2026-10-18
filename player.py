@@ -255,6 +255,19 @@ class MusicPlayer(QMainWindow):
         self.player.mediaStatusChanged.connect(self.on_media_status_changed)
         self.cloud_file_downloaded.connect(self.play_downloaded_file)
         self.run_on_ui.connect(self._run_on_ui)
+
+        # Equalizer engine (decoder -> 10-band EQ -> audio sink). Routed per
+        # track when the equalizer is enabled; engine errors fall back to the
+        # native QMediaPlayer path (see _engine_playback_error).
+        self._using_engine = False
+        self._engine_source = ('', '', '')
+        from eq_engine import EQEngine
+        self.eq_engine = EQEngine(self)
+        self.eq_engine.position_changed.connect(self.update_position)
+        self.eq_engine.duration_changed.connect(self.update_duration)
+        self.eq_engine.track_finished.connect(self._on_engine_track_finished)
+        self.eq_engine.error_occurred.connect(self._engine_playback_error)
+        self.eq_engine.state_changed.connect(self._on_engine_state)
         
         # UI
         self.setup_ui()
@@ -336,6 +349,8 @@ class MusicPlayer(QMainWindow):
         # --- Tools ---
         tools_menu = QMenu(self)
         tools_menu.setTitle("Tools")
+        tools_menu.addAction("Equalizer…", self.open_eq_dialog)
+        tools_menu.addSeparator()
         tools_menu.addAction("Web Panel", self.open_web_panel)
         tools_menu.addSeparator()
         tools_menu.addAction("Settings", self.open_settings_dialog)
@@ -840,10 +855,13 @@ class MusicPlayer(QMainWindow):
             # previous cloud-stream attempt so their closures cannot hijack
             # this track's media signals (EndOfMedia auto-advance, etc.)
             self._disconnect_stream_handlers()
-            # Set up and play the media
-            url = QUrl.fromLocalFile(os.path.abspath(path))
-            self.player.setSource(url)
-            self.player.play()
+            src = os.path.abspath(path)
+            if self._eq_active():
+                self._engine_start('file', src)
+            else:
+                # Set up and play the media
+                self.player.setSource(QUrl.fromLocalFile(src))
+                self.player.play()
             
             # Update UI elements
             self.playlist_widget.setCurrentRow(self.current_index)
@@ -864,6 +882,15 @@ class MusicPlayer(QMainWindow):
         self.play()
     
     def toggle_play(self):
+        if getattr(self, '_using_engine', False):
+            if self.eq_engine.is_playing():
+                self.eq_engine.pause()
+            else:
+                self.eq_engine.resume()
+            # Update tray UI
+            if hasattr(self, 'update_tray_ui'):
+                self.update_tray_ui()
+            return
         if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             self.player.pause()
             self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
@@ -878,7 +905,14 @@ class MusicPlayer(QMainWindow):
             self.update_tray_ui()
     
     def stop(self):
-        self.player.stop()
+        if getattr(self, '_using_engine', False):
+            self._using_engine = False
+            self._engine_source = ('', '', '')
+            self.eq_engine.stop()
+            self.seek_slider.setValue(0)
+            self.position_label.setText("0:00")
+        else:
+            self.player.stop()
         self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
         # Update tray UI
         if hasattr(self, 'update_tray_ui'):
@@ -956,12 +990,21 @@ class MusicPlayer(QMainWindow):
         self.duration_label.setText(format_time(duration))
     
     def on_slider_pressed(self):
+        if getattr(self, '_using_engine', False):
+            self._engine_was_playing = self.eq_engine.is_playing()
+            if self._engine_was_playing:
+                self.eq_engine.pause()
+            return
         # Store the current state to restore if needed
         self.was_playing = self.player.playbackState() == QMediaPlayer.PlayingState
         if self.was_playing:
             self.player.pause()
     
     def on_slider_released(self):
+        if getattr(self, '_using_engine', False):
+            if getattr(self, '_engine_was_playing', False):
+                self.eq_engine.resume()
+            return
         # Restore playback state if it was playing
         if hasattr(self, 'was_playing') and self.was_playing:
             self.player.play()
@@ -995,6 +1038,10 @@ class MusicPlayer(QMainWindow):
         # Make sure position is within valid range
         if position < 0:
             position = 0
+        if getattr(self, '_using_engine', False):
+            self.seek_slider.setValue(position)
+            self.eq_engine.seek(int(position))
+            return
         max_pos = self.player.duration()
         if position > max_pos and max_pos > 0:
             position = max_pos
@@ -1009,6 +1056,8 @@ class MusicPlayer(QMainWindow):
     
     def set_volume(self, volume):
         self.audio_output.setVolume(volume / 100.0)
+        if getattr(self, '_using_engine', False):
+            self.eq_engine.set_volume(volume / 100.0)
     
     def toggle_shuffle(self, enabled):
         # Accent highlight handled by stylesheet property (theme.py accentActive)
@@ -1166,6 +1215,98 @@ class MusicPlayer(QMainWindow):
                     # If this was the last track, just stop
                     self.stop()
     
+    # === Equalizer routing ===
+    def _eq_gains(self):
+        raw = self.settings.value("audio/eq_gains", "0,0,0,0,0,0,0,0,0,0")
+        try:
+            parts = [float(x) for x in str(raw).split(",")]
+        except (ValueError, TypeError):
+            parts = []
+        if len(parts) != 10:
+            parts = [0.0] * 10
+        return parts
+
+    def _eq_active(self):
+        """EQ drives playback only when enabled and gains are non-neutral."""
+        try:
+            enabled = self.settings.value("audio/eq_enabled", False, type=bool)
+        except Exception:
+            enabled = False
+        if not enabled:
+            return False
+        return any(abs(g) > 0.05 for g in self._eq_gains())
+
+    def _engine_start(self, kind, src, name=''):
+        """Route the current track through the EQ engine (decoder→EQ→sink)."""
+        self._disconnect_stream_handlers()
+        self._using_engine = True
+        self._engine_source = (kind, src, name)
+        self.eq_engine.play(src)
+
+    def _on_engine_state(self, state):
+        try:
+            icon = (QStyle.SP_MediaPause
+                    if state == 'playing' else QStyle.SP_MediaPlay)
+            self.play_btn.setIcon(self.style().standardIcon(icon))
+        except Exception:
+            pass
+
+    def _on_engine_track_finished(self):
+        # Mirror the native EndOfMedia auto-advance rules.
+        self._using_engine = False
+        self._engine_source = ('', '', '')
+        if self.repeat_btn.isChecked():
+            self.play()
+        elif self.shuffle_btn.isChecked() and len(self.playlist) > 1:
+            import random
+            next_index = self.current_index
+            while next_index == self.current_index and len(self.playlist) > 1:
+                next_index = random.randint(0, len(self.playlist) - 1)
+            self.current_index = next_index
+            self.play()
+        elif self.current_index < len(self.playlist) - 1:
+            self.next_track()
+
+    def _engine_playback_error(self, msg):
+        """Decoder/sink failure on the EQ path: replay via the native player."""
+        if not getattr(self, '_using_engine', False):
+            return
+        self._using_engine = False
+        kind, src, name = self._engine_source
+        self._engine_source = ('', '', '')
+        self.status_bar.showMessage(
+            "Equalizer unavailable for this track — using standard playback", 4000)
+        try:
+            if kind == 'url' and src:
+                self._play_stream(src, name)
+            elif kind == 'file' and src:
+                self.player.setSource(QUrl.fromLocalFile(src))
+                self.player.play()
+            self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+        except Exception:
+            pass
+
+    def open_eq_dialog(self):
+        from dialogs import EqualizerDialog
+
+        gains = self._eq_gains()
+        try:
+            enabled = self.settings.value("audio/eq_enabled", False, type=bool)
+        except Exception:
+            enabled = False
+        preset = str(self.settings.value("audio/eq_preset", "Flat"))
+
+        def apply_cb(g, on):
+            self.settings.setValue("audio/eq_enabled", bool(on))
+            self.settings.setValue("audio/eq_gains",
+                                   ",".join(f"{v:g}" for v in g))
+            self.eq_engine.set_gains(g)   # live when playing; harmless idle
+
+        dlg = EqualizerDialog(self, gains, enabled, preset, apply_cb)
+        dlg.exec()
+        self.settings.setValue("audio/eq_preset", dlg.preset_combo.currentText())
+        self.status_bar.showMessage("Equalizer settings saved", 3000)
+
     # === Cloud Methods ===
     def play_cloud_file(self, cloud_idx, file_idx):
         try:
@@ -1211,7 +1352,10 @@ class MusicPlayer(QMainWindow):
             else:
                 # Ampache/Subsonic embed their session auth in the URL itself
                 # (action=stream / stream.view); stream directly.
-                self._play_stream(url, file_name)
+                if self._eq_active():
+                    self._engine_start('url', url, file_name)
+                else:
+                    self._play_stream(url, file_name)
 
             self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
             # Update metadata shortly after starting stream
@@ -1512,13 +1656,15 @@ class MusicPlayer(QMainWindow):
                     raise FileNotFoundError(f"File not found at absolute path: {abs_path}")
                     
                 url = QUrl.fromLocalFile(abs_path)
-                self.player.setSource(url)
-                
-                # Update UI
-                self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
-                
-                # Start playback with a small delay to prevent race conditions
-                QTimer.singleShot(100, self.player.play)
+                if self._eq_active():
+                    self._engine_start('file', abs_path, file_name)
+                    self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+                else:
+                    self.player.setSource(url)
+                    # Update UI
+                    self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+                    # Start playback with a small delay to prevent race conditions
+                    QTimer.singleShot(100, self.player.play)
                 
                 # Update the current track in the playlist if it exists
                 if self.playlist_widget and hasattr(self, 'current_index') and 0 <= self.current_index < self.playlist_widget.count():
@@ -2257,6 +2403,12 @@ class MusicPlayer(QMainWindow):
             QMessageBox.warning(self, "Error", f"Could not save playlists: {e}")
 
     def closeEvent(self, event):
+        # Stop the EQ engine before the native player (it owns a QAudioSink
+        # and QAudioDecoder that must be torn down cleanly).
+        try:
+            self.eq_engine.stop()
+        except Exception:
+            pass
         self.player.stop()
         # Release the decoder BEFORE teardown: the FFmpeg backend crashes at
         # exit when the app closes while media is still attached (exit code 1).

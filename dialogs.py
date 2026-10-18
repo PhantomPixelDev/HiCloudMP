@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QFormLayout,
     QLineEdit, QTabWidget, QWidget, QLabel, QDialogButtonBox, QComboBox,
-    QStackedWidget
+    QStackedWidget, QCheckBox, QSlider
 )
 from PySide6.QtCore import Qt
 
@@ -225,3 +225,106 @@ class EditCloudDialog(QDialog):
             "webdav_login": self.user_edit.text().strip(),
             "webdav_password": self.pass_edit.text().strip(),
         }, **base}
+
+
+class EqualizerDialog(QDialog):
+    """Simple 10-band equalizer UI.
+
+    Slider changes are applied LIVE via ``apply_cb(gains_db, enabled)``
+    (so auditioning is immediate); pressing OK persists; Cancel restores
+    the state captured at open time.
+    """
+
+    BAND_LABELS = ("31", "62", "125", "250", "500", "1k", "2k", "4k", "8k", "16k")
+    MIN_DB, MAX_DB = -12, 12
+
+    def __init__(self, parent, gains_db, enabled, preset, apply_cb):
+        super().__init__(parent)
+        self.setWindowTitle("Equalizer")
+        self.resize(420, 320)
+        self._apply_cb = apply_cb
+        self._initial = (tuple(gains_db), bool(enabled), str(preset))
+
+        import dsp
+        self._presets = dict(dsp.PRESETS)
+
+        self.enabled_check = QCheckBox("Equalizer on")
+        self.enabled_check.setChecked(bool(enabled))
+        self.enabled_check.toggled.connect(self._emit)
+
+        self.preset_combo = QComboBox()
+        self.preset_combo.addItem("Custom")
+        for name in self._presets:
+            self.preset_combo.addItem(name)
+        if preset in self._presets:
+            self.preset_combo.setCurrentText(preset)
+        self.preset_combo.currentTextChanged.connect(self._on_preset)
+
+        top = QHBoxLayout()
+        top.addWidget(self.enabled_check)
+        top.addStretch(1)
+        top.addWidget(QLabel("Preset:"))
+        top.addWidget(self.preset_combo)
+
+        band_row = QHBoxLayout()
+        self._sliders = []
+        for label, value in zip(self.BAND_LABELS, gains_db):
+            col = QVBoxLayout()
+            slider = QSlider(Qt.Vertical)
+            slider.setRange(self.MIN_DB, self.MAX_DB)
+            slider.setValue(int(value))
+            slider.setMinimumWidth(18)
+            slider.valueChanged.connect(self._on_slider)
+            lab = QLabel(label)
+            lab.setAlignment(Qt.AlignHCenter)
+            col.addWidget(lab)
+            col.addWidget(slider, 1)
+            band_row.addLayout(col)
+            self._sliders.append(slider)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.addLayout(top)
+        layout.addLayout(band_row, 1)
+        layout.addWidget(buttons)
+
+    # ------------------------------------------------------------ behavior
+    def _current_gains(self):
+        return tuple(float(s.value()) for s in self._sliders)
+
+    def _emit(self, *_):
+        if self._apply_cb is not None:
+            self._apply_cb(self._current_gains(), self.enabled_check.isChecked())
+
+    def _on_slider(self, _):
+        self.preset_combo.blockSignals(True)
+        gains = self._current_gains()
+        matched = "Custom"
+        for name, values in self._presets.items():
+            if tuple(gains) == tuple(values):
+                matched = name
+                break
+        if self.preset_combo.currentText() != matched:
+            self.preset_combo.setCurrentText(matched)
+        self.preset_combo.blockSignals(False)
+        self._emit()
+
+    def _on_preset(self, name):
+        values = self._presets.get(name)
+        if values is None:
+            return
+        for slider, value in zip(self._sliders, values):
+            slider.blockSignals(True)
+            slider.setValue(int(value))
+            slider.blockSignals(False)
+        self._emit()
+
+    def reject(self):
+        gains, enabled, _ = self._initial
+        if self._apply_cb is not None:
+            self._apply_cb(tuple(float(g) for g in gains), bool(enabled))
+        super().reject()

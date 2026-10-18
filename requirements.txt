@@ -6,6 +6,8 @@ mutagen>=1.47.0
 pillow>=11.3.0
 requests>=2.32.5
 platformdirs>=4.4.0
+# 10-band equalizer DSP overlap-add engine
+numpy>=1.26.0
 
 # Web LAN control panel
 Flask>=3.1.2
