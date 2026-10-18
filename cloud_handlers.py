@@ -389,10 +389,12 @@ class _HTTPCloudHandler(CloudHandlerBase):
         return requests.get(url, params=params, timeout=timeout)
 
     def _add_song(self, path_extra=None, path=None, url=None, name="",
-                  artist="", album=""):
+                  artist="", album="", cover_url=None):
         entry = {"path": path or "", "url": url or "", "name": name,
                  "artist": artist or "Unknown Artist",
                  "album": album or "Unknown Album"}
+        if cover_url:
+            entry["cover_url"] = cover_url
         if path_extra:
             entry.update(path_extra)
         self.files.append(entry)
@@ -460,8 +462,19 @@ class AmpacheHandler(_HTTPCloudHandler):
                           s.findtext("./artist") or "Unknown Artist")
                 album = (s.findtext("./album/name") or
                          s.findtext("./album") or "Unknown Album")
+                album_el = s.find("./album")
+                album_id = album_el.get("id") if album_el is not None else None
+                # Dedicated artwork: <art> URL when the server provides one, else
+                # Ampache get_art on the album with the session token.
+                art_url = s.findtext("./art") or ""
+                if not art_url and album_id:
+                    art_url = (self.endpoint + "?" + urllib.parse.urlencode({
+                        "action": "get_art", "auth": self.token, "type": "album",
+                        "id": album_id, "size": 480, "client": "HiCloudMP",
+                    }))
                 path = f"{artist}/{album}/{title}"
-                self._add_song(path=path, url=url, name=title, artist=artist, album=album)
+                self._add_song(path=path, url=url, name=title, artist=artist, album=album,
+                               cover_url=art_url or None)
                 self.processed_items += 1
                 self.current_file = title
                 self.status_message = f"Ampache: fetched {self.processed_items} songs"
@@ -535,9 +548,19 @@ class SubsonicHandler(_HTTPCloudHandler):
                 stream_id = s.get("id")
                 url = (f"{self.rest_base}/stream.view?"
                        + urllib.parse.urlencode({**self._common_params(), "id": stream_id}))
+                # Nextcloud Music / Subsonic servers expose artwork at
+                # getCoverArt.view; a direct image URL avoids re-downloading
+                # (and re-decoding) the whole track for its embedded art.
+                cover_id = s.get("coverArt") or alb.get("coverArt") or ""
+                cover_url = ""
+                if cover_id:
+                    cover_url = (f"{self.rest_base}/getCoverArt.view?"
+                                 + urllib.parse.urlencode({**self._common_params(),
+                                                           "id": cover_id}))
                 self._add_song(
                     path=f"{artist}/{album_name}/{title}", url=url,
-                    name=title, artist=artist, album=album_name)
+                    name=title, artist=artist, album=album_name,
+                    cover_url=cover_url or None)
             self.processed_items = i + 1
             self.current_file = album_name
             self.status_message = f"Subsonic: album {i + 1}/{len(albums)}"
