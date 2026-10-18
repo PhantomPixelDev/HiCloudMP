@@ -559,7 +559,16 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search music...")
         self.search_input.setClearButtonEnabled(True)
-        self.search_input.returnPressed.connect(self.search_music)
+        self.search_input.returnPressed.connect(self._search_now)
+        # Live search: the index lookup is instant, so fire per keystroke,
+        # coalesced into one query per 150 ms typing pause. Enter = instant.
+        # Both routes go through _search_now (a stable class method doing
+        # dynamic lookup) so LibraryView delegation rebinds keep working.
+        self._search_debounce = QTimer(self)
+        self._search_debounce.setInterval(150)
+        self._search_debounce.setSingleShot(True)
+        self._search_debounce.timeout.connect(self._search_now)
+        self.search_input.textChanged.connect(self._on_search_input_changed)
         side.addWidget(self.search_input)
 
         self.library_tree = QTreeWidget()
@@ -941,6 +950,21 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
             pass
 
             
+    def _on_search_input_changed(self, _text):
+        """Restart the live-search debounce (one query per typing pause)."""
+        try:
+            self._search_debounce.start()
+        except Exception:
+            pass
+
+    def _search_now(self):
+        """Explicit search (Enter): cancel the pending debounce, run now."""
+        try:
+            self._search_debounce.stop()
+        except Exception:
+            pass
+        self.search_music()
+
     def _update_visualizer(self):
         """Feed the visualizer: engine spectrum when active, else idle."""
         try:
