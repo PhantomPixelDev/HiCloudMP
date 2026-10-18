@@ -434,7 +434,7 @@ class MusicPlayer(QMainWindow):
     cloud_file_downloaded = Signal(str)
     run_on_ui = Signal(object)  # pass a callable to execute on UI thread
     
-    def __init__(self):
+    def __init__(self, startup_paths=None):
         super().__init__()
         self.setWindowTitle("HiCloud MP")
         self.resize(1120, 720)
@@ -552,6 +552,22 @@ class MusicPlayer(QMainWindow):
 
         # Real top menu bar (moved here from the old sidebar footer buttons)
         self._create_menubar()
+
+        # Files passed on the command line (also Windows 'open with'):
+        # enqueue and preselect, never auto-play, never persist.
+        self._apply_startup_paths(startup_paths)
+
+    def _apply_startup_paths(self, paths):
+        """Enqueue paths given on the command line. Missing paths are
+        skipped; an empty/no-op call leaves the queue untouched."""
+        paths = [p for p in (paths or []) if p and os.path.exists(p)]
+        if not paths:
+            return
+        for p in paths:
+            if p not in self.playlist:
+                self.playlist.append(p)
+                self.playlist_widget.addItem(os.path.basename(p))
+        self.current_index = self.playlist.index(paths[0])
         
     def _create_menubar(self):
         """Standard top menu bar: File / Playback / Tools / Help."""

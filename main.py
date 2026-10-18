@@ -24,7 +24,7 @@ if __name__ == '__main__':
     # Unified theme: Dark/Light + accent + density resolved from QSettings
     theme.apply_app_theme(app, settings=QSettings("HiCloudMP", "HiCloudMP"))
     
-    player = MusicPlayer()
+    player = MusicPlayer(startup_paths=sys.argv[1:])
     # Start MPRIS service for system media controls integration (separate module)
     # (import guard above sets MprisService to None where dbus/gi are missing,
     #  e.g. Windows — Windows media keys stay handled by Qt in that case)
