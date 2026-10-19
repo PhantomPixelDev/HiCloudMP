@@ -24,6 +24,12 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          # Pin the packaged multimedia stack: PySide6 6.10.3 (FFmpeg 7.1.3)
+          # is the runtime the app is tuned and verified against. 6.12.x
+          # (FFmpeg 9) measured slower local decode opens (~0.7 s vs ~0.3 s
+          # first audible) and shipped the buggier playback this app gets
+          # blamed for; ">=6.10.1" otherwise floats to the newest minor.
+          python -m pip install "PySide6==6.10.3"
           python -m pip install -r requirements.txt
           python -m pip install nuitka
 
