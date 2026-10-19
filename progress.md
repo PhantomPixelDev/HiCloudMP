@@ -148,6 +148,34 @@ Landed with this commit (`feat: tray icon is an accent badge ...`):
   posts to a finished thread's queue (leak class, not fatal) - left
   untouched, tracked here.
 
-Next in line: EQ/viz inline investigation (agent cancelled), P2b
-playlist UI hook, P3, P4, P5b.
+`0d79189` fix: preferences survive hard process deaths (flush on change)
+- EQ/viz mystery RESOLVED inline (its investigation agent died without
+  a report): all preference writes were buffered QSettings setValue
+  with no sync; the app's repeated 0xC0000409 fastfatal deaths ran no
+  destructors, so the user's enabled EQ/viz reverted to defaults after
+  every crash - matching their recorded settings snapshot (eq=false,
+  viz unset). Exit-fatal already fixed (5ed140d); now the writes
+  themselves flush immediately: MusicPlayer._flush_settings() +
+  guarded sync after setValue in apply_eq_toggle, make_eq_apply_cb
+  gain moves, open_eq_dialog accept, SettingsDialog.save_settings.
+- Tests tests/test_settings_persist.py red->green (4).
+- Method-level notes: monkeypatched shiboken QMediaPlayer method
+  shadowing is NOT reliably intercepted (class-level descriptors win);
+  whole-object replacement is the working pattern.
+
+`d503437` fix: EQ-engine failure is loud (status wording + tray toast)
+- When the decoder->EQ->sink route fails, EQ AND viz die together
+  silently; only a 4 s status line mentioned "Equalizer". Now:
+  engine-general wording + QSystemTrayIcon toast (6 s, sanitized
+  detail), tray-less installs degrade to status only.
+- Tests tests/test_engine_fallback_ux.py red->green (3) with a
+  recording-facade native player (no WMF probing of empty files -
+  flaky under pytest).
+- Deferred to P4: closeEvent error trails when a subsystem raises
+  mid-teardown (seen via stub-teardown errors); also local
+  undecodable-file playback error UX (modal QMessageBox risk noted
+  during probing).
+
+Next in line: P2b playlist UI hook (import/export menus + drop),
+P3 playlist UX, P4 hardening pack, P5b perf round, P6 release (gated).
 
