@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
     QScrollArea
 )
 from PySide6.QtGui import QPainter
-from PySide6.QtCore import Qt, QTimer, Signal, QObject, QThread, QUrl, QSize, QEvent, QSettings
+from PySide6.QtCore import Qt, QTimer, Signal, QObject, QThread, QUrl, QSize, QEvent, QSettings, QFileSystemWatcher
 from PySide6.QtGui import QIcon, QAction, QKeySequence, QKeyEvent, QPalette, QColor, QPixmap
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput, QMediaFormat
 
@@ -57,6 +57,11 @@ STREAM_MAX_RETRIES = 5
 
 # Recently/Most Played history: last N entries kept, menus show top entries.
 HISTORY_LIMIT = 50
+
+# Folder watching: debounce bursts of Explorer writes into one rescan and
+# cap how many directories QFileSystemWatcher tracks (OS handle budget).
+FOLDER_WATCH_DEBOUNCE_MS = 1200
+FOLDER_WATCH_MAX_DIRS = 500
 
 
 # Help > Keyboard Shortcuts is generated from this one table so the docs
@@ -246,6 +251,17 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         self._viz_timer.timeout.connect(self._update_visualizer)
         self._viz_timer.start()
         
+        # Folder watching: new/removed files in library folders refresh the
+        # Local Media tree automatically (debounced burst -> one scan).
+        self._folder_watcher = QFileSystemWatcher(self)
+        self._folder_watcher.directoryChanged.connect(
+            self._on_watched_folder_changed)
+        self._folder_watch_timer = QTimer(self)
+        self._folder_watch_timer.setSingleShot(True)
+        self._folder_watch_timer.setInterval(FOLDER_WATCH_DEBOUNCE_MS)
+        self._folder_watch_timer.timeout.connect(
+            self._apply_watched_folder_refresh)
+
         # Load saved data
         self.load_media_folders()
         self.load_clouds()
@@ -2301,6 +2317,59 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
                 QMessageBox.warning(self, "Error", f"Could not load media folders: {e}")
                 self.media_folders = []
         self.update_library_tree()
+        self._refresh_folder_watcher()
+
+    # === Folder watching ================================================
+    def _watch_directories(self):
+        """Existing directories under the library roots, bounded."""
+        dirs = []
+        for root in list(getattr(self, "media_folders", None) or []):
+            try:
+                if not os.path.isdir(root):
+                    continue
+                dirs.append(root)
+                for dirpath, dirnames, _files in os.walk(root):
+                    dirnames[:] = [d for d in dirnames
+                                   if not d.startswith(".")]
+                    for d in dirnames:
+                        dirs.append(os.path.join(dirpath, d))
+                        if len(dirs) >= FOLDER_WATCH_MAX_DIRS:
+                            return dirs[:FOLDER_WATCH_MAX_DIRS]
+            except Exception:
+                continue
+        return dirs[:FOLDER_WATCH_MAX_DIRS]
+
+    def _refresh_folder_watcher(self):
+        """Point the watcher at the current library directory set."""
+        try:
+            watcher = self._folder_watcher
+            current = self._watch_directories()
+            for path in watcher.directories():
+                if path not in current:
+                    watcher.removePath(path)
+            watched = set(watcher.directories())
+            for path in current:
+                if path not in watched:
+                    watcher.addPath(path)
+        except Exception:
+            pass
+
+    def _on_watched_folder_changed(self, path):
+        """A watched directory changed: restart the debounce timer."""
+        try:
+            self._folder_watch_timer.start()
+        except Exception:
+            pass
+
+    def _apply_watched_folder_refresh(self):
+        """Debounce elapsed: rebuild the watch list and rescan the library."""
+        self._refresh_folder_watcher()
+        try:
+            self._start_local_scan()
+        except Exception:
+            pass
+        self.status_bar.showMessage(
+            "Library folder changed - refreshing…", 3000)
         
     def load_clouds(self):
         """Load saved cloud accounts from file"""
@@ -2657,6 +2726,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         if folder and folder not in self.media_folders:
             self.media_folders.append(folder)
             self.save_media_folders()
+            self._refresh_folder_watcher()
             self.update_library_tree()
             self._start_local_scan()
     
