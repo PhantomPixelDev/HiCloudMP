@@ -1833,6 +1833,34 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
             self.status_bar.showMessage(error_msg)
             QMessageBox.critical(self, "Streaming Error", error_msg)
     
+    def _dispose_finished_scan_threads(self, threads):
+        """deleteLater() scan threads that have stopped.
+
+        Dropping the last Python reference destroys the wrapper immediately,
+        which can invalidate queued deliveries still in flight. deleteLater
+        defers the C++ destruction; the wrapper is retained in
+        _retired_qthreads until Qt's destroyed signal confirms it is gone."""
+        retired = getattr(self, "_retired_qthreads", None)
+        if retired is None:
+            self._retired_qthreads = retired = []
+        for thread in threads:
+            try:
+                thread.deleteLater()
+            except RuntimeError:
+                continue
+            pair = (thread, None)
+            if pair not in retired:
+                retired.append(pair)
+            try:
+                def _forget(_obj=None, pair=pair, retired=retired):
+                    try:
+                        retired.remove(pair)
+                    except ValueError:
+                        pass
+                thread.destroyed.connect(_forget)
+            except Exception:
+                pass
+
     def _retire_qthread(self, thread, worker=None):
         """Keep references to a still-running QThread (and its worker) until
         the thread actually finishes.
@@ -2943,6 +2971,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
         # to a running QThread would destroy it -> qFatal -> process abort.
         old_threads = list(getattr(self, 'scan_threads', []) or [])
         old_workers = list(getattr(self, 'scan_workers', []) or [])
+        completed_old = []
         for i, old_thread in enumerate(old_threads):
             old_worker = old_workers[i] if i < len(old_workers) else None
             if old_worker is not None and hasattr(old_worker, 'abort'):
@@ -2951,10 +2980,18 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
                 except Exception:
                     pass
             try:
-                old_thread.quit()
-            except Exception:
+                if old_thread.isRunning():
+                    try:
+                        old_thread.quit()
+                    except Exception:
+                        pass
+                    self._retire_qthread(old_thread, old_worker)
+                else:
+                    completed_old.append(old_thread)
+            except RuntimeError:
                 pass
-            self._retire_qthread(old_thread, old_worker)
+        if completed_old:
+            self._dispose_finished_scan_threads(completed_old)
         self.scan_cloud_btn.setEnabled(False)
         self.scan_threads = []
         self.scan_workers = []
@@ -3743,6 +3780,10 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
             QTimer.singleShot(100, self._check_all_scans_complete)
             return
         self.scan_cloud_btn.setEnabled(True)
+        # Explicit deferred deletion: these wrappers are about to leave the
+        # scan lists, and dropping the last reference while queued signals
+        # are in flight can invalidate them.
+        self._dispose_finished_scan_threads(threads)
         self.scan_threads = []
         self.scan_workers = []
         errors = list(getattr(self, '_scan_errors', []))
