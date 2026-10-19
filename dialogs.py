@@ -235,7 +235,9 @@ class EqualizerDialog(QDialog):
 
     Slider changes are applied LIVE via ``apply_cb(gains_db, enabled)``
     (so auditioning is immediate); pressing OK persists; Cancel restores
-    the state captured at open time.
+    the state captured at open time. Touching a slider or picking a preset
+    while disabled auto-enables the EQ (with the box unticked, moving
+    sliders audibly does nothing, which users report as "EQ broken").
     """
 
     BAND_LABELS = ("31", "62", "125", "250", "500", "1k", "2k", "4k", "8k", "16k")
@@ -296,6 +298,18 @@ class EqualizerDialog(QDialog):
         layout.addWidget(buttons)
 
     # ------------------------------------------------------------ behavior
+    def _auto_enable_if_untouched(self):
+        """Standard-player UX (VLC et al.): interacting with the curve turns
+        the EQ on. With the box unticked, slider moves apply FLAT gains by
+        design ("visualizer-only" engine route), which reads to users as
+        "the equalizer doesn't work" — so the first touch enables it.
+        Returns True when it just enabled (the checkbox toggled signal
+        already emitted apply_cb with the current curve)."""
+        if not self.enabled_check.isChecked():
+            self.enabled_check.setChecked(True)
+            return True
+        return False
+
     def _current_gains(self):
         return tuple(float(s.value()) for s in self._sliders)
 
@@ -304,6 +318,8 @@ class EqualizerDialog(QDialog):
             self._apply_cb(self._current_gains(), self.enabled_check.isChecked())
 
     def _on_slider(self, _):
+        if self._auto_enable_if_untouched():
+            return
         self.preset_combo.blockSignals(True)
         gains = self._current_gains()
         matched = "Custom"
@@ -324,6 +340,8 @@ class EqualizerDialog(QDialog):
             slider.blockSignals(True)
             slider.setValue(int(value))
             slider.blockSignals(False)
+        if self._auto_enable_if_untouched():
+            return   # checkbox toggling already applied the preset gains
         self._emit()
 
     def reject(self):

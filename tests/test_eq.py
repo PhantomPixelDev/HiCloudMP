@@ -128,7 +128,9 @@ def test_equilizer_dialog_applies_live_and_restores_on_cancel():
 
     dlg.preset_combo.setCurrentText("Bass Boost")
     gains, on = applied[-1]
-    assert on is False
+    # Touching the curve auto-enables (users read slider-with-no-effect as
+    # "the equalizer is broken"); Cancel still restores the open state.
+    assert on is True
     assert gains == tuple(float(v) for v in dsp.PRESETS["Bass Boost"])
 
     dlg._sliders[3].setValue(4)
