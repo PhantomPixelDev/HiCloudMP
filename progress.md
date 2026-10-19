@@ -441,6 +441,14 @@ Playback fixes round (2026-10-19) — user-reported regressions in v1.0.3:
   batches across event-loop ticks. Real-data startup probe: 717 ms before,
   454 ms after; no event-loop spikes >50 ms. 2 tests.
 
-Suite: 405 passed, 2 skipped.
+`c86dd0e` perf(metadata): stop probing cloud streams on the UI thread
+- Subsonic scan rows have title='' and carry the title in `name`; artist
+  and album are populated. The old `if not title or ...` guard therefore
+  ran CoverExtractor.extract_metadata (ffprobe over the network) on the
+  UI thread for every cloud track: measured 827 ms per track. Display now
+  uses title/name/path + scanned artist/album and never probes the stream
+  on the now-playing path. 3 tests.
+
+Suite: 408 passed, 2 skipped.
 Not pushed/tagged/released; version remains 1.0.3 until explicit go.
 
