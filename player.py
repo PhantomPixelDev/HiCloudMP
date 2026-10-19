@@ -574,6 +574,16 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
                 pass
             self.web_server = None
             self.status_bar.showMessage("Web interface stopped")
+
+    def _push_web_state(self):
+        """Push desktop-side changes to connected web panels. Safe no-op
+        when the panel is off; must never affect playback."""
+        try:
+            server = getattr(self, 'web_server', None)
+            if server is not None:
+                server.broadcast_state()
+        except Exception:
+            pass
     
     def open_web_panel(self):
         """Open the web control panel in the default browser"""
@@ -1074,6 +1084,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         # Update tray UI
         if hasattr(self, 'update_tray_ui'):
             self.update_tray_ui()
+        self._push_web_state()
     
     def play_selected(self, item):
         self.current_index = self.playlist_widget.row(item)
@@ -1088,6 +1099,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
             # Update tray UI
             if hasattr(self, 'update_tray_ui'):
                 self.update_tray_ui()
+            self._push_web_state()
             return
         if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             self.player.pause()
@@ -1101,6 +1113,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         # Update tray UI
         if hasattr(self, 'update_tray_ui'):
             self.update_tray_ui()
+        self._push_web_state()
     
     def stop(self):
         if getattr(self, '_using_engine', False):
@@ -1115,6 +1128,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         # Update tray UI
         if hasattr(self, 'update_tray_ui'):
             self.update_tray_ui()
+        self._push_web_state()
     
     def next_track(self):
         if self.shuffle_btn.isChecked() and len(self.playlist) > 1:
@@ -1446,6 +1460,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
                     self.status_bar.showMessage(
                         "Playback speed needs the equalizer off "
                         "(the EQ engine has no rate control)", 5000)
+                self._push_web_state()
                 return
             self.settings.setValue("audio/playback_rate", rate)
             self.settings.sync()
@@ -1454,6 +1469,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
             if announce:
                 self.status_bar.showMessage(
                     f"Playback speed {rate:g}x", 2500)
+            self._push_web_state()
         except Exception:
             pass
 
@@ -1477,6 +1493,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         self.audio_output.setVolume(volume / 100.0)
         if getattr(self, '_using_engine', False):
             self.eq_engine.set_volume(volume / 100.0)
+        self._push_web_state()
 
     def toggle_mute(self):
         """Mute/unmute from the transport bar; remembers the previous level
@@ -1508,6 +1525,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
                 self.status_bar.showMessage("Volume muted", 2000)
         except Exception:
             pass
+        self._push_web_state()
     
     def toggle_shuffle(self, enabled):
         # Accent highlight handled by stylesheet property (theme.py accentActive)
@@ -1524,6 +1542,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         else:
             self.status_bar.showMessage("Shuffle mode disabled: normal order.")
         self.highlight_current_track()
+        self._push_web_state()
     
     def toggle_repeat(self, enabled):
         self.repeat_btn.setProperty("accentActive", enabled)
@@ -1533,6 +1552,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         self._apply_toggle_icons()
         if hasattr(self, 'repeat_action') and self.repeat_action.isChecked() != enabled:
             self.repeat_action.setChecked(enabled)
+        self._push_web_state()
     
     def on_media_status_changed(self, status):
         # Update status bar with current media status
@@ -2512,6 +2532,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         self.status_bar.showMessage(
             f"{len(rows)} track{'s' if len(rows) != 1 else ''} queued"
             f" to play next ({len(queue)} queued)", 3000)
+        self._push_web_state()
 
     def _update_queue_indicator(self):
         """Status-bar badge mirrors the Play Next queue depth."""
@@ -2533,6 +2554,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
                 f" ({n} track{'s' if n != 1 else ''})", 3000)
         else:
             self.status_bar.showMessage("Play Next queue is empty", 3000)
+        self._push_web_state()
 
     def _take_from_play_next_queue(self):
         """Pop the next valid queued row for auto-advance; None when the

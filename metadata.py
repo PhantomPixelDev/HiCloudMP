@@ -163,6 +163,7 @@ class MetadataController:
 
             if not hasattr(self.app, 'current_index') or self.app.current_index < 0 or self.app.current_index >= len(self.app.playlist):
                 self.set_default_cover()
+                self._push_web_state()
                 return
 
             current_item = self.app.playlist[self.app.current_index]
@@ -229,6 +230,7 @@ class MetadataController:
                         self.app.tray.update_tray_ui()
                 except Exception:
                     pass
+                self._push_web_state()
                 return
 
             elif isinstance(current_item, str) and os.path.exists(current_item):
@@ -247,6 +249,7 @@ class MetadataController:
                             self.app.tray.update_tray_ui()
                     except Exception:
                         pass
+                    self._push_web_state()
                     return
 
             # Fallback
@@ -254,8 +257,18 @@ class MetadataController:
             self.app.track_artist_label.setText("Artist: Unknown")
             self.app.track_album_label.setText("Album: Unknown")
             self.set_default_cover()
+            self._push_web_state()
         except Exception:
             self.set_default_cover()
+
+    def _push_web_state(self):
+        """Mirror metadata changes to the web panel (safe no-op when off)."""
+        try:
+            push = getattr(self.app, '_push_web_state', None)
+            if callable(push):
+                push()
+        except Exception:
+            pass
 
     # --- Internal ---
     def _post_to_ui(self, fn):

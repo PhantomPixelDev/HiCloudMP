@@ -221,6 +221,39 @@ class WebControlServer:
                 self._broadcast_status()
             self.player.run_on_ui.emit(_do)
 
+        @self.socketio.on('toggle_mute')
+        def handle_toggle_mute():
+            def _do():
+                self.player.toggle_mute()
+                self._broadcast_status()
+            self.player.run_on_ui.emit(_do)
+
+        @self.socketio.on('set_rate')
+        def handle_set_rate(data):
+            if not isinstance(data, dict):
+                return
+            try:
+                rate = float(data.get('rate'))
+            except (TypeError, ValueError):
+                return
+            if not (0.5 <= rate <= 2.0):
+                return
+            def _do():
+                apply_rate = getattr(self.player, '_apply_playback_rate', None)
+                if callable(apply_rate):
+                    apply_rate(int(round(rate * 100)), announce=False)
+                self._broadcast_status()
+            self.player.run_on_ui.emit(_do)
+
+        @self.socketio.on('clear_queue')
+        def handle_clear_queue():
+            def _do():
+                clear = getattr(self.player, 'clear_play_next_queue', None)
+                if callable(clear):
+                    clear()
+                self._broadcast_status()
+            self.player.run_on_ui.emit(_do)
+
         @self.socketio.on('get_all_playlists')
         def handle_get_all_playlists():
             emit('all_playlists', self._get_all_playlists())
@@ -259,6 +292,9 @@ class WebControlServer:
             'current_index': getattr(self.player, 'current_index', -1),
             'shuffle': self.player.shuffle_btn.isChecked() if hasattr(self.player, 'shuffle_btn') else False,
             'repeat': self.player.repeat_btn.isChecked() if hasattr(self.player, 'repeat_btn') else False,
+            'muted': bool(self.player.audio_output.isMuted()) if hasattr(self.player, 'audio_output') else False,
+            'rate': float(self.player._playback_rate()) if hasattr(self.player, '_playback_rate') else 1.0,
+            'queue_count': len(getattr(self.player, '_play_next_queue', None) or []),
             'playlist_name': self.player.active_playlist.name if getattr(self.player, 'active_playlist', None) else 'Current Queue',
             'playlist_id': self.player.active_playlist.id if getattr(self.player, 'active_playlist', None) else '__queue__'
         }
@@ -309,6 +345,15 @@ class WebControlServer:
 
     def _broadcast_progress(self):
         self.socketio.emit('progress', self._get_progress())
+
+    def broadcast_state(self):
+        """Push desktop-side changes to every connected panel (call on the
+        UI thread; failures must never disturb playback)."""
+        try:
+            self._broadcast_status()
+            self._broadcast_progress()
+        except Exception:
+            pass
 
     def _html(self):
         # No longer used, but kept for reference

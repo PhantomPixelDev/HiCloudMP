@@ -187,6 +187,19 @@
                         <button id="next" class="retro-btn retro-btn-primary retro-btn-circle" title="Next" aria-label="Next track"><i class="ri-skip-forward-fill"></i></button>
                         <button id="shuffle" class="retro-btn retro-btn-warning retro-btn-circle toggle-btn" title="Shuffle" aria-label="Toggle shuffle"><i class="ri-shuffle-line"></i></button>
                         <button id="repeat" class="retro-btn retro-btn-info retro-btn-circle toggle-btn" title="Repeat" aria-label="Toggle repeat"><i class="ri-repeat-2-line"></i></button>
+                        <button id="mute" class="retro-btn retro-btn-secondary retro-btn-circle toggle-btn" title="Mute" aria-label="Toggle mute"><i class="ri-volume-mute-line"></i></button>
+                    </div>
+                    <div class="retro-flex retro-gap-2 mb-3 retro-align-center retro-justify-content-center">
+                        <label class="retro-label mr-2" for="rate">Speed</label>
+                        <select id="rate" class="retro-input retro-select" title="Playback speed">
+                            <option value="0.5">0.5x</option>
+                            <option value="0.75">0.75x</option>
+                            <option value="1" selected>1x</option>
+                            <option value="1.25">1.25x</option>
+                            <option value="1.5">1.5x</option>
+                            <option value="2">2x</option>
+                        </select>
+                        <button id="queue-badge" class="retro-btn retro-btn-info retro-btn-sm" title="Play Next queue - click to clear" style="display:none">Queue: 0</button>
                     </div>
                     <div class="retro-flex retro-gap-2 mb-3 retro-align-center retro-justify-content-center">
                         <label class="retro-label mr-2">Volume: <span id="volval">70</span></label>
@@ -385,7 +398,8 @@
             next: { action: 'next', status: 'Next track', type: 'info' },
             prev: { action: 'prev', status: 'Previous track', type: 'info' },
             shuffle: { action: 'toggle_shuffle', status: 'Shuffle toggled', type: 'warning' },
-            repeat: { action: 'toggle_repeat', status: 'Repeat toggled', type: 'info' }
+            repeat: { action: 'toggle_repeat', status: 'Repeat toggled', type: 'info' },
+            mute: { action: 'toggle_mute', status: 'Mute toggled', type: 'info' }
         };
 
         // Initialize control buttons
@@ -398,6 +412,22 @@
                 });
             }
         });
+
+        // Playback speed + Play Next queue (desktop parity)
+        const rateSelect = document.getElementById('rate');
+        if (rateSelect) {
+            rateSelect.addEventListener('change', () => {
+                socket.emit('set_rate', { rate: parseFloat(rateSelect.value) });
+                showStatus(`Speed: ${rateSelect.value}x`, 'info');
+            });
+        }
+        const queueBadge = document.getElementById('queue-badge');
+        if (queueBadge) {
+            queueBadge.addEventListener('click', () => {
+                socket.emit('clear_queue');
+                showStatus('Play Next queue cleared', 'info');
+            });
+        }
 
         // Playlist Management
         let playlistFilter = '';
@@ -507,6 +537,28 @@
             document.getElementById('repeat').classList.toggle('active', !!data.repeat);
             document.getElementById('shuffle').setAttribute('aria-pressed', (!!data.shuffle).toString());
             document.getElementById('repeat').setAttribute('aria-pressed', (!!data.repeat).toString());
+            // Mute state mirrors the desktop glyph swap.
+            const muteBtn = document.getElementById('mute');
+            if (muteBtn) {
+                muteBtn.classList.toggle('active', !!data.muted);
+                muteBtn.innerHTML = data.muted
+                    ? '<i class="ri-volume-mute-line"></i>'
+                    : '<i class="ri-volume-up-line"></i>';
+                muteBtn.setAttribute('aria-pressed', (!!data.muted).toString());
+            }
+            // Playback speed (do not fight a selection being made).
+            if (rateSelect && document.activeElement !== rateSelect) {
+                const rateVal = String(data.rate != null ? data.rate : 1);
+                if (Array.from(rateSelect.options).some(o => o.value === rateVal)) {
+                    rateSelect.value = rateVal;
+                }
+            }
+            // Play Next queue depth; click the badge to clear it.
+            if (queueBadge) {
+                const queued = data.queue_count || 0;
+                queueBadge.textContent = `Queue: ${queued}`;
+                queueBadge.style.display = queued > 0 ? 'inline-block' : 'none';
+            }
             // Play/Pause toggle logic
             const playBtn = document.getElementById('play');
             window._is_playing = !!(data.state && data.state.includes('Playing'));
