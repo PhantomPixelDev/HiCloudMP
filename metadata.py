@@ -169,45 +169,14 @@ class MetadataController:
             current_item = self.app.playlist[self.app.current_index]
 
             if isinstance(current_item, dict):
-                title = current_item.get('title', '')
+                # Cloud scan rows store the track title in `name` (the
+                # Subsonic API title field lands there); artist/album are
+                # populated by the scanner. Never probe the stream here:
+                # the old ffprobe blocked the UI for ~0.8 s per cloud
+                # track, and the probe returned no album anyway.
+                title = current_item.get('title', '') or current_item.get('name', '')
                 artist = current_item.get('artist', '')
                 album = current_item.get('album', '')
-                is_cloud = current_item.get('is_cloud', False) or current_item.get('type') == 'cloud'
-                url = current_item.get('url')
-                if is_cloud:
-                    try:
-                        if (not url or "@" not in url) and "cloud_idx" in current_item and "file_idx" in current_item:
-                            cloud_idx = current_item.get('cloud_idx')
-                            file_idx = current_item.get('file_idx')
-                            if isinstance(cloud_idx, int) and 0 <= cloud_idx < len(self.app.clouds):
-                                cloud = self.app.clouds[cloud_idx]
-                                files = cloud.get('files', [])
-                                if isinstance(file_idx, int) and 0 <= file_idx < len(files):
-                                    base_url = files[file_idx].get('url')
-                                    if base_url:
-                                        cfg = cloud.get('config', {})
-                                        user = cfg.get('webdav_login', '')
-                                        pwd = cfg.get('webdav_password', '')
-                                        parsed = QUrl(base_url)
-                                        if user and pwd and not parsed.userName():
-                                            parsed.setUserName(user)
-                                            parsed.setPassword(pwd)
-                                        try:
-                                            url = parsed.toString(QUrl.UrlFormattingOption.FullyEncoded)
-                                        except Exception:
-                                            url = parsed.toString()
-                    except Exception:
-                        pass
-                    try:
-                        # ffprobe against the stream can take seconds — only pay
-                        # that cost when the scan row left metadata to fill in.
-                        if not title or not artist or not album:
-                            md = CoverExtractor.extract_metadata(url or '', is_url=True)
-                            if md.get('title'): title = md['title']
-                            if md.get('artist'): artist = md['artist']
-                            if md.get('album'): album = md['album']
-                    except Exception:
-                        pass
                 if not title:
                     if 'name' in current_item:
                         title = os.path.splitext(str(current_item['name']))[0]
