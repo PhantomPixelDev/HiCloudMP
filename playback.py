@@ -100,7 +100,22 @@ class PlaybackEngineMixin:
         kind, src, name = self._engine_source
         self._engine_source = ('', '', '')
         self.status_bar.showMessage(
-            "Equalizer unavailable for this track — using standard playback", 4000)
+            "Playback engine unavailable — using standard playback", 4000)
+        try:
+            # Beyond the 4 s status line: raise a tray notification. EQ and
+            # visualizer both disappear when this route fails; the wording
+            # must not pretend it is only the equalizer.
+            from PySide6.QtWidgets import QSystemTrayIcon
+            icon = getattr(getattr(self, "tray", None), "tray_icon", None)
+            if icon is not None:
+                detail = str(msg)[:160]
+                icon.showMessage(
+                    "HiCloud MP",
+                    "Audio engine unavailable — using standard playback"
+                    + (f" ({detail})" if detail else ""),
+                    QSystemTrayIcon.Information, 6000)
+        except Exception:
+            pass
         try:
             if kind == 'url' and src:
                 self._play_stream(src, name)
