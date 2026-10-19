@@ -89,6 +89,51 @@ def test_watch_list_is_bounded(music_player, tmp_path, monkeypatch):
     assert len(mp._folder_watcher.directories()) <= 4
 
 
+def test_watch_walk_prefers_shallow_dirs_over_deep_chain(
+        music_player, tmp_path, monkeypatch):
+    """Breadth-first: an album folder next to a deep chain must be watched
+    before descending into the chain (old os.walk order missed siblings)."""
+    mp = music_player
+    root = tmp_path / "lib"
+    deep = root / "deep" / "a" / "b"
+    deep.mkdir(parents=True)
+    album = root / "album"
+    album.mkdir()
+    mp.media_folders = [str(root)]
+    monkeypatch.setattr(folder_watch, "FOLDER_WATCH_MAX_DIRS", 4)
+
+    mp._refresh_folder_watcher()
+
+    watched = {os.path.normcase(p) for p in mp._folder_watcher.directories()}
+    assert os.path.normcase(str(album)) in watched
+    assert os.path.normcase(str(deep)) not in watched, \
+        "deepest chain must not crowd out shallow album folders"
+
+
+def test_large_watch_list_is_added_in_chunks(qtbot, music_player, tmp_path,
+                                             monkeypatch):
+    """Adding hundreds of paths takes ~1 ms each on Windows: do it across
+    event-loop ticks instead of freezing startup for half a second."""
+    mp = music_player
+    root = tmp_path / "big"
+    for i in range(12):
+        (root / f"d{i}").mkdir(parents=True)
+    mp.media_folders = [str(root)]
+    monkeypatch.setattr(folder_watch, "FOLDER_WATCH_MAX_DIRS", 20)
+    monkeypatch.setattr(folder_watch, "FOLDER_WATCH_ADD_BATCH", 3)
+    monkeypatch.setattr(folder_watch, "FOLDER_WATCH_ADD_INTERVAL_MS", 5)
+
+    mp._refresh_folder_watcher()
+
+    assert len(mp._folder_watcher.directories()) <= 3, \
+        "first tick must not add the whole watch set"
+    assert mp._pending_watch_paths, "remaining paths must be queued"
+    qtbot.wait(300)
+    watched = {os.path.normcase(p) for p in mp._folder_watcher.directories()}
+    assert os.path.normcase(str(root)) in watched
+    assert os.path.normcase(str(root / "d11")) in watched
+
+
 def test_refresh_after_scan_does_not_raise_with_no_folders(music_player):
     mp = music_player
     mp.media_folders = []
