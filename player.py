@@ -36,7 +36,7 @@ from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput, QMediaFormat
 
 # Import custom modules
 from utils import (
-    is_music_file, scan_music_files, format_time, 
+    SUPPORTED_EXTS, is_music_file, scan_music_files, format_time, 
     MEDIA_FOLDERS_FILE, CLOUD_FILES_FILE, PLAYLISTS_FILE,
     open_folder, atomic_write_text
 )
@@ -232,6 +232,8 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         file_menu.setTitle("File")
         file_menu.addAction("Add Folder", self.add_folder)
         file_menu.addAction("Add Files", self.add_files)
+        file_menu.addAction("Import Playlist…", self.import_playlist)
+        file_menu.addAction("Export Playlist…", self.export_playlist)
         file_menu.addAction("Rescan Library", self.rescan_library)
         file_menu.addAction("Add Cloud Account...", self.add_cloud)
         file_menu.addAction("Scan Cloud Library", self.scan_clouds)
@@ -2128,7 +2130,8 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
             self,
             "Add Music Files",
             "",
-            "Music Files (*.mp3 *.wav *.ogg *.flac *.aac *.m4a *.wma);;All Files (*.*)"
+            "Music Files (%s);;All Files (*.*)" %
+            " ".join("*" + e for e in SUPPORTED_EXTS)
         )
         
         if not files:
@@ -2220,6 +2223,95 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
                     
                     self.status_bar.showMessage(f"Added {len(files)} files to playlist: {playlist_name}")
     
+    # === Playlist import / export (File menu, P2b) ===
+    def import_playlist(self):
+        """Load an m3u/m3u8/pls/xspf file into the current queue.
+
+        Relative paths resolve against the playlist file's folder; only
+        supported local audio files are appended. Stream URLs are counted
+        as skipped for now (direct-URL queue entries land with the P3
+        round); undecodable/missing rows are skipped too, never fatal.
+        """
+        from playlist_io import PlaylistIO
+        try:
+            path, _ = QFileDialog.getOpenFileName(
+                self, "Import playlist", "",
+                "Playlists (*.m3u *.m3u8 *.pls *.xspf);;All Files (*.*)")
+            if not path:
+                return
+            entries = PlaylistIO.import_playlist(path)["entries"]
+            base = os.path.dirname(path)
+            added = skipped = 0
+            for entry in entries:
+                p = entry.get("path") or ""
+                if not p:
+                    skipped += 1
+                    continue
+                if p.startswith(("http://", "https://")):
+                    skipped += 1   # stream URLs: handled from P3 on
+                    continue
+                resolved = p if os.path.isabs(p) else os.path.normpath(
+                    os.path.join(base, p))
+                if not is_music_file(resolved) or not os.path.isfile(resolved):
+                    skipped += 1
+                    continue
+                self.playlist.append(resolved)
+                self.playlist_widget.addItem(os.path.basename(resolved))
+                added += 1
+            if added and len(self.playlist) == added and self.current_index < 0:
+                self.current_index = 0
+            msg = f"Imported {added} tracks from playlist"
+            if skipped:
+                msg += f" ({skipped} skipped)"
+            self.status_bar.showMessage(msg, 4000)
+        except Exception as e:
+            self.status_bar.showMessage(f"Import failed: {e}", 6000)
+
+    def export_playlist(self):
+        """Write the queue (current selection, else everything) to a
+        playlist file. Cloud tracks are not exportable (account-bound
+        rows); local files become paths/EXTINF rows, relativized by the
+        writer when they live under the export folder."""
+        from playlist_io import PlaylistIO
+        try:
+            rows = self.playlist_widget.selectedItems()
+            picks = [self.playlist_widget.row(it) for it in rows]
+            if not picks:
+                picks = list(range(len(self.playlist)))
+            entries = []
+            skipped = 0
+            for i in picks:
+                if i < 0 or i >= len(self.playlist):
+                    continue   # widget/model row drift guard
+                item = self.playlist[i]
+                if isinstance(item, dict):
+                    skipped += 1
+                    continue
+                entries.append({
+                    "path": os.path.abspath(item),
+                    "title": os.path.splitext(os.path.basename(item))[0],
+                    "duration": None})
+            if not entries:
+                self.status_bar.showMessage(
+                    "Nothing exportable in the queue", 4000)
+                return
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Export playlist", "",
+                "M3U playlist (*.m3u8);;M3U classic (*.m3u);;PLS playlist"
+                " (*.pls);;XSPF playlist (*.xspf)")
+            if not path:
+                return
+            n = PlaylistIO.export_playlist(
+                path, entries,
+                base_dir=os.path.dirname(os.path.abspath(path)))
+            msg = f"Exported {n} tracks to playlist"
+            if skipped:
+                msg += (f" ({skipped} cloud track"
+                        f"{'s' if skipped != 1 else ''} excluded)")
+            self.status_bar.showMessage(msg, 4000)
+        except Exception as e:
+            self.status_bar.showMessage(f"Export failed: {e}", 6000)
+
     def add_cloud(self):
         """Add or manage cloud storage accounts"""
         # Snapshot BEFORE constructing the dialog: AddCloudDialog.__init__ can
