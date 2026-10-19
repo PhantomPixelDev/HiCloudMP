@@ -51,6 +51,50 @@ from web_control import WebControlServer
 # audio rows are decided by utils.is_music_file.
 PLAYLIST_DROP_EXTS = (".m3u", ".m3u8", ".pls", ".xspf")
 
+
+def _first_text(value):
+    """First text out of a tag value (list / ID3 frame / plain)."""
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else ""
+    if isinstance(value, bytes):
+        try:
+            value = value.decode("utf-8", "replace")
+        except Exception:
+            return ""
+    return str(value).strip()
+
+
+def read_sort_tags(path):
+    """Best-effort (artist, album) for playlist sorting; ("", "") when
+    the file has no readable tags. The mutagen easy interface covers
+    MP3/FLAC/MP4/Vorbis; raw ID3 frames are the fallback (WAV/AIFF
+    containers carry ID3 but have no easy mapping)."""
+    try:
+        import mutagen
+        artist = album = ""
+        audio = mutagen.File(path, easy=True)
+        if audio is not None:
+            tags = getattr(audio, "tags", None) or {}
+            artist = _first_text(tags.get("artist"))
+            album = _first_text(tags.get("album"))
+        if not (artist and album):
+            raw = mutagen.File(path)
+            rtags = getattr(raw, "tags", None) if raw is not None else None
+            if rtags:
+                if not artist:
+                    artist = _first_text(rtags.get("TPE1")
+                                         or rtags.get("ARTIST")
+                                         or rtags.get("artist"))
+                if not album:
+                    album = _first_text(rtags.get("TALB")
+                                        or rtags.get("ALBUM")
+                                        or rtags.get("album"))
+        return artist, album
+    except Exception:
+        return "", ""
+
 # QThread objects whose threads outlive the code path that owned them must
 # keep a strong reference, otherwise PySide destroys the C++ QThread while it
 # is still running; ~QThread() then calls qFatal("QThread: Destroyed while
@@ -3328,13 +3372,19 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
                 meta = {"title": display_text, "artist": "", "album": ""}
                 if isinstance(entry, str) and os.path.exists(entry):
                     meta["title"] = os.path.basename(entry)
+                    if mode in ("Artist", "Album"):
+                        meta["artist"], meta["album"] = \
+                            read_sort_tags(entry)
                 items.append((entry, display_text, meta))
             if mode == "Title":
                 items.sort(key=lambda x: x[2]["title"].lower())
             elif mode == "Artist":
-                items.sort(key=lambda x: x[2]["artist"].lower())
+                items.sort(key=lambda x: (x[2]["artist"].lower(),
+                                          x[2]["title"].lower()))
             elif mode == "Album":
-                items.sort(key=lambda x: x[2]["album"].lower())
+                items.sort(key=lambda x: (x[2]["album"].lower(),
+                                          x[2]["artist"].lower(),
+                                          x[2]["title"].lower()))
             widget.clear()
             new_playlist = []
             for entry, display_text, _ in items:
