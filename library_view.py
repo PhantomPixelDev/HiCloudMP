@@ -17,7 +17,8 @@ class LibraryView:
         if data["type"] == "local_file":
             path = data["path"]
             self.app.playlist.append(path)
-            self.app.playlist_widget.addItem(os.path.basename(path))
+            self.app.playlist_widget.addQueueRow(
+                *self.app.meta.queue_cells(path))
             self.app.current_index = len(self.app.playlist) - 1
             self.app.play()
         elif data["type"] == "cloud_file":
@@ -29,9 +30,10 @@ class LibraryView:
             self.app.playlist.append(row)
             cloud = self.app.clouds[cloud_idx]
             file_info = cloud["files"][file_idx]
-            label = self.app.meta.queue_label(row) \
-                or os.path.basename(file_info["path"])
-            self.app.playlist_widget.addItem(label)
+            title, artist, album = self.app.meta.queue_cells(row)
+            if not title:
+                title = os.path.basename(file_info["path"])
+            self.app.playlist_widget.addQueueRow(title, artist, album)
             self.app.current_index = len(self.app.playlist) - 1
             self.app.play()
         elif data["type"] == "playlist":

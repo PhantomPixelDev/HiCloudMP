@@ -182,6 +182,45 @@ class MetadataController:
         except Exception:
             return None
 
+    def queue_cells(self, item):
+        """(title, artist, album) cells for a queue row — the table and the
+        playlist sort/filter read these instead of one display string.
+
+        Local paths resolve the title to their basename (tags are NOT read
+        here: this must never block). Cloud rows resolve from the in-memory
+        catalog (rows persist only the indices; the catalog carries the
+        scanned name/artist/album — Subsonic rows keep the title in `name`).
+        """
+        try:
+            row = {}
+            if isinstance(item, dict):
+                resolved = self._cloud_row_for(item)
+                if resolved:
+                    row = resolved
+                title = item.get('title') or row.get('title')
+            else:
+                title = None
+            if not title:
+                title = row.get('name')
+            if not title:
+                path = (item.get('path')
+                        if isinstance(item, dict) else None) \
+                    or row.get('path') \
+                    or (item if isinstance(item, str) else None)
+                if path:
+                    title = os.path.splitext(os.path.basename(str(path)))[0]
+            artist = (item.get('artist')
+                      if isinstance(item, dict) else None) \
+                or row.get('artist') or ''
+            album = (item.get('album')
+                     if isinstance(item, dict) else None) \
+                or row.get('album') or ''
+            return (str(title) if title else '',
+                    str(artist) if artist else '',
+                    str(album) if album else '')
+        except Exception:
+            return ('', '', '')
+
     def queue_label(self, item):
         """Human label for a queue row: 'Artist – Title', title only when no
         artist is known, basename for plain paths. Resolves cloud rows from

@@ -37,19 +37,11 @@ class PlaylistsManager:
         if getattr(self.app, 'active_playlist', None) and self.app.active_playlist.id == target.id:
             self.app.playlist.append(item)
             if isinstance(item, dict):
-                display = "(Cloud)"
-                try:
-                    cloud_idx = item.get('cloud_idx')
-                    file_idx = item.get('file_idx')
-                    if isinstance(cloud_idx, int) and isinstance(file_idx, int):
-                        cloud = self.app.clouds[cloud_idx]
-                        file_info = cloud.get('files', [])[file_idx]
-                        display = os.path.basename(file_info.get('path', 'Cloud File')) + " (Cloud)"
-                except Exception:
-                    pass
-                self.app.playlist_widget.addItem(display)
+                self.app.playlist_widget.addQueueRow(
+                    *self.app.meta.queue_cells(item))
             else:
-                self.app.playlist_widget.addItem(os.path.basename(item))
+                self.app.playlist_widget.addQueueRow(
+                    *self.app.meta.queue_cells(item))
         self.app.status_bar.showMessage(f"Added current track to playlist: {name}")
 
     def new_playlist(self):
@@ -95,18 +87,21 @@ class PlaylistsManager:
                 if item.get("type") == "cloud":
                     cloud_idx = item.get("cloud_idx")
                     file_idx = item.get("file_idx")
+                    if not isinstance(cloud_idx, int) \
+                            or not isinstance(file_idx, int):
+                        continue
                     if cloud_idx < 0 or cloud_idx >= len(self.app.clouds):
                         continue
                     cloud = self.app.clouds[cloud_idx]
                     files = cloud.get("files", [])
                     if file_idx < 0 or file_idx >= len(files):
                         continue
-                    file_info = files[file_idx]
-                    file_name = os.path.basename(file_info["path"])
-                    self.app.playlist_widget.addItem(f"{file_name} (Cloud)")
+                    self.app.playlist_widget.addQueueRow(
+                        *self.app.meta.queue_cells(item))
             else:
                 if os.path.exists(item):
-                    self.app.playlist_widget.addItem(os.path.basename(item))
+                    self.app.playlist_widget.addQueueRow(
+                        *self.app.meta.queue_cells(item))
         if self.app.playlist:
             self.app.current_index = 0
             self.app.status_bar.showMessage(f"Loaded playlist: {playlist.name}")

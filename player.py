@@ -13,6 +13,7 @@ from tray import TrayController
 from metadata import MetadataController
 from playlists_manager import PlaylistsManager
 from library_view import LibraryView
+from playlist_widget import PlaylistQueueWidget  # noqa: F401  (queued table)
 # dialogs live in dialogs.py; re-export so existing imports/patches
 # (player.SettingsDialog, monkeypatched player.CloudAccountsDialog) keep working
 from dialogs import CloudAccountsDialog, SettingsDialog  # noqa: F401
@@ -718,20 +719,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
         # If the active playlist is the same, reflect in UI
         if getattr(self, 'active_playlist', None) and self.active_playlist.id == target.id:
             self.playlist.append(item)
-            if isinstance(item, dict):
-                display = "(Cloud)"
-                try:
-                    cloud_idx = item.get('cloud_idx')
-                    file_idx = item.get('file_idx')
-                    if isinstance(cloud_idx, int) and isinstance(file_idx, int):
-                        cloud = self.clouds[cloud_idx]
-                        file_info = cloud.get('files', [])[file_idx]
-                        display = os.path.basename(file_info.get('path', 'Cloud File')) + " (Cloud)"
-                except Exception:
-                    pass
-                self.playlist_widget.addItem(display)
-            else:
-                self.playlist_widget.addItem(os.path.basename(item))
+            self.playlist_widget.addQueueRow(*self.meta.queue_cells(item))
         self.status_bar.showMessage(f"Added current track to playlist: {name}")
 
     def update_tray_ui(self):
@@ -885,13 +873,12 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
 
         content_row.addWidget(now_card)
 
-        self.playlist_widget = QListWidget()
+        self.playlist_widget = PlaylistQueueWidget()
         self.playlist_widget.itemDoubleClicked.connect(self.play_selected)
         self.playlist_widget.setContextMenuPolicy(Qt.CustomContextMenu)
         self.playlist_widget.customContextMenuRequested.connect(self.show_playlist_context_menu)
-        # Enable drag-and-drop reordering and multi-select
-        self.playlist_widget.setDragDropMode(QListWidget.InternalMove)
-        self.playlist_widget.setSelectionMode(QListWidget.ExtendedSelection)
+        # Drag-and-drop reordering + multi-select come built in
+        # (InternalMove/ExtendedSelection set in PlaylistQueueWidget).
         # Keyboard driving (P3): Del = remove, Space = play, Home/End jump
         self.playlist_widget.installEventFilter(self)
         # Explorer drops land on the viewport (not the view itself), so the
@@ -2404,19 +2391,15 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
         for idx in file_indices:
             if idx < 0 or idx >= len(files):
                 continue
-                
+
             file_info = files[idx]
-            file_name = os.path.basename(file_info["path"])
-            
-            # Add to playlist widget
-            self.playlist_widget.addItem(f"{file_name} (Cloud)")
-            
+
+            # Add to playlist widget (catalog-resolved table cells)
+            row = {"type": "cloud", "cloud_idx": cloud_idx, "file_idx": idx}
+            self.playlist_widget.addQueueRow(*self.meta.queue_cells(row))
+
             # Add to playlist data
-            self.playlist.append({
-                "type": "cloud",
-                "cloud_idx": cloud_idx,
-                "file_idx": idx
-            })
+            self.playlist.append(row)
             added += 1
         
         # Reset active playlist
@@ -2647,16 +2630,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
             self.playlist[:] = keep
             self.playlist_widget.clear()
             for it in self.playlist:
-                if isinstance(it, dict):
-                    try:
-                        cloud = self.clouds[it.get("cloud_idx")]
-                        file_info = cloud["files"][it.get("file_idx")]
-                        name = os.path.basename(file_info["path"])
-                    except Exception:
-                        name = "Cloud"
-                    self.playlist_widget.addItem(f"{name} (Cloud)")
-                else:
-                    self.playlist_widget.addItem(os.path.basename(str(it)))
+                self.playlist_widget.addQueueRow(*self.meta.queue_cells(it))
             if self.current_index >= len(self.playlist):
                 self.current_index = len(self.playlist) - 1
             if self.active_playlist:
@@ -2738,7 +2712,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
             if audio:
                 for p in audio:
                     self.playlist.append(p)
-                    self.playlist_widget.addItem(os.path.basename(p))
+                    self.playlist_widget.addQueueRow(*self.meta.queue_cells(p))
                 if self.current_index < 0 and self.playlist:
                     self.current_index = 0
                 n = len(audio)
@@ -2765,43 +2739,11 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
                     item = self.playlist_widget.takeItem(row)
                     self.playlist_widget.insertItem(row+1, item)
                     item.setSelected(True)
-    
-    def on_library_item_clicked(self, item, column):
-        """Handle double-click on library tree items"""
-        data = item.data(0, Qt.UserRole)
-        if not data:
-            return
-        # Only play or add to playlist for files, not folders
-        if data["type"] == "local_file":
-            # Play single file
-            path = data["path"]
-            self.playlist = [path]
-            self.playlist_widget.clear()
-            self.playlist_widget.addItem(os.path.basename(path))
-            self.current_index = 0
-            self.play()
-        elif data["type"] == "cloud_file":
-            cloud_idx = data["cloud_index"]
-            file_idx = data["file_index"]
-            # Set playlist to just this cloud file
-            self.playlist = [{
-                "type": "cloud",
-                "cloud_idx": cloud_idx,
-                "file_idx": file_idx
-            }]
-            self.playlist_widget.clear()
-            cloud = self.clouds[cloud_idx]
-            file_info = cloud["files"][file_idx]
-            file_name = os.path.basename(file_info["path"])
-            self.playlist_widget.addItem(f"{file_name} (Cloud)")
-            self.current_index = 0
-            self.play()
-        elif data["type"] == "playlist":
-            self.load_playlist_by_id(data["id"])
-        elif data["type"] == "new_playlist":
-            self.new_playlist()
-        # For folders, just expand/collapse (default QTreeWidget behavior)
-    
+
+    # on_library_item_clicked lives in library_view.LibraryView, rebound
+    # onto the player in __init__ (a stale duplicate here kept the old
+    # wipe-the-queue behavior alive).
+
     def add_folder(self):
         """Add a folder to the media library"""
         folder = QFileDialog.getExistingDirectory(self, "Add Media Folder")
@@ -2876,7 +2818,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
             # Add files to current playlist
             for file in files:
                 self.playlist.append(file)
-                self.playlist_widget.addItem(os.path.basename(file))
+                self.playlist_widget.addQueueRow(*self.meta.queue_cells(file))
             
             # Set current index if this is the first item
             if len(self.playlist) == len(files) and self.current_index < 0:
@@ -2955,7 +2897,8 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
                     skipped += 1
                     continue
                 self.playlist.append(resolved)
-                self.playlist_widget.addItem(os.path.basename(resolved))
+                self.playlist_widget.addQueueRow(
+                    *self.meta.queue_cells(resolved))
                 added += 1
             if added and len(self.playlist) == added and self.current_index < 0:
                 self.current_index = 0
@@ -3292,25 +3235,23 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
         # Load all items from the playlist
         for item in self.playlist:
             if isinstance(item, dict):
-                # This is a cloud item
-                if item.get("type") == "cloud":
-                    cloud_idx = item.get("cloud_idx")
-                    file_idx = item.get("file_idx")
-                    # Verify the cloud and file still exist
-                    if cloud_idx < 0 or cloud_idx >= len(self.clouds):
-                        continue
-                    cloud = self.clouds[cloud_idx]
-                    files = cloud.get("files", [])
-                    if file_idx < 0 or file_idx >= len(files):
-                        continue
-                    file_info = files[file_idx]
-                    file_name = os.path.basename(file_info["path"])
-                    # Add to playlist
-                    self.playlist_widget.addItem(f"{file_name} (Cloud)")
+                # This is a cloud item: verify the account/file still exist
+                cloud_idx = item.get("cloud_idx")
+                file_idx = item.get("file_idx")
+                if not isinstance(cloud_idx, int) \
+                        or not isinstance(file_idx, int) \
+                        or cloud_idx < 0 or cloud_idx >= len(self.clouds):
+                    continue
+                cloud = self.clouds[cloud_idx]
+                files = cloud.get("files", [])
+                if file_idx < 0 or file_idx >= len(files):
+                    continue
+                self.playlist_widget.addQueueRow(*self.meta.queue_cells(item))
             else:
                 # This is a local file
                 if os.path.exists(item):
-                    self.playlist_widget.addItem(os.path.basename(item))
+                    self.playlist_widget.addQueueRow(
+                        *self.meta.queue_cells(item))
         if self.playlist:
             self.current_index = 0
             self.status_bar.showMessage(f"Loaded playlist: {playlist.name}")
@@ -3366,7 +3307,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
         self.playlist = scan_music_files(folder)
         self.playlist_widget.clear()
         for f in self.playlist:
-            self.playlist_widget.addItem(os.path.basename(f))
+            self.playlist_widget.addQueueRow(*self.meta.queue_cells(f))
         
         # Reset active playlist
         self.active_playlist = None
@@ -3616,7 +3557,8 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
             if files:
                 for file_path in files:
                     self.playlist.append(file_path)
-                    self.playlist_widget.addItem(os.path.basename(file_path))
+                    self.playlist_widget.addQueueRow(
+                        *self.meta.queue_cells(file_path))
                 
                 self.status_bar.showMessage(f"Added {len(files)} tracks from {os.path.basename(path)}")
                 
@@ -3640,19 +3582,16 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
             for idx in file_indices:
                 if idx < 0 or idx >= len(files):
                     continue
-                    
+
                 file_info = files[idx]
-                file_name = os.path.basename(file_info["path"])
-                
-                # Add to playlist widget
-                self.playlist_widget.addItem(f"{file_name} (Cloud)")
-                
+
+                # Add to playlist widget (catalog-resolved table cells)
+                row = {"type": "cloud", "cloud_idx": cloud_idx,
+                       "file_idx": idx}
+                self.playlist_widget.addQueueRow(*self.meta.queue_cells(row))
+
                 # Add to playlist data
-                self.playlist.append({
-                    "type": "cloud",
-                    "cloud_idx": cloud_idx,
-                    "file_idx": idx
-                })
+                self.playlist.append(row)
                 added += 1
             
             self.status_bar.showMessage(f"Added {added} tracks from cloud folder")
@@ -3676,7 +3615,8 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
             path = data["path"]
             target_list.append(path)
             if update_ui:
-                self.playlist_widget.addItem(os.path.basename(path))
+                self.playlist_widget.addQueueRow(
+                    *self.meta.queue_cells(path))
             if len(target_list) == 1 and self.current_index < 0:
                 self.current_index = 0
             return os.path.basename(path)
@@ -3702,7 +3642,8 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
             })
             
             if update_ui:
-                self.playlist_widget.addItem(f"{file_name} (Cloud)")
+                self.playlist_widget.addQueueRow(*self.meta.queue_cells(
+                    target_list[-1]))
                 
             if len(target_list) == 1 and self.current_index < 0:
                 self.current_index = 0
@@ -3784,12 +3725,15 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
     def highlight_current_track(self):
         for i in range(self.playlist_widget.count()):
             item = self.playlist_widget.item(i)
-            if i == self.current_index:
-                item.setBackground(QColor(0, 80, 0))  # dark green
-                item.setForeground(QColor(255, 255, 255))
-            else:
-                item.setBackground(QColor(0, 0, 0, 0))
-                item.setForeground(QColor(240, 240, 255))
+            if item is None:
+                continue
+            for col in range(3):
+                if i == self.current_index:
+                    item.setBackground(col, QColor(0, 80, 0))  # dark green
+                    item.setForeground(col, QColor(255, 255, 255))
+                else:
+                    item.setBackground(col, QColor(0, 0, 0, 0))
+                    item.setForeground(col, QColor(240, 240, 255))
 
     def filter_playlist(self):
         text = self.playlist_search_input.text().strip().lower()
@@ -3798,10 +3742,9 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
         try:
             for i in range(widget.count()):
                 item = widget.item(i)
-                if text in item.text().lower():
-                    item.setHidden(False)
-                else:
-                    item.setHidden(True)
+                if item is None:
+                    continue
+                item.setHidden(not widget.matches_filter(i, text))
         finally:
             widget.setUpdatesEnabled(True)
 
@@ -3813,19 +3756,30 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
             return
         widget.setUpdatesEnabled(False)
         try:
-            # Build a list of (playlist_entry, display_text, meta) for sorting
+            # Rows sort off their table cells; local rows fall back to the
+            # embedded tags (read once and kept on the row cells).
             items = []
             for i in range(widget.count()):
                 entry = self.playlist[i] if i < len(self.playlist) else None
                 item = widget.item(i)
-                display_text = item.text() if item else ""
-                meta = {"title": display_text, "artist": "", "album": ""}
-                if isinstance(entry, str) and os.path.exists(entry):
-                    meta["title"] = os.path.basename(entry)
-                    if mode in ("Artist", "Album"):
-                        meta["artist"], meta["album"] = \
-                            read_sort_tags(entry)
-                items.append((entry, display_text, meta))
+                display = item.text(0) if item else ""
+                if isinstance(entry, str) and \
+                        entry.startswith(("http://", "https://")):
+                    meta = {"title": display or "Stream",
+                            "artist": "", "album": ""}
+                elif isinstance(entry, str) and os.path.exists(entry):
+                    title, artist, album = self.meta.queue_cells(entry)
+                    if not artist or not album:
+                        rt_artist, rt_album = read_sort_tags(entry)
+                        artist = artist or rt_artist
+                        album = album or rt_album
+                    meta = {"title": title or display,
+                            "artist": artist, "album": album}
+                else:
+                    title, artist, album = self.meta.queue_cells(entry)
+                    meta = {"title": title or display,
+                            "artist": artist, "album": album}
+                items.append((entry, item, meta))
             if mode == "Title":
                 items.sort(key=lambda x: x[2]["title"].lower())
             elif mode == "Artist":
@@ -3835,11 +3789,17 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
                 items.sort(key=lambda x: (x[2]["album"].lower(),
                                           x[2]["artist"].lower(),
                                           x[2]["title"].lower()))
-            widget.clear()
-            new_playlist = []
-            for entry, display_text, _ in items:
-                widget.addItem(display_text)
-                new_playlist.append(entry)
+            # Re-permute the existing rows (cells survive, no rebuild).
+            # Take everything out first: mutating indices mid-scan corrupts
+            # the remaining rows' positions.
+            row_items = [widget.item(i) for i in range(widget.count())]
+            for it in row_items:
+                if it is not None:
+                    widget.takeItem(widget.row(it))
+            for i, (entry, item, meta) in enumerate(items):
+                if item is not None:
+                    widget.insertItem(i, item)
+            new_playlist = [entry for entry, _i, _m in items]
         finally:
             widget.setUpdatesEnabled(True)
         # Update the underlying playlist data

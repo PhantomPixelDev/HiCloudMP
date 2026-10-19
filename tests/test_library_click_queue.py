@@ -68,5 +68,6 @@ def test_cloud_library_click_appends_and_keeps_queue(music_player,
     ]
     assert mp.current_index == 1
     assert mp.playlist_widget.count() == 2
-    assert mp.playlist_widget.item(1).text() == "Skillibeng – Spend It"
+    assert mp.playlist_widget.item(1).text(0) == "Spend It"
+    assert mp.playlist_widget.item(1).text(1) == "Skillibeng"
     assert played == [1]
