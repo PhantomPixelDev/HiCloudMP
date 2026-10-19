@@ -256,3 +256,35 @@ P6 verification COMPLETE (2026-10-19):
   loud fallback), local covers FIXED (4077823/0360727).
 - v1.0.3 bump/tag/build: awaiting explicit user go.
 
+
+Improv round (Do it all), part 1 of ~6 (2026-10-19):
+User asked for the full improvement list; executing continuously, TDD,
+one commit per logical change, release gate still locked.
+
+`1d7d1f4` fix: corrupt local file skips to next track
+- P4 only removed the modal; the queue still stopped dead at the bad
+  row. InvalidMedia now advances playback to the next entry (status +
+  tray toast kept), tail stops with "end of playlist". Bounded: each
+  skip moves the index forward, so a fully-corrupt playlist cannot
+  loop. Message keeps the "Could not play" prefix the hardening test
+  asserts on. tests/test_invalid_media_skip.py (3 tests).
+
+`9493138` feat: stream URLs from imported playlists play from queue
+- Import kept counting http(s) rows as skipped; they now join the
+  queue as "(Stream)" rows, play() routes string URLs through the
+  existing _play_stream retry path, export writes URLs verbatim (the
+  old path abspath-mangled them to "https:\host\file"). Browser/m3u8
+  round trip covered in tests/test_playlist_menu.py (2 new tests).
+
+`53bc6cf` feat: Explorer drag-drop onto the playlist
+- Playlist files drop-import via shared _import_playlist_file
+  (extracted from the menu action); audio files append to the queue;
+  junk refused; internal reorder drags untouched. Filter is installed
+  on the viewport (drag events land there, not the view).
+- Test-infra lesson recorded: QDropEvent stores a RAW pointer to its
+  QMimeData - passing _mime(...) inline lets shiboken destroy the
+  mime while the event still points at it; the next mimeData()/repr()
+  access is an instant access violation. Call sites hold the mime in
+  a local (tests/test_playlist_drop.py, 7 tests).
+- Suite after 1d7d1f4+9493138: 307 passed, 2 skipped. After 53bc6cf:
+  314 passed, 2 skipped.
