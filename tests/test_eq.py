@@ -59,6 +59,34 @@ def test_local_play_routes_engine_when_eq_on(music_player, monkeypatch):
     assert mp._using_engine is False
 
 
+class _SilentPlayer:
+    """Routing-test stand-in for the real QMediaPlayer: setSource/play are
+    recorded, never handed to the WMF backend. A real setSource() of a
+    missing file leaves async backend work in flight; pytest-qt teardown
+    then destroys the player mid-load and the WMF worker thread trips an
+    access violation that kills the whole suite (reproduced ~2/8 runs).
+    The real object stays alive in _real (house rule: never drop the last
+    Python reference to a live C++ Qt object)."""
+
+    def __init__(self, real):
+        self._real = real
+        self.source_url = None
+        self.plays = 0
+
+    def setSource(self, url):
+        self.source_url = url
+
+    def play(self):
+        self.plays += 1
+
+    def source(self):
+        return self.source_url if self.source_url is not None \
+            else self._real.source()
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
 def test_play_routes_native_when_eq_off(music_player, monkeypatch):
     mp = music_player
     calls = []
@@ -67,22 +95,28 @@ def test_play_routes_native_when_eq_off(music_player, monkeypatch):
     mp.playlist = [r"C:\nonexistent\track.mp3"]
     mp.current_index = 0
     mp._disconnect_stream_handlers = lambda: None
+    monkeypatch.setattr(mp, "player", _SilentPlayer(mp.player),
+                        raising=False)
     mp.play()
 
     assert calls == []
     assert mp._using_engine is False
     assert mp.player.source().isLocalFile()
+    assert mp.player.plays == 1, "native route must actually start playback"
 
 
-def test_engine_error_falls_back_to_native_replay(music_player):
+def test_engine_error_falls_back_to_native_replay(music_player, monkeypatch):
     mp = music_player
     mp.playlist = [r"C:\nonexistent\track.mp3"]
     mp.current_index = 0
     mp._engine_source = ('file', r"C:\nonexistent\track.mp3", "track.mp3")
     mp._using_engine = True
+    monkeypatch.setattr(mp, "player", _SilentPlayer(mp.player),
+                        raising=False)
     mp._engine_playback_error("boom")
     assert mp._using_engine is False
     assert mp.player.source().isLocalFile(), "fallback replays via native player"
+    assert mp.player.plays == 1, "fallback must actually start playback"
 
 
 def test_equilizer_dialog_applies_live_and_restores_on_cancel():
