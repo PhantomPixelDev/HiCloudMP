@@ -182,6 +182,39 @@ class MetadataController:
         except Exception:
             return None
 
+    def queue_label(self, item):
+        """Human label for a queue row: 'Artist – Title', title only when no
+        artist is known, basename for plain paths. Resolves cloud rows from
+        the in-memory catalog (cloud rows only carry indices); never a
+        network/probe call."""
+        try:
+            row = {}
+            if isinstance(item, dict):
+                resolved = self._cloud_row_for(item)
+                if resolved:
+                    row = resolved
+                title = item.get('title') or row.get('title')
+            else:
+                title = None
+            if not title:
+                title = row.get('name')
+            if not title:
+                path = (item.get('path')
+                        if isinstance(item, dict) else None) \
+                    or row.get('path') \
+                    or (item if isinstance(item, str) else None)
+                if path:
+                    title = os.path.splitext(os.path.basename(
+                        str(path)))[0]
+            artist = (item.get('artist')
+                      if isinstance(item, dict) else None) \
+                or row.get('artist') or ''
+            if title and artist:
+                return f"{artist} – {title}"
+            return str(title) if title else ''
+        except Exception:
+            return ''
+
     def update_metadata_display(self):
         try:
             # Reset labels

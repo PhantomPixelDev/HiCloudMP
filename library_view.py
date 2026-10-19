@@ -7,30 +7,32 @@ class LibraryView:
         self.app = app  # MusicPlayer instance
 
     def on_library_item_clicked(self, item, column):
+        """Double-click on a library entry. A FILE always APPENDS to the
+        current queue and plays the new row (users build a queue across
+        clicks; replacing it silently was reported as a bug on v1.0.4).
+        Playlists/categories keep their explicit load behavior."""
         data = item.data(0, Qt.UserRole)
         if not data:
             return
         if data["type"] == "local_file":
             path = data["path"]
-            self.app.playlist = [path]
-            self.app.playlist_widget.clear()
+            self.app.playlist.append(path)
             self.app.playlist_widget.addItem(os.path.basename(path))
-            self.app.current_index = 0
+            self.app.current_index = len(self.app.playlist) - 1
             self.app.play()
         elif data["type"] == "cloud_file":
             cloud_idx = data["cloud_index"]
             file_idx = data["file_index"]
-            self.app.playlist = [{
-                "type": "cloud",
-                "cloud_idx": cloud_idx,
-                "file_idx": file_idx
-            }]
-            self.app.playlist_widget.clear()
+            row = {"type": "cloud",
+                   "cloud_idx": cloud_idx,
+                   "file_idx": file_idx}
+            self.app.playlist.append(row)
             cloud = self.app.clouds[cloud_idx]
             file_info = cloud["files"][file_idx]
-            file_name = os.path.basename(file_info["path"])
-            self.app.playlist_widget.addItem(f"{file_name} (Cloud)")
-            self.app.current_index = 0
+            label = self.app.meta.queue_label(row) \
+                or os.path.basename(file_info["path"])
+            self.app.playlist_widget.addItem(label)
+            self.app.current_index = len(self.app.playlist) - 1
             self.app.play()
         elif data["type"] == "playlist":
             self.app.load_playlist_by_id(data["id"])
