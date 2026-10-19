@@ -6,7 +6,9 @@ It is mixed into MusicPlayer; every method touches the app through
 self exactly as before the split.
 """
 
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import QTimer, QUrl
+
+import os
 
 
 class PlaybackEngineMixin:
@@ -68,6 +70,65 @@ class PlaybackEngineMixin:
         self._engine_source = (kind, src, name)
         self._sync_engine_gains()
         self.eq_engine.play(src)
+        if kind == 'file':
+            # Sequential local playback: pre-arm the next row so the sink
+            # continues straight into it (gapless).
+            self._queue_gapless_next()
+
+    def _queue_gapless_next(self):
+        """Pre-arm the engine with the next sequential playlist row.
+
+        Only the plain sequential case is gapless: shuffle, a pending Play
+        Next queue, cloud dict rows and the last row use the normal path
+        (the engine finishes, the player advances and starts a new sink)."""
+        try:
+            if not getattr(self, "_using_engine", False):
+                return
+            arm = getattr(self.eq_engine, "queue_next", None)
+            if not callable(arm):
+                return
+            if getattr(self, "_play_next_queue", None):
+                return
+            if self.shuffle_btn.isChecked():
+                return
+            idx = self.current_index + 1
+            if not (0 <= idx < len(self.playlist)):
+                return
+            item = self.playlist[idx]
+            if not isinstance(item, str):
+                return
+            if item.startswith(("http://", "https://")) or os.path.exists(item):
+                arm(item)
+        except Exception:
+            pass
+
+    def _on_engine_track_advanced(self, source):
+        """The engine already started `source` on the running sink: mirror
+        the hand-off in the UI. Calling play() here would restart the audio
+        and reintroduce the gap, so this only updates state."""
+        try:
+            idx = self.current_index + 1
+            if not (0 <= idx < len(self.playlist)) or self.playlist[idx] != source:
+                try:
+                    idx = self.playlist.index(source)
+                except ValueError:
+                    # Row was removed mid-track; surface what is audible.
+                    self.playlist.append(source)
+                    self.playlist_widget.addItem(
+                        os.path.basename(source) or source)
+                    idx = len(self.playlist) - 1
+            self.current_index = idx
+            self.playlist_widget.setCurrentRow(idx)
+            self.highlight_current_track()
+            self.play_btn.setIcon(self._icon_pause())
+            if hasattr(self, "update_tray_ui"):
+                self.update_tray_ui()
+            self.record_play(source)
+            QTimer.singleShot(100, self.update_metadata_display)
+            self._queue_gapless_next()
+            self._push_web_state()
+        except Exception:
+            pass
 
     def _on_engine_state(self, state):
         try:

@@ -22,6 +22,7 @@ class EQEngine(QObject):
     position_changed = Signal(int)      # ms within track
     duration_changed = Signal(int)      # ms
     track_finished = Signal()
+    track_advanced = Signal(str)        # gapless hand-off: next source started
     error_occurred = Signal(str)
     state_changed = Signal(str)         # 'playing' | 'paused' | 'stopped'
 
@@ -58,6 +59,15 @@ class EQEngine(QObject):
         # Spectrum tap (visualizer): rolling mono tail + latest band data.
         self._spectrum = None
         self._spec_buf = np.zeros((0,), dtype=np.float32)
+        # Gapless hand-off: a preloaded decoder for the following track and
+        # the sink timestamp at which its audio becomes audible.
+        self._next_decoder = None
+        self._next_source = None
+        self._advance_target_us = None
+        self._advance_source = None
+        self._advance_old_base_ms = 0
+        self._advance_old_prof_us = 0
+        self._advance_old_duration_ms = 0
         # Output device: None = system default (re-choosable in Settings;
         # applied when the next sink is created).
         self._out_device = None
@@ -196,6 +206,10 @@ class EQEngine(QObject):
         and discard decoded frames until decoder.position() reaches the target."""
         if self._decoder is None or self._proc is None:
             return
+        if self._advance_target_us is not None:
+            # Seek during a gapless hand-off: finish the UI transition first
+            # so the player index and the audio agree.
+            self._complete_advance()
         ms = max(0, int(ms))
         self._pending = np.zeros((0, self.CHANNELS), dtype=np.int16)
         self._proc.reset()
@@ -232,6 +246,46 @@ class EQEngine(QObject):
         except Exception as e:
             raise RuntimeError(f"seek restart failed: {e}")
 
+    def queue_next(self, source):
+        """Pre-open the following track so the running sink can continue
+        straight into it (gapless): no stop/restart between tracks.
+        Returns True when a decoder was armed."""
+        self.clear_queued_next()
+        if self._decoder is None:
+            return False
+        try:
+            fmt = QAudioFormat()
+            fmt.setSampleRate(self.SAMPLE_RATE)
+            fmt.setChannelCount(self.CHANNELS)
+            fmt.setSampleFormat(QAudioFormat.SampleFormat.Int16)
+            decoder = QAudioDecoder(self)
+            decoder.setAudioFormat(fmt)
+            src = str(source)
+            if src.startswith("http://") or src.startswith("https://"):
+                decoder.setSource(QUrl(src))
+            else:
+                decoder.setSource(QUrl.fromLocalFile(src))
+            decoder.start()
+        except Exception:
+            self.clear_queued_next()
+            return False
+        self._next_decoder = decoder
+        self._next_source = src
+        return True
+
+    def clear_queued_next(self):
+        """Drop the preloaded next decoder (playlist/queue changed)."""
+        decoder = self._next_decoder
+        self._next_decoder = None
+        self._next_source = None
+        if decoder is not None:
+            try:
+                decoder.stop()
+                decoder.setSource(QUrl())
+                decoder.deleteLater()
+            except Exception:
+                pass
+
     def stop(self):
         was_active = self._decoder is not None
         self._teardown()
@@ -245,6 +299,9 @@ class EQEngine(QObject):
         self._fallback_timer.stop()
         self._wake_timer.stop()
         self._wake_scheduled = False
+        self.clear_queued_next()
+        self._advance_target_us = None
+        self._advance_source = None
         if self._decoder is not None:
             try:
                 self._decoder.stop()
@@ -271,7 +328,16 @@ class EQEngine(QObject):
         self._spec_buf = np.zeros((0,), dtype=np.float32)
 
     def _on_duration_changed(self, ms):
-        self._duration_ms = int(ms)
+        ms = int(ms)
+        if ms <= 0 and self._duration_ms > 0:
+            # A just-promoted preloaded decoder re-reports -1 after the
+            # hand-off; never lose a duration we already know.
+            return
+        self._duration_ms = ms
+        if self._advance_target_us is not None:
+            # The old track is still audible; publish the new duration at
+            # the audible hand-off (see _complete_advance).
+            return
         self.duration_changed.emit(self._duration_ms)
 
     def _on_buffer_ready(self):
@@ -395,7 +461,96 @@ class EQEngine(QObject):
                     self._tap_spectrum(self._pending[:consumed])
                     self._pending = self._pending[consumed:]
         self._emit_position()
+        self._maybe_promote_next()
         self._check_finished()
+
+    def _maybe_promote_next(self):
+        """The current track is fully written and a decoder is preloaded:
+        switch before the sink drains (still sample-continuous)."""
+        if (self._next_decoder is None or self._advance_target_us is not None
+                or not self._decoding_done or self._pending.shape[0]
+                or self._sink is None):
+            return
+        self._promote_next()
+
+    def _promote_next(self):
+        """Swap in the preloaded decoder on the SAME sink and EQ chain."""
+        old_duration = self._duration_ms
+        old_base_ms = self._base_ms
+        old_prof_us = self._prof_us_base
+        try:
+            now_us = int(self._sink.processedUSecs())
+        except Exception:
+            now_us = 0
+        target_us = None
+        if old_duration > 0:
+            target_us = old_prof_us + max(0, old_duration - old_base_ms) * 1000
+            target_us = max(target_us, now_us)
+
+        old = self._decoder
+        self._decoder = None
+        if old is not None:
+            try:
+                old.stop()
+                old.bufferReady.disconnect(self._on_buffer_ready)
+                old.finished.disconnect(self._on_decoder_finished)
+                old.durationChanged.disconnect(self._on_duration_changed)
+                old.setSource(QUrl())
+                old.deleteLater()
+            except Exception:
+                pass
+
+        decoder = self._next_decoder
+        source = self._next_source
+        self._next_decoder = None
+        self._next_source = None
+        if decoder is None:
+            return
+        self._decoder = decoder
+        try:
+            decoder.bufferReady.connect(self._on_buffer_ready)
+            decoder.finished.connect(self._on_decoder_finished)
+            decoder.durationChanged.connect(self._on_duration_changed)
+        except Exception:
+            pass
+        try:
+            new_duration = int(decoder.duration())
+        except Exception:
+            new_duration = 0
+        self._duration_ms = max(0, new_duration)
+        self._decoding_done = False
+        self._finish_emitted = False
+        self._error_reported = False
+        self._got_first_buffer = False
+        self._skip_until_ms = 0
+        self._skip_done = True
+
+        if target_us is not None:
+            # Old audio remains in the sink: report the old tail until the
+            # new track becomes audible, then emit the hand-off.
+            self._advance_target_us = target_us
+            self._advance_source = source
+            self._advance_old_base_ms = old_base_ms
+            self._advance_old_prof_us = old_prof_us
+            self._advance_old_duration_ms = old_duration
+            self._base_ms = 0
+            self._prof_us_base = target_us
+        else:
+            # Duration unknown: switch now (still no sink restart).
+            self._base_ms = 0
+            self._prof_us_base = now_us
+            self.duration_changed.emit(self._duration_ms)
+            if source:
+                self.track_advanced.emit(source)
+
+    def _complete_advance(self):
+        """The old track has fully played: surface the new-track state."""
+        source = self._advance_source or ""
+        self._advance_target_us = None
+        self._advance_source = None
+        self.duration_changed.emit(self._duration_ms)
+        if source:
+            self.track_advanced.emit(source)
 
     def _tap_spectrum(self, chunk):
         """Roll the written (post-EQ = audible) audio through the analyzer."""
@@ -430,9 +585,19 @@ class EQEngine(QObject):
         if self._sink is None:
             return
         try:
-            us = self._sink.processedUSecs()
+            us = int(self._sink.processedUSecs())
         except Exception:
             return
+        if self._advance_target_us is not None:
+            if us < self._advance_target_us:
+                # The old track is still audible: keep reporting its tail.
+                ms = self._advance_old_base_ms + max(0, int(
+                    (us - self._advance_old_prof_us) / 1000))
+                if self._advance_old_duration_ms > 0:
+                    ms = min(ms, self._advance_old_duration_ms)
+                self.position_changed.emit(max(0, ms))
+                return
+            self._complete_advance()
         if us < self._prof_us_base:
             us = self._prof_us_base
         ms = self._base_ms + int((us - self._prof_us_base) / 1000)
@@ -445,9 +610,15 @@ class EQEngine(QObject):
         if self._sink is None:
             return self._base_ms
         try:
-            us = self._sink.processedUSecs()
+            us = int(self._sink.processedUSecs())
         except Exception:
             return self._base_ms
+        if self._advance_target_us is not None and us < self._advance_target_us:
+            ms = self._advance_old_base_ms + max(0, int(
+                (us - self._advance_old_prof_us) / 1000))
+            if self._advance_old_duration_ms > 0:
+                ms = min(ms, self._advance_old_duration_ms)
+            return max(0, ms)
         if us < self._prof_us_base:
             us = self._prof_us_base
         return self._base_ms + int((us - self._prof_us_base) / 1000)
@@ -457,6 +628,8 @@ class EQEngine(QObject):
         return self._duration_ms
 
     def _check_finished(self):
+        if self._advance_target_us is not None:
+            return
         if (not self._playing or self._finish_emitted or not self._decoding_done
                 or self._error_reported):
             return

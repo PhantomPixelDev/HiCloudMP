@@ -224,6 +224,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         self.eq_engine.position_changed.connect(self.update_position)
         self.eq_engine.duration_changed.connect(self.update_duration)
         self.eq_engine.track_finished.connect(self._on_engine_track_finished)
+        self.eq_engine.track_advanced.connect(self._on_engine_track_advanced)
         self.eq_engine.error_occurred.connect(self._engine_playback_error)
         self.eq_engine.state_changed.connect(self._on_engine_state)
         
@@ -2528,6 +2529,13 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         if queue is None:
             self._play_next_queue = queue = []
         queue.extend(rows)
+        try:
+            # A user-queued row outranks the preloaded gapless candidate.
+            clear_next = getattr(self.eq_engine, "clear_queued_next", None)
+            if callable(clear_next):
+                clear_next()
+        except Exception:
+            pass
         self._update_queue_indicator()
         self.status_bar.showMessage(
             f"{len(rows)} track{'s' if len(rows) != 1 else ''} queued"
@@ -2554,6 +2562,8 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
                 f" ({n} track{'s' if n != 1 else ''})", 3000)
         else:
             self.status_bar.showMessage("Play Next queue is empty", 3000)
+        if getattr(self, "_using_engine", False):
+            self._queue_gapless_next()
         self._push_web_state()
 
     def _take_from_play_next_queue(self):
