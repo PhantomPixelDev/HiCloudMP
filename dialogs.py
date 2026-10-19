@@ -764,6 +764,13 @@ class SettingsDialog(QDialog):
         self.settings.setValue("download_folder", self.download_folder_edit.text())
         self.settings.setValue("web_interface", self.web_checkbox.isChecked())
         self.settings.setValue("web/host", "0.0.0.0" if self.lan_checkbox.isChecked() else "127.0.0.1")
+        try:
+            # Flush immediately: QSettings buffers, and hard deaths
+            # (fastfatal family) run no destructors - buffered
+            # preferences were lost on crash.
+            self.settings.sync()
+        except Exception:
+            pass
 
     def open_cloud_accounts(self):
         if self.parent:

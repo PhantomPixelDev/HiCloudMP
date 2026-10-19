@@ -1177,6 +1177,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         Cloud streams switch at the next track."""
         try:
             self.settings.setValue("audio/eq_enabled", bool(on))
+            self._flush_settings()
             if on:
                 if getattr(self, "_using_engine", False):
                     self._sync_engine_gains()   # engine already runs
@@ -1208,6 +1209,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
             on = bool(on)
             self.settings.setValue("audio/eq_gains",
                                    ",".join(f"{v:g}" for v in g))
+            self._flush_settings()
             if on != last_on[0]:
                 last_on[0] = on
                 self.apply_eq_toggle(on)
@@ -1391,6 +1393,19 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
             parts = [0.0] * 10
         return parts
 
+    def _flush_settings(self):
+        """Write pending QSettings changes to backing storage NOW.
+
+        QSettings buffers writes and flushes on clean exit only; the
+        fastfatal-class deaths of the 0xC0000409 family run no
+        destructors, so buffered preferences evaporated - users had to
+        re-enable the equalizer/visualizer after every crash. Preferences
+        are flushed the moment they change so no crash can eat them."""
+        try:
+            self.settings.sync()
+        except Exception:
+            pass
+
 
     def open_eq_dialog(self):
         from dialogs import EqualizerDialog
@@ -1408,6 +1423,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         self.settings.setValue("audio/eq_preset", dlg.preset_combo.currentText())
         self.settings.setValue("audio/eq_enabled",
                                dlg.enabled_check.isChecked())
+        self._flush_settings()
         self.apply_eq_toggle(dlg.enabled_check.isChecked())
         self.status_bar.showMessage("Equalizer settings saved", 3000)
 
