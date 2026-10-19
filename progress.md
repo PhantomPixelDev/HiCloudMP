@@ -216,7 +216,21 @@ Landed with this commit (`feat: tray icon is an accent badge ...`):
   QListWidget methods via instance setattr is honored for plain calls.
 - Tests red->green (4+3); suite cold `298 passed, 2 skipped`.
 
-Next in line: P4 hardening pack (closeEvent trail guard, InvalidMedia
-modal demotion to status+toast, undecodable-file UX), P6 release
-(verification x3 + real-app relaunch; tag only on explicit user go).
+`8e31f61` fix: corrupt files never modal the queue; close survives broken subsystems
+- Plan P4: local InvalidMedia during auto-advance popped a MODAL
+  QMessageBox (queue stopped dead until click) -> now status line +
+  tray toast via shared _tray_toast helper (factored from
+  _engine_playback_error); cloud rows keep the retry path.
+- closeEvent: player.stop / web-server stop / the three state saves
+  independently guarded - one broken subsystem can no longer skip
+  later saves or block close; event.accept() always reached.
+- Tests tests/test_hardening.py red->green (4, incl. refactor guard);
+  suite cold `302 passed, 2 skipped`. One-off faulthandler C-stack
+  dump observed in an inline pytest run (killed mid-run by interrupt);
+  clean runs green; exit-fatal class covered by 5ed140d subprocess
+  gates.
+
+Next in line: P6 release round - verification suite x3, real-app
+relaunch checklist, temp-probe cleanup, version bump + tag/build
+STRICTLY gated on explicit user go.
 
