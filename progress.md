@@ -452,3 +452,16 @@ Playback fixes round (2026-10-19) — user-reported regressions in v1.0.3:
 Suite: 408 passed, 2 skipped.
 Not pushed/tagged/released; version remains 1.0.3 until explicit go.
 
+`edf362d` fix(metadata): resolve cloud queue metadata from scanned rows
+- Library-built cloud queue rows store only cloud_idx/file_idx, so the
+  now-playing labels under the cover reset to Unknown even though the
+  playlist and file manager showed the scanned names. Display now
+  resolves name/artist/album (and path fallback) from the in-memory
+  clouds.json catalog. Resolved values are cached on the live queue row
+  so repeated displays do not re-resolve the catalog; Unknown placeholders
+  are not cached, so a later scan can fill them in. No ffprobe, network
+  request, or rescan. 2 tests.
+
+Suite: 410 passed, 2 skipped.
+Not pushed/tagged/released; version remains 1.0.3 until explicit go.
+
