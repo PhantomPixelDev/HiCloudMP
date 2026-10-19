@@ -484,3 +484,21 @@ Landed with this commit (`6af1c35`):
 
 Suite: 413 passed, 2 skipped.
 Version remains 1.0.4 until explicit go for 1.0.5.
+
+## 2026-10-20 — fix: touching the EQ curve enables the equalizer
+
+Landed with this commit (`7b3093b`):
+
+- v1.0.4 user report "Equalizer dont work": install registry had
+  `eq_enabled=false` with a Bass-Boost curve stored; the dialog's
+  "Equalizer on" box defaults to the persisted state, and with it unticked
+  slider/preset changes saved the curve but applied FLAT gains live
+  (visualizer-only engine route by design), so tuning was inaudible.
+- Moving a slider or picking a preset now auto-enables the EQ (VLC-style).
+  Explicit unchecking still applies immediately; Cancel/X still restores
+  the state captured at open. Probes confirmed the engine itself works on
+  the packaged stack (PySide 6.12/FFmpeg 9): local WAV tone + real MP3 +
+  cloud stream all decode, position advances, no errors. 4 dialog tests.
+
+Suite: 417 passed, 2 skipped.
+Version remains 1.0.4 until explicit go for 1.0.5.
