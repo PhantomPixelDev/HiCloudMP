@@ -713,6 +713,8 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         # Enable drag-and-drop reordering and multi-select
         self.playlist_widget.setDragDropMode(QListWidget.InternalMove)
         self.playlist_widget.setSelectionMode(QListWidget.ExtendedSelection)
+        # Keyboard driving (P3): Del = remove, Space = play, Home/End jump
+        self.playlist_widget.installEventFilter(self)
         content_row.addWidget(self.playlist_widget, 1)
         stage_col.addLayout(content_row, 1)
 
@@ -1304,7 +1306,12 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
                         print(f"Metadata update on BufferedMedia failed: {e}")
         
         elif status == QMediaPlayer.MediaStatus.EndOfMedia:
-            if self.repeat_btn.isChecked():
+            queued = self._take_from_play_next_queue()
+            if queued is not None:
+                # User's Play Next outranks repeat/shuffle/sequence
+                self.current_index = queued
+                self.play()
+            elif self.repeat_btn.isChecked():
                 # Repeat current track
                 self.player.setPosition(0)
                 self.player.play()
@@ -2032,27 +2039,48 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         self.playlist_selector.blockSignals(False)
     
     def show_playlist_context_menu(self, position):
-        selected_items = self.playlist_widget.selectedItems()
         item = self.playlist_widget.itemAt(position)
         if not item:
             return
-        index = self.playlist_widget.row(item)
-        context_menu = QMenu()
-        play_action = context_menu.addAction("Play")
+        menu = QMenu(self)
+        self._build_playlist_context_menu(menu, self.playlist_widget.row(item))
+        menu.exec(self.playlist_widget.viewport().mapToGlobal(position))
+
+    def _build_playlist_context_menu(self, menu, index):
+        """Context-menu builder (shared, testable): transport, Play Next,
+        playlist hygiene, and import/export shortcuts."""
+        selected_items = self.playlist_widget.selectedItems()
+        play_action = menu.addAction("Play")
         play_action.triggered.connect(lambda: self.play_item_at_index(index))
-        remove_action = context_menu.addAction("Remove from Playlist")
+        # Route actions on multi-selection: choosing one row plays exactly
+        # that; the whole selection is acancheable as its own action.
+        if len(selected_items) > 1:
+            play_sel = menu.addAction("Play Selected")
+            play_sel.triggered.connect(self._play_first_selected)
+        queue_action = menu.addAction("Queue Next")
+        queue_action.triggered.connect(self.queue_play_next)
+        remove_action = menu.addAction("Remove from Playlist")
         remove_action.triggered.connect(lambda: self.remove_from_playlist(index))
         if len(selected_items) > 1:
-            remove_selected_action = context_menu.addAction("Remove Selected")
+            remove_selected_action = menu.addAction("Remove Selected")
             remove_selected_action.triggered.connect(self.remove_selected_from_playlist)
-            move_up_action = context_menu.addAction("Move Selected Up")
+            move_up_action = menu.addAction("Move Selected Up")
             move_up_action.triggered.connect(lambda: self.move_selected_in_playlist(-1))
-            move_down_action = context_menu.addAction("Move Selected Down")
+            move_down_action = menu.addAction("Move Selected Down")
             move_down_action.triggered.connect(lambda: self.move_selected_in_playlist(1))
+        menu.addAction("Remove Duplicates", self.remove_duplicates_from_playlist)
         if self.active_playlist:
-            save_action = context_menu.addAction("Save Playlist")
+            save_action = menu.addAction("Save Playlist")
             save_action.triggered.connect(self.save_current_playlist)
-        context_menu.exec(self.playlist_widget.viewport().mapToGlobal(position))
+        menu.addSeparator()
+        menu.addAction("Import Playlist…", self.import_playlist)
+        menu.addAction("Export Playlist…", self.export_playlist)
+        return menu
+
+    def _play_first_selected(self):
+        """Play the TOP of the current selection (Play Selected action)."""
+        rows = self.playlist_widget.row(self.playlist_widget.selectedItems()[0])
+        self.play_item_at_index(rows)
     
     def remove_selected_from_playlist(self):
         selected_rows = sorted([self.playlist_widget.row(item) for item in self.playlist_widget.selectedItems()], reverse=True)
@@ -2061,6 +2089,98 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
             del self.playlist[row]
         if self.active_playlist:
             self.active_playlist.modified = datetime.now().isoformat()
+
+    # === Play Next queue (P3) ===
+    def queue_play_next(self):
+        """Queue the selected rows to play right after the current track."""
+        rows = sorted({self.playlist_widget.row(it)
+                       for it in self.playlist_widget.selectedItems()})
+        if self.current_index >= 0:
+            rows = [r for r in rows if r != self.current_index]
+        if not rows:
+            self.status_bar.showMessage(
+                "Select a track to queue next", 3000)
+            return
+        queue = getattr(self, "_play_next_queue", None)
+        if queue is None:
+            self._play_next_queue = queue = []
+        queue.extend(rows)
+        self.status_bar.showMessage(
+            f"{len(rows)} track{'s' if len(rows) != 1 else ''} queued"
+            f" to play next ({len(queue)} queued)", 3000)
+
+    def _take_from_play_next_queue(self):
+        """Pop the next valid queued row for auto-advance; None when the
+        queue is empty. Rows that outlived their track vanish silently."""
+        queue = getattr(self, "_play_next_queue", None)
+        while queue:
+            idx = queue.pop(0)
+            if 0 <= idx < len(self.playlist):
+                return idx
+        return None
+
+    def remove_duplicates_from_playlist(self):
+        """Drop repeated queue rows (same normalized path, or the same
+        cloud track), keeping the first occurrence."""
+        seen = set()
+        keep = []
+        for item in self.playlist:
+            if isinstance(item, dict):
+                key = ("cloud", item.get("cloud_idx"), item.get("file_idx"))
+            else:
+                key = os.path.normcase(str(item))
+            if key in seen:
+                continue
+            seen.add(key)
+            keep.append(item)
+        dupes = len(self.playlist) - len(keep)
+        if dupes:
+            self.playlist[:] = keep
+            self.playlist_widget.clear()
+            for it in self.playlist:
+                if isinstance(it, dict):
+                    try:
+                        cloud = self.clouds[it.get("cloud_idx")]
+                        file_info = cloud["files"][it.get("file_idx")]
+                        name = os.path.basename(file_info["path"])
+                    except Exception:
+                        name = "Cloud"
+                    self.playlist_widget.addItem(f"{name} (Cloud)")
+                else:
+                    self.playlist_widget.addItem(os.path.basename(str(it)))
+            if self.current_index >= len(self.playlist):
+                self.current_index = len(self.playlist) - 1
+            if self.active_playlist:
+                self.active_playlist.modified = datetime.now().isoformat()
+        self.status_bar.showMessage(
+            (f"Removed {dupes} duplicate{'s' if dupes != 1 else ''}"
+             if dupes else "No duplicates in the playlist"), 4000)
+
+    # === Playlist keyboard driving (P3) ===
+    def eventFilter(self, obj, event):
+        """Playlist widget keys: Del removes the selection, Space starts
+        the selected track, Home/End jump selection extremes."""
+        if obj is self.playlist_widget and event.type() == QEvent.KeyPress:
+            key = event.key()
+            if key == Qt.Key_Delete:
+                self.remove_selected_from_playlist()
+                return True
+            if key == Qt.Key_Space:
+                row = self.playlist_widget.currentRow()
+                if row >= 0:
+                    self.play_item_at_index(row)
+                return True
+            if key == Qt.Key_Home:
+                if self.playlist_widget.count():
+                    self.playlist_widget.setCurrentRow(0)
+                return True
+            if key == Qt.Key_End:
+                count = self.playlist_widget.count()
+                if count:
+                    self.playlist_widget.setCurrentRow(count - 1)
+                    self.playlist_widget.item(count - 1).setSelected(True)
+                return True
+        return super().eventFilter(obj, event)
     
     def move_selected_in_playlist(self, direction):
         selected_rows = sorted([self.playlist_widget.row(item) for item in self.playlist_widget.selectedItems()])

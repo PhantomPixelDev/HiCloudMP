@@ -80,6 +80,12 @@ class PlaybackEngineMixin:
         # Mirror the native EndOfMedia auto-advance rules.
         self._using_engine = False
         self._engine_source = ('', '', '')
+        queued = self._take_from_play_next_queue()
+        if queued is not None:
+            # User's Play Next outranks repeat/shuffle/sequence
+            self.current_index = queued
+            self.play()
+            return
         if self.repeat_btn.isChecked():
             self.play()
         elif self.shuffle_btn.isChecked() and len(self.playlist) > 1:
