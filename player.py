@@ -17,6 +17,9 @@ from library_view import LibraryView
 # (player.SettingsDialog, monkeypatched player.CloudAccountsDialog) keep working
 from dialogs import CloudAccountsDialog, SettingsDialog  # noqa: F401
 from playback import PlaybackEngineMixin
+from history import PlayHistoryMixin, HISTORY_LIMIT  # noqa: F401
+from folder_watch import (FolderWatchMixin, FOLDER_WATCH_DEBOUNCE_MS,  # noqa: F401
+                          FOLDER_WATCH_MAX_DIRS)
 from visualizer import SFVisualizer
 import icons
 
@@ -30,7 +33,7 @@ from PySide6.QtWidgets import (
     QScrollArea
 )
 from PySide6.QtGui import QPainter
-from PySide6.QtCore import Qt, QTimer, Signal, QObject, QThread, QUrl, QSize, QEvent, QSettings, QFileSystemWatcher
+from PySide6.QtCore import Qt, QTimer, Signal, QObject, QThread, QUrl, QSize, QEvent, QSettings
 from PySide6.QtGui import QIcon, QAction, QKeySequence, QKeyEvent, QPalette, QColor, QPixmap
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput, QMediaFormat
 
@@ -55,13 +58,9 @@ PLAYLIST_DROP_EXTS = (".m3u", ".m3u8", ".pls", ".xspf")
 # off exponentially; after this many failures the queue moves on).
 STREAM_MAX_RETRIES = 5
 
-# Recently/Most Played history: last N entries kept, menus show top entries.
-HISTORY_LIMIT = 50
-
-# Folder watching: debounce bursts of Explorer writes into one rescan and
-# cap how many directories QFileSystemWatcher tracks (OS handle budget).
-FOLDER_WATCH_DEBOUNCE_MS = 1200
-FOLDER_WATCH_MAX_DIRS = 500
+# Recently/Most Played history and folder watching live in history.py /
+# folder_watch.py; their constants are re-exported above for compatibility
+# (tests and callers import them from player).
 
 
 # Help > Keyboard Shortcuts is generated from this one table so the docs
@@ -138,7 +137,8 @@ from thread_teardown import register_exit_guard as _register_exit_guard  # noqa:
 _register_exit_guard(lambda: list(_ORPHAN_QTHREADS))
 
 
-class MusicPlayer(QMainWindow, PlaybackEngineMixin):
+class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
+                   FolderWatchMixin):
     cloud_file_downloaded = Signal(str)
     run_on_ui = Signal(object)  # pass a callable to execute on UI thread
     
@@ -254,14 +254,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         
         # Folder watching: new/removed files in library folders refresh the
         # Local Media tree automatically (debounced burst -> one scan).
-        self._folder_watcher = QFileSystemWatcher(self)
-        self._folder_watcher.directoryChanged.connect(
-            self._on_watched_folder_changed)
-        self._folder_watch_timer = QTimer(self)
-        self._folder_watch_timer.setSingleShot(True)
-        self._folder_watch_timer.setInterval(FOLDER_WATCH_DEBOUNCE_MS)
-        self._folder_watch_timer.timeout.connect(
-            self._apply_watched_folder_refresh)
+        self._init_folder_watch()
 
         # Load saved data
         self.load_media_folders()
@@ -2340,58 +2333,6 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         self.update_library_tree()
         self._refresh_folder_watcher()
 
-    # === Folder watching ================================================
-    def _watch_directories(self):
-        """Existing directories under the library roots, bounded."""
-        dirs = []
-        for root in list(getattr(self, "media_folders", None) or []):
-            try:
-                if not os.path.isdir(root):
-                    continue
-                dirs.append(root)
-                for dirpath, dirnames, _files in os.walk(root):
-                    dirnames[:] = [d for d in dirnames
-                                   if not d.startswith(".")]
-                    for d in dirnames:
-                        dirs.append(os.path.join(dirpath, d))
-                        if len(dirs) >= FOLDER_WATCH_MAX_DIRS:
-                            return dirs[:FOLDER_WATCH_MAX_DIRS]
-            except Exception:
-                continue
-        return dirs[:FOLDER_WATCH_MAX_DIRS]
-
-    def _refresh_folder_watcher(self):
-        """Point the watcher at the current library directory set."""
-        try:
-            watcher = self._folder_watcher
-            current = self._watch_directories()
-            for path in watcher.directories():
-                if path not in current:
-                    watcher.removePath(path)
-            watched = set(watcher.directories())
-            for path in current:
-                if path not in watched:
-                    watcher.addPath(path)
-        except Exception:
-            pass
-
-    def _on_watched_folder_changed(self, path):
-        """A watched directory changed: restart the debounce timer."""
-        try:
-            self._folder_watch_timer.start()
-        except Exception:
-            pass
-
-    def _apply_watched_folder_refresh(self):
-        """Debounce elapsed: rebuild the watch list and rescan the library."""
-        self._refresh_folder_watcher()
-        try:
-            self._start_local_scan()
-        except Exception:
-            pass
-        self.status_bar.showMessage(
-            "Library folder changed - refreshing…", 3000)
-        
     def load_clouds(self):
         """Load saved cloud accounts from file"""
         if os.path.exists(CLOUD_FILES_FILE):
@@ -3346,145 +3287,6 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
             atomic_write_text(PLAYLISTS_FILE, json.dumps(playlists_data))
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Could not save playlists: {e}")
-
-    # === Play history (Recently / Most Played) =========================
-    def _history_path(self):
-        return os.path.join(self.data_dir, "play_history.json")
-
-    def _load_play_history(self):
-        """Corrupt or missing history is simply an empty history."""
-        try:
-            with open(self._history_path(), "r", encoding="utf-8") as f:
-                data = json.load(f)
-            recent = [p for p in data.get("recent", [])
-                      if isinstance(p, str)]
-            counts = {}
-            for key, value in (data.get("counts") or {}).items():
-                try:
-                    counts[str(key)] = int(value)
-                except (TypeError, ValueError):
-                    continue
-            names = {}
-            for key, value in (data.get("names") or {}).items():
-                if isinstance(value, str):
-                    names[str(key)] = value
-            return {"recent": recent[:HISTORY_LIMIT],
-                    "counts": counts, "names": names}
-        except Exception:
-            return {"recent": [], "counts": {}, "names": {}}
-
-    def _save_play_history(self):
-        try:
-            atomic_write_text(self._history_path(),
-                              json.dumps(self._history, ensure_ascii=False,
-                                         indent=1))
-        except Exception:
-            pass
-
-    def _history_key(self, item):
-        if isinstance(item, dict) and item.get("type") == "cloud":
-            return f"cloud:{item.get('cloud_idx')}:{item.get('file_idx')}"
-        if isinstance(item, str):
-            return item
-        return None
-
-    def record_play(self, item=None):
-        """Track a started play for Recently/Most Played: re-plays move to
-        the front, counts accumulate, the list is capped."""
-        try:
-            if item is None:
-                if not (0 <= self.current_index < len(self.playlist)):
-                    return
-                item = self.playlist[self.current_index]
-            key = self._history_key(item)
-            if not key:
-                return
-            if isinstance(item, dict):
-                name = item.get("name") or item.get("path") or key
-            else:
-                name = os.path.basename(str(item).split("?", 1)[0].rstrip("/"))
-                name = name or str(item)
-            recent = [k for k in self._history.get("recent", []) if k != key]
-            recent.insert(0, key)
-            self._history["recent"] = recent[:HISTORY_LIMIT]
-            counts = self._history.setdefault("counts", {})
-            counts[key] = int(counts.get(key, 0)) + 1
-            self._history.setdefault("names", {})[key] = str(name)
-            self._save_play_history()
-        except Exception:
-            pass
-
-    def _history_display(self, key):
-        try:
-            names = self._history.get("names") or {}
-            if names.get(key):
-                return names[key]
-            if key.startswith("cloud:"):
-                return key
-            return os.path.basename(str(key).split("?", 1)[0].rstrip("/")) \
-                or str(key)
-        except Exception:
-            return str(key)
-
-    def _fill_history_menu(self, menu, keys, with_counts=False):
-        menu.clear()
-        if not keys:
-            empty = menu.addAction("Nothing played yet")
-            empty.setEnabled(False)
-            return
-        for key in keys[:15]:
-            label = self._history_display(key)
-            if with_counts:
-                label = f"{label}  ({self._history['counts'].get(key, 0)})"
-            act = menu.addAction(label)
-            act.triggered.connect(
-                lambda _checked=False, k=key: self._play_history_entry(k))
-
-    def _rebuild_recent_menu(self):
-        self._fill_history_menu(
-            self.recent_menu, self._history.get("recent", []))
-
-    def _rebuild_most_menu(self):
-        counts = self._history.get("counts") or {}
-        ranked = sorted(
-            counts.items(),
-            key=lambda kv: (-kv[1], self._history_display(kv[0]).lower()))
-        self._fill_history_menu(self.most_menu, [k for k, _ in ranked],
-                                with_counts=True)
-
-    def _play_history_entry(self, key):
-        """Replay a history row: reuse its queue slot when present, append
-        otherwise. Missing local files report instead of failing silently."""
-        try:
-            if key.startswith("cloud:"):
-                for i, item in enumerate(self.playlist):
-                    if self._history_key(item) == key:
-                        self.current_index = i
-                        self.play()
-                        return
-                self.status_bar.showMessage(
-                    "Track is not in the current queue", 3000)
-                return
-            is_url = key.startswith(("http://", "https://"))
-            if not is_url and not os.path.exists(key):
-                self.status_bar.showMessage(
-                    "File no longer exists: " + os.path.basename(key), 4000)
-                return
-            try:
-                idx = self.playlist.index(key)
-            except ValueError:
-                self.playlist.append(key)
-                if is_url:
-                    label = (os.path.basename(key.split("?", 1)[0].rstrip("/"))
-                             or key) + " (Stream)"
-                else:
-                    label = os.path.basename(key)
-                self.playlist_widget.addItem(label)
-                idx = len(self.playlist) - 1
-            self.current_index = idx
-            self.play()
-        except Exception:
-            pass
 
     def _restore_window_geometry(self):
         """Apply the saved window size/position, when there is one."""

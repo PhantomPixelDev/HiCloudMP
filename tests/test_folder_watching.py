@@ -7,7 +7,7 @@ is bounded.
 """
 import os
 
-import player as player_mod
+import folder_watch
 
 
 def test_watcher_watches_existing_directories(music_player, tmp_path):
@@ -82,7 +82,7 @@ def test_watch_list_is_bounded(music_player, tmp_path, monkeypatch):
     for i in range(6):
         (root / f"d{i}").mkdir(parents=True)
     mp.media_folders = [str(root)]
-    monkeypatch.setattr(player_mod, "FOLDER_WATCH_MAX_DIRS", 4)
+    monkeypatch.setattr(folder_watch, "FOLDER_WATCH_MAX_DIRS", 4)
 
     mp._refresh_folder_watcher()
 
