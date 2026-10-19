@@ -324,3 +324,32 @@ Improv round, part 2 (2026-10-19):
   (960 minimum wins) - asserted via the exact blob + height roundtrip.
 
 Suite: 326 passed, 2 skipped.
+
+Improv round, part 3 (2026-10-19):
+
+`30136fb` feat: mute toggle in the main window
+- The transport volume glyph was a disabled decoration; only the tray
+  could mute, and tray mute only silenced the native output (mute did
+  nothing while EQ/viz owned playback). The glyph is now a real toggle:
+  remembers the pre-mute level, mirrors the slider at 0, swaps to a
+  volume-x glyph, and zeroes the EQ-engine sink when that route runs.
+  Dragging the slider up unmutes; the tray action is engine-aware too.
+  5 tests.
+
+`2c277ee` feat: playback speed control
+- Playback > Speed submenu (0.5x-2x), persisted at audio/playback_rate,
+  re-applied to every new native track, validated on load (garbage or
+  out-of-range -> 1x). The EQ engine has no rate control: choosing a
+  speed there keeps 1x and explains why instead of silently no-oping.
+  7 tests.
+
+`8627552` feat: single-instance lock
+- main.py takes a QLocalServer named-pipe lock before building the
+  window; a second launch connects (the only reliable probe - Qt on
+  Windows lets two servers listen on one name, but connects always
+  reach the first), pings activate, exits 0. The running instance
+  shows/raises itself. The OS removes the pipe with the process, so no
+  stale lock file. 3 tests plus a real two-process smoke: second exited
+  in ~1.3 s, first stayed alive.
+
+Suite: 341 passed, 2 skipped.
