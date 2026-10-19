@@ -15,6 +15,28 @@ from PySide6.QtGui import QCloseEvent
 from PySide6.QtMultimedia import QMediaPlayer
 
 
+class _Facade:
+    """Delegating stand-in that KEEPS the real object referenced.
+
+    Plain SimpleNamespace replacement drops the last Python reference to
+    the live QMediaPlayer / EQEngine - PySide then destroys the C++
+    object while the media backend still touches it, which is an access
+    violation class crash of the whole test process (observed 0xC0000005
+    in suite runs). Every override here routes to the facade; everything
+    else delegates to the kept-alive real object.
+    """
+
+    def __init__(self, real, **overrides):
+        self._real = real
+        self._overrides = overrides
+
+    def __getattr__(self, name):
+        try:
+            return self._overrides[name]
+        except KeyError:
+            return getattr(self._real, name)
+
+
 def _seed(mp, names, current=0):
     mp.playlist = [str(n) for n in names]
     mp.playlist_widget.clear()
@@ -41,9 +63,7 @@ def test_invalid_media_local_never_modals(toast_spy, monkeypatch):
     mp, toasts = toast_spy
     modals = []
     monkeypatch.setattr(
-        mp, "player", SimpleNamespace(
-            setSource=lambda *a, **k: None, stop=lambda: None,
-        ), raising=False)
+        mp, "player", _Facade(mp.player, stop=lambda: None), raising=False)
     from player import QMessageBox as player_QMessageBox
 
     class _Box:
@@ -63,9 +83,7 @@ def test_invalid_media_local_never_modals(toast_spy, monkeypatch):
 
 def test_invalid_media_cloud_keeps_retry_path(toast_spy, monkeypatch):
     mp, toasts = toast_spy
-    monkeypatch.setattr(
-        mp, "player", SimpleNamespace(setSource=lambda *a, **k: None,
-                                      stop=lambda: None), raising=False)
+    monkeypatch.setattr(mp, "player", _Facade(mp.player), raising=False)
     from player import QMessageBox as player_QMessageBox
 
     class _Box:
@@ -100,13 +118,12 @@ def test_close_survives_broken_subsystem(toast_spy, monkeypatch):
     monkeypatch.setattr(mp, "save_playlists",
                         lambda: saved.append("playlists"), raising=False)
     monkeypatch.setattr(mp, "player",
-                        SimpleNamespace(stop=lambda: None,
-                                        setSource=lambda *a, **k: None),
-                        raising=False)
+                        _Facade(mp.player, stop=lambda: None), raising=False)
     monkeypatch.setattr(mp, "eq_engine",
-                        SimpleNamespace(stop=lambda: None), raising=False)
+                        _Facade(mp.eq_engine, stop=lambda: None),
+                        raising=False)
     monkeypatch.setattr(mp, "meta",
-                        SimpleNamespace(stop=lambda: None), raising=False)
+                        _Facade(mp.meta, stop=lambda: None), raising=False)
     monkeypatch.setattr(mp, "web_server", None, raising=False)
 
     event = QCloseEvent()
@@ -136,10 +153,11 @@ def test_engine_error_toast_refactor_keeps_surface(music_player, monkeypatch,
 
     monkeypatch.setattr(mp, "tray",
                         SimpleNamespace(tray_icon=_Icon()), raising=False)
-    monkeypatch.setattr(mp, "player",
-                        SimpleNamespace(setSource=lambda *a, **k: None,
-                                        play=lambda: None),
-                        raising=False)
+    monkeypatch.setattr(
+        mp, "player",
+        _Facade(mp.player, setSource=lambda *a, **k: None,
+                play=lambda: None),
+        raising=False)
 
     mp._engine_playback_error("decoder gone")
 
