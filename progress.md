@@ -288,3 +288,39 @@ one commit per logical change, release gate still locked.
   a local (tests/test_playlist_drop.py, 7 tests).
 - Suite after 1d7d1f4+9493138: 307 passed, 2 skipped. After 53bc6cf:
   314 passed, 2 skipped.
+
+Improv round, part 2 (2026-10-19):
+
+`9f5df59` fix(test): EQ routing tests no longer feed WMF a missing file
+- Root cause of the intermittent 0xC0000005 that killed full-suite runs
+  (seen twice at ~22%): test_eq.py's two route tests handed a
+  nonexistent path to the REAL QMediaPlayer; pytest-qt teardown then
+  destroyed the player mid-async-load and the WMF backend worker thread
+  tripped an access violation (pooled thread, no Python frame). Repro:
+  test_eq.py alone crashed 5/10 runs; after the fix 0/20.
+- Fix follows the house recording-facade pattern (_SilentPlayer keeps
+  the real object alive in _real, records setSource/play, delegates
+  reads). Not an app bug - real missing files go through the
+  InvalidMedia path fixed in 1d7d1f4.
+- Full suite 3/3 consecutive green afterwards.
+
+`51f9512` feat: Artist/Album sort reads real tags
+- The sort combo offered Artist/Album but sorted on hardcoded empty
+  strings (placebo). read_sort_tags(): mutagen easy interface first,
+  raw ID3 frames fallback (WAVE has no easy mapping - verified live).
+  Untagged rows sort first; ties fall back to artist/title. Only read
+  for those two modes; unreadable files return ("", ""). 5 tests with
+  real WAV+ID3 files.
+
+`2558040` feat: Play Next queue visibility
+- Status-bar badge "Play Next: N" (hidden at zero, click clears) +
+  "Clear Play Next Queue" context action (enabled only when queued);
+  badge refreshes on every mutation. 4 tests.
+
+`41b3fc9` feat: remember window geometry
+- saveGeometry/restoreGeometry through QSettings; saved as an extra
+  guarded step in closeEvent + settings.sync(). Note: offscreen test
+  screens are 800x800, so Qt screen-fits large saved widths in tests
+  (960 minimum wins) - asserted via the exact blob + height roundtrip.
+
+Suite: 326 passed, 2 skipped.
