@@ -518,3 +518,29 @@ Landed with this commit:
 
 Suite: 419 passed, 2 skipped.
 Version remains 1.0.4 until explicit go for 1.0.5.
+
+## 2026-10-20 — feat: queue becomes a Title/Artist/Album table
+
+Landed with these commits:
+
+- `b2eb0fa` Queue rows were single-column filename strings; playlist is now
+  `PlaylistQueueWidget` (QTreeWidget: Title|Artist|Album) that speaks the
+  QListWidget dialect (addItem/count/item/takeItem/insertItem/currentRow/
+  row/itemAt/selectedItems, text(col=0) default), so the app and tests keep
+  working unchanged while rows carry real metadata cells. Cells resolve from
+  the scanned cloud catalog via `MetadataController.queue_cells` (Subsonic
+  rows keep the title in `name`). Filter matches any column; sort re-permutes
+  existing rows using artist/album cells (local rows still read tags via
+  read_sort_tags, cached into cells); highlight paints all three columns;
+  stream rows keep their "(Stream)" marker; the dead duplicate
+  `on_library_item_clicked` in player.py (still wiping the queue) is gone.
+- `4fab01f` CI pins the packaged stack to PySide6==6.10.3. Measured on the
+  dev machine with identical code+data: local decode-open to first audible
+  ~0.29 s on 6.10.3 vs ~0.66-0.85 s on 6.12.0; cloud streams ~0.5-0.6 s on
+  both; installed-app steady state 17% of one core during playback; startup
+  ~2.5 s. The 6.12/FFmpeg 9 stack is where the user's "compiled version is
+  super slow" reports pointed; shipped builds now run the tuned stack
+  (FFmpeg 7.1.3) instead of floating to the newest minor.
+
+Suite: 424 passed, 2 skipped.
+Version remains 1.0.4 (git) — v1.0.5 tag/push/release awaits explicit go.
