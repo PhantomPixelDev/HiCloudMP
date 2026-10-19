@@ -230,7 +230,15 @@ Landed with this commit (`feat: tray icon is an accent badge ...`):
   clean runs green; exit-fatal class covered by 5ed140d subprocess
   gates.
 
-Next in line: P6 release round - verification suite x3, real-app
-relaunch checklist, temp-probe cleanup, version bump + tag/build
-STRICTLY gated on explicit user go.
+`6adaf24` fix(test): hardening tests kept real C++ objects alive
+- P6 verification exposed an intermittent 0xC0000005 (once per ~2-3
+  cold runs) introduced by 8e31f61's tests: bare SimpleNamespace
+  replacement of mp.player/eq_engine/meta dropped the last Python
+  reference to the live objects -> PySide destroyed C++ under the
+  media backend's feet. Tests now use a delegating _Facade (house
+  pattern from the engine-fallback round). Suite x4 consecutive cold
+  runs green (302 passed, 2 skipped each), no dumps post-fix.
+
+Now at P6: real-app relaunch checklist + temp-probe cleanup; version
+bump/tag/build STRICTLY gated on explicit user go.
 
