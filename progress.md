@@ -353,3 +353,62 @@ Improv round, part 3 (2026-10-19):
   in ~1.3 s, first stayed alive.
 
 Suite: 341 passed, 2 skipped.
+
+
+Improv round, part 4 (2026-10-19) - items 10-17:
+
+`07d2fbf` feat: Help > Keyboard Shortcuts reference dialog
+- Global keys (Space, Ctrl+arrows, Ctrl+S) and playlist keys (Del,
+  Home/End, volume click) were only discoverable by accident. The dialog
+  is generated from one SHORTCUT_HELP table; a test asserts the four
+  transport rows match the real QAction shortcuts. 4 tests.
+
+`e117fd2` feat: bounded stream retries with auto-skip
+- A dead URL reconnected forever; EndOfMedia reconnects did not even
+  count. Retries now cap at STREAM_MAX_RETRIES for every path; when the
+  exhausted stream is the playing playlist row, playback advances to the
+  next entry (bounded - each give-up moves forward). Unrelated failures
+  report and stop. 5 tests.
+
+`61bd83c` feat: Recently Played / Most Played
+- play_history.json (atomic writes; corrupt = empty). Records existing
+  local files, stream URLs and cloud rows; re-plays move to the front,
+  counts accumulate, recent capped at 50. Tools submenus rebuilt on open;
+  click replays in place or appends; missing files report. 9 tests.
+
+`33ac5cc` feat: watch library folders and auto-refresh
+- QFileSystemWatcher over every library root + subdirectories (bounded),
+  debounced into one background rescan; watch list rebuilt afterward so
+  new subfolders are picked up and removed folders dropped. 6 tests.
+
+`b53d175` feat: web panel parity + desktop-to-panel push
+- Panel gained mute, 0.5x-2x speed, Play Next queue badge (click clears).
+  Status carries muted/rate/queue_count. Play/stop/pause, volume, mute,
+  shuffle, repeat, speed, queue changes and metadata updates broadcast
+  status+progress instead of waiting for the next poll. 7 tests.
+
+`6dca7ea` feat: gapless hand-off on the EQ-engine path
+- Sequential local tracks tore down decoder+sink between songs. The
+  engine now preloads the next decoder and swaps it onto the SAME sink/EQ
+  chain; the UI/position change is reported at the audible boundary, and
+  a late durationChanged(-1) can no longer erase the known duration.
+  Player arms only plain sequential local rows (not shuffle/Play Next/
+  cloud/last); Play Next invalidates, clearing it re-arms. 11 tests plus a
+  real two-track audio probe (advanced then finished, no restart).
+
+`d803abd` refactor: extract play history and folder watching
+- Bounded split: history.py (PlayHistoryMixin) and folder_watch.py
+  (FolderWatchMixin + constants). MusicPlayer mixes both in; constants
+  re-exported. player.py 3,959 -> 3,761 lines. Structural test prevents
+  duplication back into the class.
+
+`e53c612` fix: delete finished cloud-scan QThreads via deleteLater
+- Completed scans dropped QThread wrappers from the lists, letting Python
+  destroy the C++ object while queued signals could still be delivered.
+  Finished threads are deleteLater()'d and retained until Qt's destroyed
+  signal; running threads keep retire+quit and the 100 ms recheck; a new
+  scan disposes old threads that already stopped. 4 tests incl. a real
+  QThread.
+
+Suite: 389 passed, 2 skipped. All 17 improvement items complete.
+v1.0.3 bump/tag/build/push still waiting for explicit go.
