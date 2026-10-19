@@ -135,6 +135,9 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         
         # Initialize settings
         self.settings = QSettings("HiCloudMP", "HiCloudMP")
+        # Remember window size/position across launches (first run keeps
+        # the default 1120x720 set above).
+        self._restore_window_geometry()
 
         # Themed icon factory (accent-tinted Feather glyphs; stock QStyle
         # icons are fully replaced). Colors refresh with every theme change.
@@ -886,6 +889,17 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         self.progress_bar.hide()
 
         self.status_bar.addPermanentWidget(self.progress_bar)
+
+        # Play Next queue visibility: a one-click badge in the status bar.
+        # Hidden while the queue is empty; clicking clears the queue.
+        self.queue_indicator = QToolButton()
+        self.queue_indicator.setText("Play Next: 0")
+        self.queue_indicator.setToolTip(
+            "Tracks queued with Queue Next - click to clear")
+        self.queue_indicator.setAutoRaise(True)
+        self.queue_indicator.setVisible(False)
+        self.queue_indicator.clicked.connect(self.clear_play_next_queue)
+        self.status_bar.addPermanentWidget(self.queue_indicator)
 
     def _run_on_ui(self, fn):
         try:
@@ -2151,6 +2165,10 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
             play_sel.triggered.connect(self._play_first_selected)
         queue_action = menu.addAction("Queue Next")
         queue_action.triggered.connect(self.queue_play_next)
+        clear_queue_action = menu.addAction("Clear Play Next Queue")
+        clear_queue_action.triggered.connect(self.clear_play_next_queue)
+        clear_queue_action.setEnabled(
+            bool(getattr(self, "_play_next_queue", None)))
         remove_action = menu.addAction("Remove from Playlist")
         remove_action.triggered.connect(lambda: self.remove_from_playlist(index))
         if len(selected_items) > 1:
@@ -2197,9 +2215,31 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         if queue is None:
             self._play_next_queue = queue = []
         queue.extend(rows)
+        self._update_queue_indicator()
         self.status_bar.showMessage(
             f"{len(rows)} track{'s' if len(rows) != 1 else ''} queued"
             f" to play next ({len(queue)} queued)", 3000)
+
+    def _update_queue_indicator(self):
+        """Status-bar badge mirrors the Play Next queue depth."""
+        try:
+            n = len(getattr(self, "_play_next_queue", None) or [])
+            self.queue_indicator.setText(f"Play Next: {n}")
+            self.queue_indicator.setVisible(n > 0)
+        except Exception:
+            pass
+
+    def clear_play_next_queue(self):
+        """Drop everything waiting in the Play Next queue."""
+        n = len(getattr(self, "_play_next_queue", None) or [])
+        self._play_next_queue = []
+        self._update_queue_indicator()
+        if n:
+            self.status_bar.showMessage(
+                f"Play Next queue cleared"
+                f" ({n} track{'s' if n != 1 else ''})", 3000)
+        else:
+            self.status_bar.showMessage("Play Next queue is empty", 3000)
 
     def _take_from_play_next_queue(self):
         """Pop the next valid queued row for auto-advance; None when the
@@ -2208,7 +2248,9 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         while queue:
             idx = queue.pop(0)
             if 0 <= idx < len(self.playlist):
+                self._update_queue_indicator()
                 return idx
+        self._update_queue_indicator()
         return None
 
     def remove_duplicates_from_playlist(self):
@@ -2979,6 +3021,22 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Could not save playlists: {e}")
 
+    def _restore_window_geometry(self):
+        """Apply the saved window size/position, when there is one."""
+        try:
+            geo = self.settings.value("ui/window_geometry")
+            if geo is not None:
+                self.restoreGeometry(geo)
+        except Exception:
+            pass
+
+    def _save_window_geometry(self):
+        try:
+            self.settings.setValue("ui/window_geometry",
+                                   self.saveGeometry())
+        except Exception:
+            pass
+
     def closeEvent(self, event):
         # Stop the EQ engine before the native player (it owns a QAudioSink
         # and QAudioDecoder that must be torn down cleanly).
@@ -3060,11 +3118,17 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         # never skip the others (a close that ate the playlists file was
         # the failure mode this guards against).
         for step in (self.save_media_folders, self.save_clouds,
-                     self.save_playlists):
+                     self.save_playlists, self._save_window_geometry):
             try:
                 step()
             except Exception as e:
                 print(f"Warning: state save failed during close: {e}")
+        # QSettings writes are buffered; make sure they hit disk even if
+        # the process dies immediately after close.
+        try:
+            self.settings.sync()
+        except Exception:
+            pass
         
         # Clean up any remaining temp files in the temp directory
         try:
