@@ -51,6 +51,10 @@ from web_control import WebControlServer
 # audio rows are decided by utils.is_music_file.
 PLAYLIST_DROP_EXTS = (".m3u", ".m3u8", ".pls", ".xspf")
 
+# Stream reconnect attempts before a URL is declared dead (each retry backs
+# off exponentially; after this many failures the queue moves on).
+STREAM_MAX_RETRIES = 5
+
 
 # Help > Keyboard Shortcuts is generated from this one table so the docs
 # cannot drift from the actions. The first four keys are the real QAction
@@ -1962,19 +1966,25 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         }
 
     def _schedule_stream_retry(self, url, display_name, immediate=False):
-        """Schedule a reconnect with exponential backoff and jitter."""
+        """Schedule a reconnect with exponential backoff and jitter.
+        Attempts are bounded (immediate EndOfMedia reconnects count too);
+        once exhausted the stream is abandoned so a dead URL in a playlist
+        cannot reconnect forever."""
         try:
             if not hasattr(self, '_stream_retry'):
                 self._reset_stream_retry()
             # Update latest target
             self._stream_retry['url'] = url
             self._stream_retry['name'] = display_name
+            attempts = int(self._stream_retry.get('attempts', 0)) + 1
+            self._stream_retry['attempts'] = attempts
+            if attempts > STREAM_MAX_RETRIES:
+                self._give_up_stream(url, display_name)
+                return
             # Compute delay
             if immediate:
                 delay_ms = 250
             else:
-                attempts = int(self._stream_retry.get('attempts', 0)) + 1
-                self._stream_retry['attempts'] = attempts
                 base = min(30000, 1000 * (2 ** (attempts - 1)))  # cap at 30s
                 jitter = random.randint(0, 500)
                 delay_ms = base + jitter
@@ -1983,6 +1993,38 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
             QTimer.singleShot(delay_ms, lambda: self._play_stream(self._stream_retry['url'], self._stream_retry['name']))
         except Exception as e:
             print(f"schedule_stream_retry error: {e}")
+
+    def _give_up_stream(self, url, display_name):
+        """Retries exhausted: stop hammering the dead URL. When it was the
+        playlist row being played, advance to the next entry - each
+        give-up moves the index forward, so dead playlists terminate."""
+        self._reset_stream_retry()
+        try:
+            self.player.stop()
+            self.player.setSource(QUrl())
+        except Exception:
+            pass
+        self._disconnect_stream_handlers()
+        name = display_name or "stream"
+        try:
+            self._tray_toast("HiCloud MP", f"Stream unavailable: {name}")
+        except Exception:
+            pass
+        current = None
+        if 0 <= self.current_index < len(self.playlist):
+            current = self.playlist[self.current_index]
+        if not (isinstance(current, str) and current == url):
+            self.status_bar.showMessage(f"Stream unavailable: {name}", 5000)
+            return
+        if self.current_index + 1 < len(self.playlist):
+            self.status_bar.showMessage(
+                f"Stream unavailable: {name} - skipping to the next track",
+                5000)
+            self.current_index += 1
+            self.play()
+        else:
+            self.status_bar.showMessage(
+                f"Stream unavailable: {name} (end of playlist)", 5000)
 
     def cleanup_temp_files(self):
         """Clean up old temporary files on startup"""
