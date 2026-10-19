@@ -3159,39 +3159,49 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
 
     def filter_playlist(self):
         text = self.playlist_search_input.text().strip().lower()
-        for i in range(self.playlist_widget.count()):
-            item = self.playlist_widget.item(i)
-            if text in item.text().lower():
-                item.setHidden(False)
-            else:
-                item.setHidden(True)
+        widget = self.playlist_widget
+        widget.setUpdatesEnabled(False)
+        try:
+            for i in range(widget.count()):
+                item = widget.item(i)
+                if text in item.text().lower():
+                    item.setHidden(False)
+                else:
+                    item.setHidden(True)
+        finally:
+            widget.setUpdatesEnabled(True)
 
     def sort_playlist(self):
+        widget = self.playlist_widget
         mode = self.playlist_sort_combo.currentText()
         if mode == "Original":
             # TODO: restore original order if needed
             return
-        # Build a list of (playlist_entry, display_text, meta) for sorting
-        items = []
-        for i in range(self.playlist_widget.count()):
-            entry = self.playlist[i] if i < len(self.playlist) else None
-            item = self.playlist_widget.item(i)
-            display_text = item.text() if item else ""
-            meta = {"title": display_text, "artist": "", "album": ""}
-            if isinstance(entry, str) and os.path.exists(entry):
-                meta["title"] = os.path.basename(entry)
-            items.append((entry, display_text, meta))
-        if mode == "Title":
-            items.sort(key=lambda x: x[2]["title"].lower())
-        elif mode == "Artist":
-            items.sort(key=lambda x: x[2]["artist"].lower())
-        elif mode == "Album":
-            items.sort(key=lambda x: x[2]["album"].lower())
-        self.playlist_widget.clear()
-        new_playlist = []
-        for entry, display_text, _ in items:
-            self.playlist_widget.addItem(display_text)
-            new_playlist.append(entry)
+        widget.setUpdatesEnabled(False)
+        try:
+            # Build a list of (playlist_entry, display_text, meta) for sorting
+            items = []
+            for i in range(widget.count()):
+                entry = self.playlist[i] if i < len(self.playlist) else None
+                item = widget.item(i)
+                display_text = item.text() if item else ""
+                meta = {"title": display_text, "artist": "", "album": ""}
+                if isinstance(entry, str) and os.path.exists(entry):
+                    meta["title"] = os.path.basename(entry)
+                items.append((entry, display_text, meta))
+            if mode == "Title":
+                items.sort(key=lambda x: x[2]["title"].lower())
+            elif mode == "Artist":
+                items.sort(key=lambda x: x[2]["artist"].lower())
+            elif mode == "Album":
+                items.sort(key=lambda x: x[2]["album"].lower())
+            widget.clear()
+            new_playlist = []
+            for entry, display_text, _ in items:
+                widget.addItem(display_text)
+                new_playlist.append(entry)
+        finally:
+            widget.setUpdatesEnabled(True)
         # Update the underlying playlist data
         if self.active_playlist:
             self.active_playlist.items[:] = new_playlist

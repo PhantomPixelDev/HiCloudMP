@@ -34,11 +34,16 @@ class SFVisualizer(QWidget):
             pass
 
     def set_spectrum(self, values):
-        """Feed band energies (sequence of floats) or None to go idle."""
-        if values is None:
-            self._values = None
-        else:
-            self._values = [max(0.0, min(1.0, float(v))) for v in values]
+        """Feed band energies (sequence of floats) or None to go idle.
+
+        Identical frames (and idle-to-idle) skip the repaint: the 20 Hz
+        timer must not force widget updates through an unchanged canvas.
+        """
+        fresh = None if values is None else \
+            [max(0.0, min(1.0, float(v))) for v in values]
+        if fresh == self._values:
+            return
+        self._values = fresh
         self.update()
 
     def paintEvent(self, event):
