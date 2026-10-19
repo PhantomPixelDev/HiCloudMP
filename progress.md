@@ -412,3 +412,35 @@ Improv round, part 4 (2026-10-19) - items 10-17:
 
 Suite: 389 passed, 2 skipped. All 17 improvement items complete.
 v1.0.3 bump/tag/build/push still waiting for explicit go.
+
+Playback fixes round (2026-10-19) — user-reported regressions in v1.0.3:
+
+`14bbe17` fix(ui): volume slider jumps to the clicked level
+- Stock QSlider pages by pageStep on groove clicks: clicking at x=20 of
+  a 150 px volume slider moved 70 -> 60 instead of near 13, so a level
+  could only be set by dragging. ClickJumpSlider maps press/move/release
+  to the groove position, keeps sliderPressed/sliderReleased and keyboard
+  behaviour. 6 tests (click 25/50/75%, drag, signals, live player).
+
+`6ec2143` fix(visualizer): real spectrum on native playback and clearer bars
+- The visualizer only read the EQ engine's spectrum. Any native playback
+  (engine device busy/unsupported fallback, native cloud streams) showed
+  the idle baseline forever. QAudioBufferOutput now taps decoded native
+  PCM with sample-rate-aware band mapping; the engine stays the post-EQ
+  source when active. Bars are larger (150x36), use the saved accent at
+  startup, and a 0.65 display gamma lifts quiet music without faking
+  silence. Evidence: the user's real Subsonic track produced 24 bands
+  (max 0.27) through the engine; a real QMediaPlayer tone produced max
+  0.79 through the native tap; local music peaks averaged 0.39. 8 tests.
+
+`ee15097` perf(library): keep folder watching off the UI's critical path
+- Every refresh walked the 48 GB Downloads tree on the UI thread (391
+  dirs, 160 ms) and then called addPath 391 times (~358 ms); this ran at
+  startup and again after every debounced folder change. Walk is now
+  breadth-first, stops at 128 dirs, and large watch sets are added in
+  batches across event-loop ticks. Real-data startup probe: 717 ms before,
+  454 ms after; no event-loop spikes >50 ms. 2 tests.
+
+Suite: 405 passed, 2 skipped.
+Not pushed/tagged/released; version remains 1.0.3 until explicit go.
+
