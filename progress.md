@@ -239,6 +239,20 @@ Landed with this commit (`feat: tray icon is an accent badge ...`):
   pattern from the engine-fallback round). Suite x4 consecutive cold
   runs green (302 passed, 2 skipped each), no dumps post-fix.
 
-Now at P6: real-app relaunch checklist + temp-probe cleanup; version
-bump/tag/build STRICTLY gated on explicit user go.
+P6 verification COMPLETE (2026-10-19):
+- Full cold suite: 8 consecutive runs `302 passed, 2 skipped` after
+  6adaf24 (one 0xC0000005 blip pre-fix, zero post-fix).
+- Real-app relaunch smoke: `main.py` starts with the user's real
+  settings, alive at 10 s, no fastfail, no crash-log entries; only
+  stderr is the user's own enabled web-panel Flask banner. Terminated.
+- Temp probes deleted (wrap_app.py, dbg_playlist_io.py,
+  probe_engine_error.py, probe_cover*.py, run logs).
+- Session commits on main (all UNPUSHED, tag/build gated):
+  0d79189, d503437 (EQ/viz + settings), 36ab5f3 (playlist IO UI),
+  b923a72 (playlist UX), 20f1a2a (perf), 8e31f61 (hardening),
+  6adaf24 (test-crash fix), + ledger commits.
+- User symptoms status: 0xC0000409 exit fatal FIXED (5ed140d +
+  gates), EQ/viz "stopped working" root-caused and FIXED (flush +
+  loud fallback), local covers FIXED (4077823/0360727).
+- v1.0.3 bump/tag/build: awaiting explicit user go.
 
