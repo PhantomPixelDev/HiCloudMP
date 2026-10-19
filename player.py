@@ -52,6 +52,20 @@ from web_control import WebControlServer
 PLAYLIST_DROP_EXTS = (".m3u", ".m3u8", ".pls", ".xspf")
 
 
+# Help > Keyboard Shortcuts is generated from this one table so the docs
+# cannot drift from the actions. The first four keys are the real QAction
+# shortcuts (asserted by tests); the rest live in the playlist key filter.
+SHORTCUT_HELP = (
+    ("Space", "Play / Pause"),
+    ("Ctrl+Right", "Next track"),
+    ("Ctrl+Left", "Previous track"),
+    ("Ctrl+S", "Stop"),
+    ("Del", "Remove selected rows from the playlist"),
+    ("Home / End", "Jump to the first / last playlist row"),
+    ("Click volume icon", "Mute / unmute"),
+)
+
+
 def _first_text(value):
     """First text out of a tag value (list / ID3 frame / plain)."""
     if value is None:
@@ -339,12 +353,42 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         # --- Help ---
         help_menu = QMenu(self)
         help_menu.setTitle("Help")
+        help_menu.addAction("Keyboard Shortcuts", self._show_shortcuts_help)
         help_menu.addAction("About HiCloud MP", self._show_about)
         mb.addMenu(help_menu)
 
         # Ownership debugging vestige from the PySide wrapper-invalidation
         # investigation: keep strong refs so no transient GC can reclaim them.
         self._menu_holder = [file_menu, playback_menu, tools_menu, help_menu]
+
+    def _show_shortcuts_help(self):
+        try:
+            self._build_shortcuts_dialog().exec()
+        except Exception:
+            pass
+
+    def _build_shortcuts_dialog(self):
+        """Keyboard reference built from SHORTCUT_HELP (single source)."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Keyboard Shortcuts")
+        layout = QVBoxLayout(dlg)
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(18)
+        grid.setVerticalSpacing(6)
+        for row, (keys, what) in enumerate(SHORTCUT_HELP):
+            key_label = QLabel(keys)
+            key_label.setObjectName("shortcut_keys")
+            key_label.setStyleSheet("font-weight: 600;")
+            what_label = QLabel(what)
+            what_label.setObjectName("shortcut_desc")
+            grid.addWidget(key_label, row, 0)
+            grid.addWidget(what_label, row, 1)
+        layout.addLayout(grid)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok)
+        buttons.accepted.connect(dlg.accept)
+        layout.addWidget(buttons)
+        dlg.setMinimumWidth(380)
+        return dlg
 
     def _show_about(self):
         QMessageBox.information(
