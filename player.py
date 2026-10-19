@@ -1343,7 +1343,10 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
             else:
                 error_msg = "Error: Could not play media (invalid or unsupported format)"
                 self.status_bar.showMessage(error_msg, 5000)
-                QMessageBox.critical(self, "Playback Error", error_msg)
+                # NEVER a modal here: this fires during playlist
+                # auto-advance and a dialog would stop the queue dead. The
+                # playback error is reported and the queue moves on.
+                self._tray_toast("HiCloud MP", error_msg)
             
         # Update play/pause button based on playback state
         if status in [QMediaPlayer.MediaStatus.LoadedMedia, 
@@ -2815,7 +2818,12 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
             self.eq_engine.stop()
         except Exception:
             pass
-        self.player.stop()
+        # Guarded: a dead backend must never interrupt the close mid-way
+        # (state saves further below matter more than any single step).
+        try:
+            self.player.stop()
+        except Exception:
+            pass
         # Release the decoder BEFORE teardown: the FFmpeg backend crashes at
         # exit when the app closes while media is still attached (exit code 1).
         try:
@@ -2864,9 +2872,12 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
                 self.meta.stop()
         except Exception:
             pass
-        # Stop web server if running
-        if self.web_server:
-            self.web_server.stop()
+        # Stop web server if running (guarded: close must complete)
+        try:
+            if self.web_server:
+                self.web_server.stop()
+                self.web_server = None
+        except Exception:
             self.web_server = None
         # Clean up temporary files
         for temp_file in list(self.temp_files_to_cleanup):
@@ -2876,11 +2887,16 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
                     self.temp_files_to_cleanup.remove(temp_file)
             except Exception as e:
                 print(f"Error deleting temp file {temp_file}: {e}")
-        
-        # Save state
-        self.save_media_folders()
-        self.save_clouds()
-        self.save_playlists()
+
+        # Save state - each guarded independently: one broken save must
+        # never skip the others (a close that ate the playlists file was
+        # the failure mode this guards against).
+        for step in (self.save_media_folders, self.save_clouds,
+                     self.save_playlists):
+            try:
+                step()
+            except Exception as e:
+                print(f"Warning: state save failed during close: {e}")
         
         # Clean up any remaining temp files in the temp directory
         try:

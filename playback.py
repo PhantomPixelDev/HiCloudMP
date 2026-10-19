@@ -98,6 +98,18 @@ class PlaybackEngineMixin:
         elif self.current_index < len(self.playlist) - 1:
             self.next_track()
 
+    def _tray_toast(self, title, body, ms=6000):
+        """Raise a tray notification when a tray icon exists; silently a
+        no-op on tray-less installs (tests, remote sessions)."""
+        try:
+            from PySide6.QtWidgets import QSystemTrayIcon
+            icon = getattr(getattr(self, "tray", None), "tray_icon", None)
+            if icon is not None:
+                icon.showMessage(title, body,
+                                 QSystemTrayIcon.Information, ms)
+        except Exception:
+            pass
+
     def _engine_playback_error(self, msg):
         """Decoder/sink failure on the EQ path: replay via the native player."""
         if not getattr(self, '_using_engine', False):
@@ -107,21 +119,14 @@ class PlaybackEngineMixin:
         self._engine_source = ('', '', '')
         self.status_bar.showMessage(
             "Playback engine unavailable — using standard playback", 4000)
-        try:
-            # Beyond the 4 s status line: raise a tray notification. EQ and
-            # visualizer both disappear when this route fails; the wording
-            # must not pretend it is only the equalizer.
-            from PySide6.QtWidgets import QSystemTrayIcon
-            icon = getattr(getattr(self, "tray", None), "tray_icon", None)
-            if icon is not None:
-                detail = str(msg)[:160]
-                icon.showMessage(
-                    "HiCloud MP",
-                    "Audio engine unavailable — using standard playback"
-                    + (f" ({detail})" if detail else ""),
-                    QSystemTrayIcon.Information, 6000)
-        except Exception:
-            pass
+        # Beyond the 4 s status line: raise a tray notification. EQ and
+        # visualizer both disappear when this route fails; the wording
+        # must not pretend it is only the equalizer.
+        detail = str(msg)[:160]
+        self._tray_toast(
+            "HiCloud MP",
+            "Audio engine unavailable — using standard playback"
+            + (f" ({detail})" if detail else ""))
         try:
             if kind == 'url' and src:
                 self._play_stream(src, name)
