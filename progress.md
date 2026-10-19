@@ -192,7 +192,22 @@ Landed with this commit (`feat: tray icon is an accent badge ...`):
   `279 passed, 2 skipped` (test-content fixes: m3u fixtures resolve
   relative to the playlist's own folder).
 
-Next in line: P3 playlist UX (context menu enrichment, multi-select
-ops, Play Next queue, keyboard ops, dup detection), P4 hardening pack,
-P5b perf round, P6 release (gated on user go).
+`b923a72` feat: playlist UX - Play Next queue, dedupe, keyboard ops, context menu
+- Plan P3: queue_play_next parks selected rows; BOTH auto-advance sites
+  (native EndOfMedia + engine finish) consume the queue before
+  repeat/shuffle/sequence; stale rows vanish silently.
+- remove_duplicates_from_playlist: normcase-path + cloud-row key,
+  first occurrence kept, widget mirrored, index clamp, no-dup run
+  says so.
+- Keyboard via filter on playlist_widget: Del/Space/Home/End; other
+  keys pass through (guard pins it).
+- Context menu refactored to _build_playlist_context_menu; adds Play
+  Selected, Queue Next, Remove Duplicates, import/export shortcuts.
+- Tests tests/test_playlist_ux.py red->green (12); suite cold
+  `291 passed, 2 skipped`.
+
+Next in line: P4 hardening pack (incl. closeEvent trail + local
+undecodable-file error UX note from the EQ round), P5b perf round
+(viz repaint gate, filter diff + setUpdatesEnabled, sort without
+stat-storm, web poll hidden-gate DONE in 1afdfc8), P6 release (gated).
 
