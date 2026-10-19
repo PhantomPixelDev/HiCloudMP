@@ -161,3 +161,61 @@ def test_menu_click_on_missing_file_is_graceful(music_player):
     assert mp.playlist == []
     assert "no longer exists" in mp.status_bar.currentMessage().lower()
 
+
+# --- Cloud entries must show real song names, never raw catalog keys -------
+
+_CLOUD_ROW = {
+    "path": "Music/Spend It.mp3",
+    "name": "Spend It",
+    "title": "Spend It",
+    "artist": "Skillibeng",
+    "album": "Mr. Villain",
+}
+
+
+def test_cloud_history_labels_resolve_catalog_names(music_player):
+    mp = music_player
+    mp.clouds = [{"name": "Cloud",
+                  "files": [dict(x) for x in [
+                      {"path": "a/x.mp3", "artist": "Other", "title": "X"},
+                      {"path": "a/y.mp3", "artist": "Other", "title": "Y"},
+                      dict(_CLOUD_ROW)]]}]
+    mp.record_play({"type": "cloud", "cloud_idx": 0, "file_idx": 2})
+    mp._rebuild_recent_menu()
+
+    text = mp.recent_menu.actions()[0].text()
+    assert "cloud:0:2" not in text, "raw key leaked into the menu label"
+    assert "Skillibeng" in text and "Spend It" in text
+
+
+def test_legacy_raw_cloud_labels_repair_on_display(music_player):
+    mp = music_player
+    mp.clouds = [{"name": "Cloud", "files": [dict(x) for x in [
+        {"path": "a/x.mp3", "artist": "Other", "title": "X"},
+        {"path": "a/y.mp3", "artist": "Other", "title": "Y"},
+        dict(_CLOUD_ROW)]]}]
+    mp._history = {"recent": ["cloud:0:2"],
+                   "counts": {"cloud:0:2": 3},
+                   "names": {"cloud:0:2": "cloud:0:2"}}
+    mp._rebuild_most_menu()
+
+    text = mp.most_menu.actions()[0].text()
+    assert "Spend It" in text and "3" in text
+    assert "cloud" not in text.lower(), "raw key leaked into Most Played"
+
+
+def test_record_play_caches_resolved_cloud_name(music_player):
+    mp = music_player
+    mp.clouds = [{"name": "Cloud", "files": [dict(x) for x in [
+        {"path": "a/x.mp3", "artist": "Other", "title": "X"},
+        {"path": "a/y.mp3", "artist": "Other", "title": "Y"},
+        dict(_CLOUD_ROW)]]}]
+    mp.record_play({"type": "cloud", "cloud_idx": 0, "file_idx": 2})
+
+    key = "cloud:0:2"
+    mp._save_play_history()
+    fresh = mp._load_play_history()
+    assert "Spend It" in fresh["names"][key], \
+        "resolved display name must persist for future sessions"
+
+

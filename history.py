@@ -59,9 +59,55 @@ class PlayHistoryMixin:
             return item
         return None
 
+    def _cloud_row_for_key(self, key):
+        """Resolve a 'cloud:<idx>:<file>' key against the in-memory catalog.
+
+        Queue rows and history entries only persist account/file indices;
+        the scanned cloud row (loaded with the app, never a network call)
+        is the metadata cache. Returns None when the row no longer exists.
+        """
+        try:
+            parts = key.split(":")
+            if len(parts) < 3 or parts[0] != "cloud":
+                return None
+            cloud_idx = int(parts[1])
+            file_idx = int(parts[2])
+            clouds = getattr(self, "clouds", None) or []
+            if not (0 <= cloud_idx < len(clouds)):
+                return None
+            cloud = clouds[cloud_idx]
+            if not isinstance(cloud, dict):
+                return None
+            files = cloud.get("files") or []
+            if not (0 <= file_idx < len(files)):
+                return None
+            row = files[file_idx]
+            return row if isinstance(row, dict) else None
+        except Exception:
+            return None
+
+    def _cloud_display(self, row):
+        """Human label for a catalog row: 'Artist – Title' (or title only)."""
+        try:
+            if not isinstance(row, dict):
+                return None
+            title = row.get("title") or row.get("name")
+            if not title:
+                path = row.get("path")
+                if path:
+                    title = os.path.splitext(os.path.basename(str(path)))[0]
+            artist = row.get("artist") or ""
+            title = str(title) if title else None
+            if title and row.get("artist"):
+                return f"{artist} – {title}"
+            return title
+        except Exception:
+            return None
+
     def record_play(self, item=None):
         """Track a started play for Recently/Most Played: re-plays move to
-        the front, counts accumulate, the list is capped."""
+        the front, counts accumulate, the list is capped. Cloud entries are
+        named from the catalog row so menus show real song names."""
         try:
             if item is None:
                 if not (0 <= self.current_index < len(self.playlist)):
@@ -70,8 +116,12 @@ class PlayHistoryMixin:
             key = self._history_key(item)
             if not key:
                 return
+            row = self._cloud_row_for_key(key) \
+                if isinstance(item, dict) else None
             if isinstance(item, dict):
-                name = item.get("name") or item.get("path") or key
+                name = (self._cloud_display(row)
+                        or self._dict_item_display(item)
+                        or key)
             else:
                 name = os.path.basename(str(item).split("?", 1)[0].rstrip("/"))
                 name = name or str(item)
@@ -85,12 +135,36 @@ class PlayHistoryMixin:
         except Exception:
             pass
 
+    @staticmethod
+    def _dict_item_display(item):
+        """Label from fields cached on the queue row itself (catalog first,
+        then whatever the row already carries)."""
+        try:
+            if not isinstance(item, dict):
+                return None
+            title = item.get("title") or item.get("name")
+            if not title:
+                return None
+            artist = item.get("artist")
+            if artist:
+                return f"{artist} – {title}"
+            return str(title)
+        except Exception:
+            return None
+
     def _history_display(self, key):
         try:
             names = self._history.get("names") or {}
-            if names.get(key):
-                return names[key]
+            name = names.get(key)
+            if name and name != key:
+                return name
             if key.startswith("cloud:"):
+                # Legacy entries stored the raw key as the "name": repair on
+                # display from the catalog row (names stay untouched on disk
+                # and heal on the next play of the same track).
+                resolved = self._cloud_display(self._cloud_row_for_key(key))
+                if resolved:
+                    return resolved
                 return key
             return os.path.basename(str(key).split("?", 1)[0].rstrip("/")) \
                 or str(key)
