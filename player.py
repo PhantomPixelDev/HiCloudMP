@@ -1341,12 +1341,13 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
                 # Retry playing the current item after a short delay
                 QTimer.singleShot(2000, self.retry_current_playback)
             else:
-                error_msg = "Error: Could not play media (invalid or unsupported format)"
+                error_msg = "Could not play media (invalid or unsupported format)"
                 self.status_bar.showMessage(error_msg, 5000)
                 # NEVER a modal here: this fires during playlist
                 # auto-advance and a dialog would stop the queue dead. The
                 # playback error is reported and the queue moves on.
                 self._tray_toast("HiCloud MP", error_msg)
+                self._skip_invalid_track()
             
         # Update play/pause button based on playback state
         if status in [QMediaPlayer.MediaStatus.LoadedMedia, 
@@ -1356,6 +1357,29 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
                 if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState 
                 else self._icon_play()
             )
+
+    def _skip_invalid_track(self):
+        """Advance past a corrupt/undecodable local file instead of
+        stopping the queue. Bounded by the playlist: every skip moves the
+        index forward, so a fully-corrupt queue ends at the tail with a
+        clear message rather than looping."""
+        try:
+            if not self.playlist or not (0 <= self.current_index
+                                         < len(self.playlist)):
+                return
+            if self.current_index < len(self.playlist) - 1:
+                self.current_index += 1
+                nxt = self.playlist[self.current_index]
+                name = os.path.basename(str(nxt)) if not isinstance(nxt, dict) \
+                    else "next track"
+                self.status_bar.showMessage(
+                    f"Could not play this track - skipping to {name}", 4000)
+                self.play()
+            else:
+                self.status_bar.showMessage(
+                    "Could not play media - end of playlist", 5000)
+        except Exception:
+            pass
 
     def retry_current_playback(self):
         """Retry playing the current track, with a maximum number of retries."""
