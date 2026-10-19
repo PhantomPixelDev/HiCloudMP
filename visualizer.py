@@ -14,6 +14,10 @@ class SFVisualizer(QWidget):
     """Paints n_bands vertical bars from a spectrum (list of 0..1)."""
 
     DEFAULT_ACCENT = "#e11d48"
+    # Music typically peaks around 0.4 on the 60 dB engine scale; a linear
+    # bar only reaches ~40% height and looks almost dead. Gamma lifts real
+    # signal (0 stays 0, 1 stays 1) without inventing motion while silent.
+    DISPLAY_GAMMA = 0.65
 
     def __init__(self, n_bands=24, parent=None):
         super().__init__(parent)
@@ -21,6 +25,15 @@ class SFVisualizer(QWidget):
         self._values = None          # None = idle baseline
         self._accent = self.DEFAULT_ACCENT
         self.setMouseTracking(False)
+
+    @classmethod
+    def display_level(cls, value):
+        """Map a band energy to its painted height (real data, lifted)."""
+        try:
+            v = max(0.0, min(1.0, float(value)))
+        except (TypeError, ValueError):
+            return 0.0
+        return v ** cls.DISPLAY_GAMMA
 
     def set_palette(self, accent_hex):
         """Theme hook: the accent color the bars are painted with."""
@@ -54,9 +67,9 @@ class SFVisualizer(QWidget):
         accent = QColor(self._accent)
         if not accent.isValid():
             accent = QColor(self.DEFAULT_ACCENT)
-        accent.setAlpha(150)
+        accent.setAlpha(200)
         baseline = QColor(accent)
-        baseline.setAlpha(70)
+        baseline.setAlpha(55)
 
         slot = w / n
         bar_w = max(2.0, slot * 0.62)
@@ -70,7 +83,7 @@ class SFVisualizer(QWidget):
         count = min(n, len(self._values))
         p.setPen(Qt.NoPen) if hasattr(Qt, "NoPen") else None
         for i in range(count):
-            v = self._values[i]
+            v = self.display_level(self._values[i])
             bar_h = min_h + v * (h - min_h - 4.0)
             x = i * slot + (slot - bar_w) / 2.0
             p.fillRect(QRectF(x, h - 3.0 - bar_h, bar_w, bar_h), accent)

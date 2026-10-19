@@ -52,3 +52,13 @@ def test_accepts_mono_int16_input():
     spec = compute_spectrum(wave)
     peak = int(np.argmax(spec))
     assert 10 <= peak <= 13
+
+
+def test_respects_source_sample_rate_for_band_mapping():
+    """Native audio can be 48/96 kHz; the band edges are frequencies, so
+    the FFT bin-to-Hz mapping must use the buffer's real rate."""
+    t = np.arange(int(0.3 * 96000)) / 96000.0
+    wave = np.stack([8000 * np.sin(2 * np.pi * 1000 * t)] * 2, axis=1)
+    spec = compute_spectrum(wave.astype(np.int16), sample_rate=96000)
+    peak = int(np.argmax(spec))
+    assert 10 <= peak <= 13, f"1 kHz at 96 kHz peaked at band {peak}"

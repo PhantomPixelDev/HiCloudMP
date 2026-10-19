@@ -14,11 +14,13 @@ _DYN_RANGE_DB = 60.0
 _WINDOW = np.hanning(N_FFT)
 
 
-def compute_spectrum(block, n_bands=N_BANDS):
+def compute_spectrum(block, n_bands=N_BANDS, sample_rate=44100.0):
     """Band energies of `block` (int16-scale mono (n,) or (n, ch)).
 
     Returns float32 array of length n_bands: per-band RMS-magnitude on a
     60 dB scale mapped to 0..1 (0 = silence/inaudible, 1 = full scale).
+    `sample_rate` must be the source's real rate (native taps can be 48/96
+    kHz); the band edges are absolute frequencies.
     """
     arr = np.asarray(block)
     if arr.ndim == 2:
@@ -27,7 +29,7 @@ def compute_spectrum(block, n_bands=N_BANDS):
     if tail.size < N_FFT:
         tail = np.pad(tail, (N_FFT - tail.size, 0), mode="constant")
     spec = np.abs(np.fft.rfft(tail * _WINDOW))
-    freqs = np.fft.rfftfreq(N_FFT, d=1.0 / 44100.0)
+    freqs = np.fft.rfftfreq(N_FFT, d=1.0 / max(1.0, float(sample_rate)))
 
     # Log-spaced band edges, DC excluded (offset noise shows up there).
     edges = np.geomspace(F_MIN, F_MAX, n_bands + 1)

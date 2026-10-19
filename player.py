@@ -199,6 +199,23 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
         self.audio_output = QAudioOutput()
         self.player.setAudioOutput(self.audio_output)
         self.audio_output.setVolume(0.7)  # 70% volume default
+        # Native spectrum tap: the visualizer stays alive on the fallback
+        # path (engine device busy/unsupported) and on native cloud streams.
+        # When the EQ engine is active it remains the post-EQ source.
+        self._native_spectrum = None
+        self._native_spectrum_at = 0.0
+        self._native_tap_at = 0.0
+        self._native_tap_enabled = bool(
+            self.settings.value("ui/visualizer_enabled", False, type=bool))
+        self._native_audio_output = None
+        try:
+            from PySide6.QtMultimedia import QAudioBufferOutput
+            _tap = QAudioBufferOutput(self)
+            _tap.audioBufferReceived.connect(self._on_native_audio_buffer)
+            self.player.setAudioBufferOutput(_tap)
+            self._native_audio_output = _tap
+        except Exception as e:
+            print(f"native spectrum tap unavailable: {e}")
         # Metadata/Cover controller
         self.meta = MetadataController(self)
         # Stream-specific retry handlers (see _play_stream/_disconnect_stream_handlers)
@@ -246,8 +263,15 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
 
         # UI
         self.setup_ui()
+        # The app-wide theme is applied before MusicPlayer is constructed;
+        # match the bars to the saved accent instead of the default red.
+        try:
+            import theme as _theme
+            self.visualizer.set_palette(_theme.icon_colors(self.settings)[0])
+        except Exception:
+            pass
 
-        # Visualizer polling (~20 Hz): engine spectrum or idle baseline.
+        # Visualizer polling (~20 Hz): engine spectrum or native fallback tap.
         self._viz_timer = QTimer(self)
         self._viz_timer.setInterval(50)
         self._viz_timer.timeout.connect(self._update_visualizer)
@@ -955,7 +979,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
 
         # Spectrum visualizer (EQ-engine tap; calm baseline when EQ is off)
         self.visualizer = SFVisualizer()
-        self.visualizer.setFixedSize(120, 32)
+        self.visualizer.setFixedSize(150, 36)
         buttons_layout.addWidget(self.visualizer)
 
         # Volume (icon = mute toggle + compact slider in the transport bar)
@@ -1201,13 +1225,66 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
             pass
         self.search_music()
 
+    def _on_native_audio_buffer(self, buffer):
+        """Tap decoded native audio (QAudioBufferOutput) for the visualizer.
+
+        Copies real PCM, so the bars stay honest when the EQ engine is not
+        the active route. Throttled to ~33 Hz; QAudioBuffer's data is only
+        valid during this signal.
+        """
+        try:
+            if not getattr(self, "_native_tap_enabled", False):
+                return
+            now = time.monotonic()
+            if now - getattr(self, "_native_tap_at", 0.0) < 0.03:
+                return
+            self._native_tap_at = now
+
+            import numpy as np
+            from PySide6.QtMultimedia import QAudioFormat
+            from spectrum import compute_spectrum
+
+            fmt = buffer.format()
+            rate = int(fmt.sampleRate() or 0)
+            channels = max(1, int(fmt.channelCount() or 1))
+            raw = buffer.constData()
+            if not rate or raw is None:
+                return
+            sample_format = fmt.sampleFormat()
+            if sample_format == QAudioFormat.SampleFormat.Int16:
+                samples = np.frombuffer(raw, dtype="<i2").astype(np.float32)
+            elif sample_format == QAudioFormat.SampleFormat.Float:
+                samples = (np.frombuffer(raw, dtype="<f4").astype(np.float32)
+                           * 32768.0)
+            elif sample_format == QAudioFormat.SampleFormat.Int32:
+                samples = (np.frombuffer(raw, dtype="<i4").astype(np.float32)
+                           / 65536.0)
+            elif sample_format == QAudioFormat.SampleFormat.UInt8:
+                samples = ((np.frombuffer(raw, dtype=np.uint8).astype(np.float32)
+                            - 128.0) * 256.0)
+            else:
+                return
+            usable = (samples.size // channels) * channels
+            if usable <= 0:
+                return
+            samples = samples[:usable].reshape(-1, channels)
+            self._native_spectrum = compute_spectrum(
+                samples, sample_rate=rate)
+            self._native_spectrum_at = now
+        except Exception:
+            pass
+
     def _update_visualizer(self):
-        """Feed the visualizer: engine spectrum when active, else idle."""
+        """Feed the visualizer: engine spectrum when active, else native tap."""
         try:
             if getattr(self, "_using_engine", False):
                 data = self.eq_engine.get_spectrum()
             else:
-                data = None
+                data = getattr(self, "_native_spectrum", None)
+                if (data is not None and
+                        time.monotonic()
+                        - getattr(self, "_native_spectrum_at", 0.0) > 0.5):
+                    data = None   # paused/stopped: decay to the idle baseline
         except Exception:
             data = None
         try:
@@ -1361,6 +1438,9 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
              unless the EQ is on, which keeps the engine route.
         Cloud streams always switch at the next track start.
         """
+        self._native_tap_enabled = bool(on)
+        if not on:
+            self._native_spectrum = None
         try:
             if on and not getattr(self, "_using_engine", False):
                 self._enable_engine_route(

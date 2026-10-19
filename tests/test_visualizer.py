@@ -35,6 +35,16 @@ def test_widget_paints_more_bars_with_data(qapp):
     assert differs(idle, calm) < 300, "zero spectrum must look idle"
 
 
+def test_display_curve_lifts_quiet_bands(qapp):
+    """Music peaks around 0.4 on the 60 dB scale; a raw linear bar barely
+    moves. The display curve must lift real signal without faking silence."""
+    from visualizer import SFVisualizer
+    assert SFVisualizer.display_level(0.0) == 0.0
+    assert SFVisualizer.display_level(1.0) == 1.0
+    assert SFVisualizer.display_level(0.2) > 0.2
+    assert SFVisualizer.display_level(0.4) > 0.45
+
+
 def test_transport_bar_hosts_visualizer(music_player):
     from visualizer import SFVisualizer
     assert isinstance(music_player.visualizer, SFVisualizer)
