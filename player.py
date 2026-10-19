@@ -388,7 +388,13 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
             self._apply_toggle_icons()
             vbtn = getattr(self, 'volume_icon', None)
             if vbtn is not None:
-                vbtn.setIcon(self._icon("volume", size=20))
+                glyph = "volume"
+                try:
+                    if self.audio_output.isMuted():
+                        glyph = "volume-x"
+                except Exception:
+                    pass
+                vbtn.setIcon(self._icon(glyph, size=20))
                 vbtn.setIconSize(QSize(20, 20))
         except AttributeError:
             pass  # setup_ui() still building; icons apply once others land
@@ -854,12 +860,16 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         self.visualizer.setFixedSize(120, 32)
         buttons_layout.addWidget(self.visualizer)
 
-        # Volume (icon + compact slider in the transport bar)
+        # Volume (icon = mute toggle + compact slider in the transport bar)
         self.volume_icon = QToolButton()
         self.volume_icon.setIcon(self._icon("volume", size=18))
         self.volume_icon.setIconSize(QSize(18, 18))
         self.volume_icon.setFixedSize(32, 32)
-        self.volume_icon.setEnabled(False)  # purely a visual marker
+        self.volume_icon.setCursor(Qt.PointingHandCursor)
+        self.volume_icon.setToolTip("Mute / unmute (click)")
+        self.volume_icon.setAutoRaise(True)
+        self.volume_icon.clicked.connect(self.toggle_mute)
+        self._pre_mute_volume = 70
 
         self.volume_slider = QSlider(Qt.Horizontal)
         self.volume_slider.setRange(0, 100)
@@ -1303,9 +1313,49 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         return apply_cb
 
     def set_volume(self, volume):
+        # Dragging the slider is an explicit level choice: leave mute. (The
+        # mute toggle sets the slider to 0 with blockSignals, so this branch
+        # cannot fight it.)
+        try:
+            if volume > 0 and self.audio_output.isMuted():
+                self.audio_output.setMuted(False)
+                self.volume_icon.setIcon(self._icon("volume", size=18))
+        except Exception:
+            pass
         self.audio_output.setVolume(volume / 100.0)
         if getattr(self, '_using_engine', False):
             self.eq_engine.set_volume(volume / 100.0)
+
+    def toggle_mute(self):
+        """Mute/unmute from the transport bar; remembers the previous level
+        and applies to both output routes (native + EQ engine sink)."""
+        try:
+            if self.audio_output.isMuted():
+                level = getattr(self, "_pre_mute_volume", 70) or 70
+                self.audio_output.setMuted(False)
+                self.volume_icon.setIcon(self._icon("volume", size=18))
+                self.volume_slider.blockSignals(True)
+                self.volume_slider.setValue(level)
+                self.volume_slider.blockSignals(False)
+                self.set_volume(level)
+                self.status_bar.showMessage("Volume unmuted", 2000)
+            else:
+                level = self.volume_slider.value()
+                if level > 0:
+                    self._pre_mute_volume = level
+                self.audio_output.setMuted(True)
+                self.volume_icon.setIcon(self._icon("volume-x", size=18))
+                self.volume_slider.blockSignals(True)
+                self.volume_slider.setValue(0)
+                self.volume_slider.blockSignals(False)
+                try:
+                    if getattr(self, '_using_engine', False):
+                        self.eq_engine.set_volume(0.0)
+                except Exception:
+                    pass
+                self.status_bar.showMessage("Volume muted", 2000)
+        except Exception:
+            pass
     
     def toggle_shuffle(self, enabled):
         # Accent highlight handled by stylesheet property (theme.py accentActive)

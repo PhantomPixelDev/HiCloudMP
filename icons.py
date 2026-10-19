@@ -30,6 +30,10 @@ _GLYPHS = {
     "volume": ("stroke",
                '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>'
                '<path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>'),
+    "volume-x": ("stroke",
+                 '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>'
+                 '<line x1="23" y1="9" x2="17" y2="15"/>'
+                 '<line x1="17" y1="9" x2="23" y2="15"/>'),
     "folder": ("stroke",
                '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>'),
     "music": ("stroke",

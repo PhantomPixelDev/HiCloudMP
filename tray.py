@@ -74,7 +74,7 @@ class TrayController:
         tray_menu.addSeparator()
         self.tray_mute_action = tray_menu.addAction("Mute")
         self.tray_mute_action.setCheckable(True)
-        self.tray_mute_action.toggled.connect(lambda m: self.app.audio_output.setMuted(m))
+        self.tray_mute_action.toggled.connect(self._on_tray_mute_toggled)
 
         # Inline volume slider
         vol_widget_action = QWidgetAction(tray_menu)
@@ -135,6 +135,19 @@ class TrayController:
             "stop": QStyle.SP_MediaStop,
         }.get(name, QStyle.SP_MediaPlay)
         return self.app.style().standardIcon(fallback)
+
+    def _on_tray_mute_toggled(self, muted):
+        """Tray Mute must silence BOTH output routes (native + EQ sink)."""
+        try:
+            self.app.audio_output.setMuted(muted)
+        except Exception:
+            pass
+        try:
+            if getattr(self.app, "_using_engine", False):
+                self.app.eq_engine.set_volume(
+                    0.0 if muted else self.app.volume_slider.value() / 100.0)
+        except Exception:
+            pass
 
     def update_tray_ui(self):
         if not self.tray_icon:
