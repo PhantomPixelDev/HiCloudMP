@@ -47,6 +47,10 @@ from workers import DownloadWorker, ScanCloudWorker, CoverArtWorker
 
 from web_control import WebControlServer
 
+# Playlist files that can be dropped onto the queue (they get imported);
+# audio rows are decided by utils.is_music_file.
+PLAYLIST_DROP_EXTS = (".m3u", ".m3u8", ".pls", ".xspf")
+
 # QThread objects whose threads outlive the code path that owned them must
 # keep a strong reference, otherwise PySide destroys the C++ QThread while it
 # is still running; ~QThread() then calls qFatal("QThread: Destroyed while
@@ -715,6 +719,9 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         self.playlist_widget.setSelectionMode(QListWidget.ExtendedSelection)
         # Keyboard driving (P3): Del = remove, Space = play, Home/End jump
         self.playlist_widget.installEventFilter(self)
+        # Explorer drops land on the viewport (not the view itself), so the
+        # drag/drop filter must watch both.
+        self.playlist_widget.viewport().installEventFilter(self)
         content_row.addWidget(self.playlist_widget, 1)
         stage_col.addLayout(content_row, 1)
 
@@ -2200,7 +2207,9 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
     # === Playlist keyboard driving (P3) ===
     def eventFilter(self, obj, event):
         """Playlist widget keys: Del removes the selection, Space starts
-        the selected track, Home/End jump selection extremes."""
+        the selected track, Home/End jump selection extremes. The viewport
+        filter handles Explorer drag/drop (playlist files import, audio
+        rows queue up) while internal reorder drags pass through."""
         if obj is self.playlist_widget and event.type() == QEvent.KeyPress:
             key = event.key()
             if key == Qt.Key_Delete:
@@ -2221,7 +2230,63 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
                     self.playlist_widget.setCurrentRow(count - 1)
                     self.playlist_widget.item(count - 1).setSelected(True)
                 return True
+        if obj is self.playlist_widget.viewport():
+            et = event.type()
+            if et in (QEvent.DragEnter, QEvent.DragMove):
+                if self._external_drop_ok(event.mimeData()):
+                    event.acceptProposedAction()
+                    return True
+            elif et == QEvent.Drop:
+                if self._external_drop_ok(event.mimeData()):
+                    self._handle_file_drop(
+                        self._drop_paths_from_mime(event.mimeData()))
+                    event.acceptProposedAction()
+                    return True
         return super().eventFilter(obj, event)
+
+    def _drop_paths_from_mime(self, mime):
+        """Local file paths carried by a drag; [] for anything else (the
+        internal reorder mime carries no urls)."""
+        try:
+            if mime is None or not mime.hasUrls():
+                return []
+            return [u.toLocalFile() for u in mime.urls() if u.isLocalFile()]
+        except Exception:
+            return []
+
+    def _external_drop_ok(self, mime):
+        """True when the drop carries at least one row we can use: a
+        playlist file to import or a supported audio file to queue."""
+        for p in self._drop_paths_from_mime(mime):
+            low = p.lower()
+            if low.endswith(PLAYLIST_DROP_EXTS) or is_music_file(p):
+                return True
+        return False
+
+    def _handle_file_drop(self, paths):
+        """Explorer drop: playlist files import through the shared path,
+        audio files append to the queue. Never fatal."""
+        try:
+            playlists = [p for p in paths
+                         if p.lower().endswith(PLAYLIST_DROP_EXTS)]
+            audio = [p for p in paths
+                     if not p.lower().endswith(PLAYLIST_DROP_EXTS)
+                     and is_music_file(p)]
+            for p in playlists:
+                self._import_playlist_file(p)
+            if audio:
+                for p in audio:
+                    self.playlist.append(p)
+                    self.playlist_widget.addItem(os.path.basename(p))
+                if self.current_index < 0 and self.playlist:
+                    self.current_index = 0
+                n = len(audio)
+                self.status_bar.showMessage(
+                    f"Added {n} dropped file{'s' if n != 1 else ''} "
+                    "to the queue", 4000)
+            return bool(playlists) or bool(audio)
+        except Exception:
+            return False
     
     def move_selected_in_playlist(self, direction):
         selected_rows = sorted([self.playlist_widget.row(item) for item in self.playlist_widget.selectedItems()])
@@ -2392,13 +2457,21 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         audio files and stream URLs are appended (URL rows play through the
         streaming path); undecodable/missing rows are skipped, never fatal.
         """
-        from playlist_io import PlaylistIO
         try:
             path, _ = QFileDialog.getOpenFileName(
                 self, "Import playlist", "",
                 "Playlists (*.m3u *.m3u8 *.pls *.xspf);;All Files (*.*)")
             if not path:
                 return
+            self._import_playlist_file(path)
+        except Exception as e:
+            self.status_bar.showMessage(f"Import failed: {e}", 6000)
+
+    def _import_playlist_file(self, path):
+        """Import one playlist file into the queue. Shared by the menu
+        action and drag-drop; returns (added, skipped)."""
+        from playlist_io import PlaylistIO
+        try:
             entries = PlaylistIO.import_playlist(path)["entries"]
             base = os.path.dirname(path)
             added = skipped = 0
@@ -2428,8 +2501,10 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
             if skipped:
                 msg += f" ({skipped} skipped)"
             self.status_bar.showMessage(msg, 4000)
+            return added, skipped
         except Exception as e:
             self.status_bar.showMessage(f"Import failed: {e}", 6000)
+            return 0, 0
 
     def export_playlist(self):
         """Write the queue (current selection, else everything) to a
