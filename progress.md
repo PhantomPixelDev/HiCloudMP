@@ -206,8 +206,17 @@ Landed with this commit (`feat: tray icon is an accent badge ...`):
 - Tests tests/test_playlist_ux.py red->green (12); suite cold
   `291 passed, 2 skipped`.
 
-Next in line: P4 hardening pack (incl. closeEvent trail + local
-undecodable-file error UX note from the EQ round), P5b perf round
-(viz repaint gate, filter diff + setUpdatesEnabled, sort without
-stat-storm, web poll hidden-gate DONE in 1afdfc8), P6 release (gated).
+`20f1a2a` perf: viz repaint gate + playlist filter/sort repaint brackets
+- visualizer.set_spectrum skips identical/idle-to-idle frames; 20 Hz
+  timer pin and paint-content tests stay green.
+- filter_playlist/sort_playlist wrapped in setUpdatesEnabled brackets;
+  behavior parity asserted; driven via the real signals.
+- Test-writing lessons pinned in the ledger: fixture names ended
+  ".mp3" so a "3" search matched everything (test bug, fixed); spy on
+  QListWidget methods via instance setattr is honored for plain calls.
+- Tests red->green (4+3); suite cold `298 passed, 2 skipped`.
+
+Next in line: P4 hardening pack (closeEvent trail guard, InvalidMedia
+modal demotion to status+toast, undecodable-file UX), P6 release
+(verification x3 + real-app relaunch; tag only on explicit user go).
 
