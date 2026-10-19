@@ -68,10 +68,28 @@ if __name__ == '__main__':
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
 
+    # Single instance: a second launch pings the running window and exits
+    # (two players would fight over the same settings/playlist files).
+    from single_instance import InstanceLock
+    _instance_lock = InstanceLock()
+    if not _instance_lock.acquire():
+        sys.exit(0)
+
     # Unified theme: Dark/Light + accent + density resolved from QSettings
     theme.apply_app_theme(app, settings=QSettings("HiCloudMP", "HiCloudMP"))
     
     player = MusicPlayer(startup_paths=sys.argv[1:])
+
+    def _raise_from_second_launch():
+        try:
+            player.showNormal()
+            player.raise_()
+            player.activateWindow()
+        except Exception:
+            pass
+
+    _instance_lock.activated.connect(_raise_from_second_launch)
+
     # Start MPRIS service for system media controls integration (separate module)
     # (import guard above sets MprisService to None where dbus/gi are missing,
     #  e.g. Windows — Windows media keys stay handled by Qt in that case)
