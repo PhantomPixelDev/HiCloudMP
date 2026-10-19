@@ -465,3 +465,22 @@ Not pushed/tagged/released; version remains 1.0.3 until explicit go.
 Suite: 410 passed, 2 skipped.
 Not pushed/tagged/released; version remains 1.0.3 until explicit go.
 
+
+## 2026-10-20 — fix: Recently/Most Played name cloud entries from the catalog
+
+Landed with this commit (`6af1c35`):
+
+- Queue rows and history entries persist only `cloud_idx`/`file_idx`, so
+  `record_play` cached the raw `cloud:0:N` key as the display name and the
+  Recently/Most Played menus showed keys instead of songs (user-reported,
+  confirmed on v1.0.4 install data).
+- Display names now resolve from the in-memory scanned cloud rows as
+  `Artist – Title` (title falls back to row `name`, then basename of
+  `path`). Subsonic rows carry the title in `name`, artist in `artist`.
+- Legacy entries whose stored name is still the raw key are repaired at
+  display time (files on disk stay untouched; names heal on next play).
+- Newly recorded plays persist the resolved human name, so restarts keep
+  showing real song names. 3 tests.
+
+Suite: 413 passed, 2 skipped.
+Version remains 1.0.4 until explicit go for 1.0.5.
