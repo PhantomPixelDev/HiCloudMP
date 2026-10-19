@@ -64,14 +64,36 @@ def test_import_playlist_appends_supported_files(music_player, monkeypatch,
 
     mp.import_playlist()
 
-    assert [os.path.normcase(p) for p in mp.playlist] == [
+    # local rows resolve on disk; the URL row joins as a stream entry
+    assert [os.path.normcase(p) if "://" not in p else p
+            for p in mp.playlist] == [
         os.path.normcase(one),
-        os.path.normcase(str(mus / "two.opus"))]
-    assert mp.playlist_widget.count() == 2
+        os.path.normcase(str(mus / "two.opus")),
+        "https://skip.example/stream"]
+    assert mp.playlist_widget.count() == 3
     assert mp.current_index == 0, "first import becomes the ready track"
     msg = mp.status_bar.currentMessage()
-    assert "Imported 2" in msg, msg
-    assert "2 skipped" in msg, msg
+    assert "Imported 3" in msg, msg
+    assert "1 skipped" in msg, msg
+    assert "(Stream)" in mp.playlist_widget.item(2).text()
+
+
+def test_play_on_stream_entry_routes_to_play_stream(music_player,
+                                                    monkeypatch):
+    mp = music_player
+    mp.playlist = ["https://radio.example/live.mp3"]
+    mp.playlist_widget.clear()
+    mp.playlist_widget.addItem("live.mp3 (Stream)")
+    mp.current_index = 0
+
+    played = []
+    monkeypatch.setattr(mp, "_play_stream",
+                        lambda url, name: played.append((url, name)),
+                        raising=False)
+
+    mp.play()
+
+    assert played == [("https://radio.example/live.mp3", "live.mp3")], played
 
 
 def test_import_playlist_cancel_changes_nothing(music_player, monkeypatch):
@@ -155,3 +177,29 @@ def test_export_cancel_writes_nothing(music_player, monkeypatch):
     mp.export_playlist()
     # no exception and no message crash - cancelled is a no-op
     assert mp.playlist == []
+
+
+def test_export_writes_stream_urls_verbatim(music_player, monkeypatch,
+                                            tmp_path):
+    mp = music_player
+    mp.playlist = []
+    while mp.playlist_widget.count():
+        mp.playlist_widget.takeItem(0)
+
+    mus = tmp_path / "urls"
+    mus.mkdir()
+    a = _song(mus, "alpha.mp3")
+    mp.playlist = [a, "https://radio.example/live.mp3"]
+    mp.playlist_widget.addItem("alpha.mp3")
+    mp.playlist_widget.addItem("live.mp3 (Stream)")
+    mp.current_index = 0
+
+    out = tmp_path / "mix.m3u8"
+    monkeypatch.setattr(QFileDialog, "getSaveFileName",
+                        lambda *a, **k: (str(out), ""))
+
+    mp.export_playlist()
+
+    text = out.read_text(encoding="utf-8")
+    assert "https://radio.example/live.mp3" in text, text
+    assert "Exported 2" in mp.status_bar.currentMessage()

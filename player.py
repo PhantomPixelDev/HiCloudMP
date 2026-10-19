@@ -854,27 +854,41 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
             self.play_cloud_file(cloud_idx, file_idx)
         else:
             path = self.playlist[self.current_index]
-            # Local playback: detach stream-retry handlers installed by a
-            # previous cloud-stream attempt so their closures cannot hijack
-            # this track's media signals (EndOfMedia auto-advance, etc.)
-            self._disconnect_stream_handlers()
-            src = os.path.abspath(path)
-            if self._route_through_engine():
-                self._engine_start('file', src)
+            if isinstance(path, str) and path.startswith(
+                    ("http://", "https://")):
+                # Stream URL row (e.g. from an imported playlist): play it
+                # through the streaming path with its own retry handling.
+                self._play_stream(
+                    path,
+                    os.path.basename(path.split("?", 1)[0].rstrip("/"))
+                    or path)
+                self.playlist_widget.setCurrentRow(self.current_index)
+                item = self.playlist_widget.item(self.current_index)
+                if item:
+                    self.playlist_widget.scrollToItem(item)
+                self.play_btn.setIcon(self._icon_pause())
             else:
-                # Set up and play the media
-                self.player.setSource(QUrl.fromLocalFile(src))
-                self.player.play()
-            
-            # Update UI elements
-            self.playlist_widget.setCurrentRow(self.current_index)
-            item = self.playlist_widget.item(self.current_index)
-            if item:
-                self.playlist_widget.scrollToItem(item)
-            self.play_btn.setIcon(self._icon_pause())
-            
-            # Force an immediate metadata update
-            QTimer.singleShot(100, self.update_metadata_display)
+                # Local playback: detach stream-retry handlers installed by a
+                # previous cloud-stream attempt so their closures cannot hijack
+                # this track's media signals (EndOfMedia auto-advance, etc.)
+                self._disconnect_stream_handlers()
+                src = os.path.abspath(path)
+                if self._route_through_engine():
+                    self._engine_start('file', src)
+                else:
+                    # Set up and play the media
+                    self.player.setSource(QUrl.fromLocalFile(src))
+                    self.player.play()
+
+                # Update UI elements
+                self.playlist_widget.setCurrentRow(self.current_index)
+                item = self.playlist_widget.item(self.current_index)
+                if item:
+                    self.playlist_widget.scrollToItem(item)
+                self.play_btn.setIcon(self._icon_pause())
+
+                # Force an immediate metadata update
+                QTimer.singleShot(100, self.update_metadata_display)
         self.highlight_current_track()
         # Update tray UI
         if hasattr(self, 'update_tray_ui'):
@@ -2374,10 +2388,9 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
     def import_playlist(self):
         """Load an m3u/m3u8/pls/xspf file into the current queue.
 
-        Relative paths resolve against the playlist file's folder; only
-        supported local audio files are appended. Stream URLs are counted
-        as skipped for now (direct-URL queue entries land with the P3
-        round); undecodable/missing rows are skipped too, never fatal.
+        Relative paths resolve against the playlist file's folder; local
+        audio files and stream URLs are appended (URL rows play through the
+        streaming path); undecodable/missing rows are skipped, never fatal.
         """
         from playlist_io import PlaylistIO
         try:
@@ -2395,7 +2408,11 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
                     skipped += 1
                     continue
                 if p.startswith(("http://", "https://")):
-                    skipped += 1   # stream URLs: handled from P3 on
+                    self.playlist.append(p)
+                    display = os.path.basename(p.split("?", 1)[0].rstrip("/")) \
+                        or p
+                    self.playlist_widget.addItem(f"{display} (Stream)")
+                    added += 1
                     continue
                 resolved = p if os.path.isabs(p) else os.path.normpath(
                     os.path.join(base, p))
@@ -2433,6 +2450,14 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
                 item = self.playlist[i]
                 if isinstance(item, dict):
                     skipped += 1
+                    continue
+                if isinstance(item, str) and item.startswith(
+                        ("http://", "https://")):
+                    entries.append({
+                        "path": item,
+                        "title": os.path.splitext(
+                            os.path.basename(item.split("?", 1)[0]))[0],
+                        "duration": None})
                     continue
                 entries.append({
                     "path": os.path.abspath(item),
