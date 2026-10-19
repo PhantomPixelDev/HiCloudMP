@@ -154,6 +154,34 @@ class MetadataController:
         except Exception:
             self.set_default_cover()
 
+    def _cloud_row_for(self, item):
+        """Return the scanned catalog row backing a queue entry, if any.
+
+        Playlist entries intentionally store only (cloud_idx, file_idx):
+        artist/album/name live in the catalog loaded from clouds.json, so
+        resolving a row is free and never touches the network.
+        """
+        try:
+            if not isinstance(item, dict):
+                return None
+            cloud_idx = item.get('cloud_idx')
+            file_idx = item.get('file_idx')
+            if not isinstance(cloud_idx, int) or not isinstance(file_idx, int):
+                return None
+            clouds = getattr(self.app, 'clouds', None) or []
+            if not (0 <= cloud_idx < len(clouds)):
+                return None
+            cloud = clouds[cloud_idx]
+            if not isinstance(cloud, dict):
+                return None
+            files = cloud.get('files') or []
+            if not (0 <= file_idx < len(files)):
+                return None
+            row = files[file_idx]
+            return row if isinstance(row, dict) else None
+        except Exception:
+            return None
+
     def update_metadata_display(self):
         try:
             # Reset labels
@@ -169,21 +197,39 @@ class MetadataController:
             current_item = self.app.playlist[self.app.current_index]
 
             if isinstance(current_item, dict):
-                # Cloud scan rows store the track title in `name` (the
-                # Subsonic API title field lands there); artist/album are
-                # populated by the scanner. Never probe the stream here:
-                # the old ffprobe blocked the UI for ~0.8 s per cloud
-                # track, and the probe returned no album anyway.
-                title = current_item.get('title', '') or current_item.get('name', '')
-                artist = current_item.get('artist', '')
-                album = current_item.get('album', '')
+                # Queue rows built by the library store only account/file
+                # indices. The scanned cloud row (already in memory and
+                # persisted in clouds.json) is the metadata cache: resolve
+                # from it instead of probing the stream or forcing a rescan.
+                row = self._cloud_row_for(current_item) or {}
+                title = (current_item.get('title')
+                         or current_item.get('name')
+                         or row.get('title')
+                         or row.get('name')
+                         or '')
+                artist = current_item.get('artist') or row.get('artist') or ''
+                album = current_item.get('album') or row.get('album') or ''
                 if not title:
-                    if 'name' in current_item:
-                        title = os.path.splitext(str(current_item['name']))[0]
-                    elif 'path' in current_item:
-                        title = os.path.splitext(os.path.basename(str(current_item['path'])))[0]
+                    path = current_item.get('path') or row.get('path')
+                    if path:
+                        title = os.path.splitext(
+                            os.path.basename(str(path)))[0]
                     else:
                         title = 'Unknown'
+
+                # Cache resolved display values on the live queue row so
+                # repeated displays (track changes, tray/web pushes) never
+                # need to resolve the catalog again. Placeholder values are
+                # not cached, so a later scan can fill them in.
+                for key, value in (('title', title),
+                                   ('artist', artist),
+                                   ('album', album)):
+                    if (value
+                            and value not in ('Unknown', 'Unknown Artist',
+                                              'Unknown Album')
+                            and not current_item.get(key)):
+                        current_item[key] = value
+
                 if not artist: artist = 'Unknown Artist'
                 if not album: album = 'Unknown Album'
 

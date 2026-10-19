@@ -77,3 +77,65 @@ def test_explicit_title_still_wins(music_player):
     mp.current_index = 0
     mp.meta.update_metadata_display()
     assert "Real Title" in mp.track_title_label.text()
+
+
+def test_index_only_cloud_item_resolves_metadata_from_scan_row(
+        music_player, monkeypatch):
+    """Queue rows built by the library only carry account/file indices.
+
+    The scanned cloud row is the metadata cache: displaying the now-playing
+    labels must resolve it instead of falling back to Unknown, without any
+    network probe or rescan.
+    """
+    mp = music_player
+    monkeypatch.setattr(mp.meta, "_start_cover_art_fetch",
+                        lambda *a, **k: None)
+    mp.clouds = [{"name": "Test Cloud", "config": {}, "files": [{
+        "path": "Real Artist/Real Album/internal-id.flac",
+        "url": "https://s/stream?x=1",
+        "name": "Real Song",
+        "artist": "Real Artist",
+        "album": "Real Album",
+    }]}]
+    mp.playlist = [{"type": "cloud", "cloud_idx": 0, "file_idx": 0}]
+    mp.current_index = 0
+
+    mp.meta.update_metadata_display()
+
+    assert "Real Song" in mp.track_title_label.text()
+    assert "Real Artist" in mp.track_artist_label.text()
+    assert "Real Album" in mp.track_album_label.text()
+
+
+def test_resolved_cloud_metadata_is_cached_on_the_playlist_item(
+        music_player, monkeypatch):
+    """A resolved queue row keeps its metadata for later displays.
+
+    Playlist rows are displayed repeatedly (track changes, tray refreshes,
+    web-state pushes). Caching the resolved values on the row avoids repeat
+    catalog lookups and keeps labels intact if the catalog is unavailable.
+    """
+    mp = music_player
+    monkeypatch.setattr(mp.meta, "_start_cover_art_fetch",
+                        lambda *a, **k: None)
+    mp.clouds = [{"name": "Test Cloud", "config": {}, "files": [{
+        "path": "Real Artist/Real Album/internal-id.flac",
+        "url": "https://s/stream?x=1",
+        "name": "Real Song",
+        "artist": "Real Artist",
+        "album": "Real Album",
+    }]}]
+    item = {"type": "cloud", "cloud_idx": 0, "file_idx": 0}
+    mp.playlist = [item]
+    mp.current_index = 0
+
+    mp.meta.update_metadata_display()
+    mp.clouds = []  # catalog unavailable: the queue row is the cache
+    mp.meta.update_metadata_display()
+
+    assert item.get("title") == "Real Song"
+    assert item.get("artist") == "Real Artist"
+    assert item.get("album") == "Real Album"
+    assert "Real Song" in mp.track_title_label.text()
+    assert "Real Artist" in mp.track_artist_label.text()
+    assert "Real Album" in mp.track_album_label.text()
