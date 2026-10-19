@@ -21,6 +21,7 @@ from history import PlayHistoryMixin, HISTORY_LIMIT  # noqa: F401
 from folder_watch import (FolderWatchMixin, FOLDER_WATCH_DEBOUNCE_MS,  # noqa: F401
                           FOLDER_WATCH_MAX_DIRS)
 from visualizer import SFVisualizer
+from slider import ClickJumpSlider
 import icons
 
 from PySide6.QtWidgets import (
@@ -968,7 +969,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
         self.volume_icon.clicked.connect(self.toggle_mute)
         self._pre_mute_volume = 70
 
-        self.volume_slider = QSlider(Qt.Horizontal)
+        self.volume_slider = ClickJumpSlider(Qt.Horizontal)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(70)
         self.volume_slider.setFixedWidth(150)
