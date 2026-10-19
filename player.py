@@ -55,6 +55,9 @@ PLAYLIST_DROP_EXTS = (".m3u", ".m3u8", ".pls", ".xspf")
 # off exponentially; after this many failures the queue moves on).
 STREAM_MAX_RETRIES = 5
 
+# Recently/Most Played history: last N entries kept, menus show top entries.
+HISTORY_LIMIT = 50
+
 
 # Help > Keyboard Shortcuts is generated from this one table so the docs
 # cannot drift from the actions. The first four keys are the real QAction
@@ -150,6 +153,9 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         # Create directories if they don't exist
         os.makedirs(self.data_dir, exist_ok=True)
         os.makedirs(self.cache_dir, exist_ok=True)
+
+        # Recently/Most Played history (JSON next to the other user data).
+        self._history = self._load_play_history()
         
         # Initialize settings
         self.settings = QSettings("HiCloudMP", "HiCloudMP")
@@ -350,6 +356,11 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         tools_menu.addAction("Equalizer…", self.open_eq_dialog)
         tools_menu.addSeparator()
         tools_menu.addAction("Web Panel", self.open_web_panel)
+        tools_menu.addSeparator()
+        self.recent_menu = tools_menu.addMenu("Recently Played")
+        self.recent_menu.aboutToShow.connect(self._rebuild_recent_menu)
+        self.most_menu = tools_menu.addMenu("Most Played")
+        self.most_menu.aboutToShow.connect(self._rebuild_most_menu)
         tools_menu.addSeparator()
         tools_menu.addAction("Settings", self.open_settings_dialog)
         mb.addMenu(tools_menu)
@@ -993,6 +1004,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
             cloud_idx = current_item.get("cloud_idx")
             file_idx = current_item.get("file_idx")
             self.play_cloud_file(cloud_idx, file_idx)
+            self.record_play(current_item)
         else:
             path = self.playlist[self.current_index]
             if isinstance(path, str) and path.startswith(
@@ -1003,6 +1015,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
                     path,
                     os.path.basename(path.split("?", 1)[0].rstrip("/"))
                     or path)
+                self.record_play(path)
                 self.playlist_widget.setCurrentRow(self.current_index)
                 item = self.playlist_widget.item(self.current_index)
                 if item:
@@ -1020,6 +1033,11 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
                     # Set up and play the media
                     self.player.setSource(QUrl.fromLocalFile(src))
                     self.player.play()
+
+                # History records only files that actually exist (a missing
+                # row would otherwise pollute Recently Played).
+                if os.path.exists(path):
+                    self.record_play(path)
 
                 # Update UI elements
                 self.playlist_widget.setCurrentRow(self.current_index)
@@ -3227,6 +3245,145 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Could not save playlists: {e}")
 
+    # === Play history (Recently / Most Played) =========================
+    def _history_path(self):
+        return os.path.join(self.data_dir, "play_history.json")
+
+    def _load_play_history(self):
+        """Corrupt or missing history is simply an empty history."""
+        try:
+            with open(self._history_path(), "r", encoding="utf-8") as f:
+                data = json.load(f)
+            recent = [p for p in data.get("recent", [])
+                      if isinstance(p, str)]
+            counts = {}
+            for key, value in (data.get("counts") or {}).items():
+                try:
+                    counts[str(key)] = int(value)
+                except (TypeError, ValueError):
+                    continue
+            names = {}
+            for key, value in (data.get("names") or {}).items():
+                if isinstance(value, str):
+                    names[str(key)] = value
+            return {"recent": recent[:HISTORY_LIMIT],
+                    "counts": counts, "names": names}
+        except Exception:
+            return {"recent": [], "counts": {}, "names": {}}
+
+    def _save_play_history(self):
+        try:
+            atomic_write_text(self._history_path(),
+                              json.dumps(self._history, ensure_ascii=False,
+                                         indent=1))
+        except Exception:
+            pass
+
+    def _history_key(self, item):
+        if isinstance(item, dict) and item.get("type") == "cloud":
+            return f"cloud:{item.get('cloud_idx')}:{item.get('file_idx')}"
+        if isinstance(item, str):
+            return item
+        return None
+
+    def record_play(self, item=None):
+        """Track a started play for Recently/Most Played: re-plays move to
+        the front, counts accumulate, the list is capped."""
+        try:
+            if item is None:
+                if not (0 <= self.current_index < len(self.playlist)):
+                    return
+                item = self.playlist[self.current_index]
+            key = self._history_key(item)
+            if not key:
+                return
+            if isinstance(item, dict):
+                name = item.get("name") or item.get("path") or key
+            else:
+                name = os.path.basename(str(item).split("?", 1)[0].rstrip("/"))
+                name = name or str(item)
+            recent = [k for k in self._history.get("recent", []) if k != key]
+            recent.insert(0, key)
+            self._history["recent"] = recent[:HISTORY_LIMIT]
+            counts = self._history.setdefault("counts", {})
+            counts[key] = int(counts.get(key, 0)) + 1
+            self._history.setdefault("names", {})[key] = str(name)
+            self._save_play_history()
+        except Exception:
+            pass
+
+    def _history_display(self, key):
+        try:
+            names = self._history.get("names") or {}
+            if names.get(key):
+                return names[key]
+            if key.startswith("cloud:"):
+                return key
+            return os.path.basename(str(key).split("?", 1)[0].rstrip("/")) \
+                or str(key)
+        except Exception:
+            return str(key)
+
+    def _fill_history_menu(self, menu, keys, with_counts=False):
+        menu.clear()
+        if not keys:
+            empty = menu.addAction("Nothing played yet")
+            empty.setEnabled(False)
+            return
+        for key in keys[:15]:
+            label = self._history_display(key)
+            if with_counts:
+                label = f"{label}  ({self._history['counts'].get(key, 0)})"
+            act = menu.addAction(label)
+            act.triggered.connect(
+                lambda _checked=False, k=key: self._play_history_entry(k))
+
+    def _rebuild_recent_menu(self):
+        self._fill_history_menu(
+            self.recent_menu, self._history.get("recent", []))
+
+    def _rebuild_most_menu(self):
+        counts = self._history.get("counts") or {}
+        ranked = sorted(
+            counts.items(),
+            key=lambda kv: (-kv[1], self._history_display(kv[0]).lower()))
+        self._fill_history_menu(self.most_menu, [k for k, _ in ranked],
+                                with_counts=True)
+
+    def _play_history_entry(self, key):
+        """Replay a history row: reuse its queue slot when present, append
+        otherwise. Missing local files report instead of failing silently."""
+        try:
+            if key.startswith("cloud:"):
+                for i, item in enumerate(self.playlist):
+                    if self._history_key(item) == key:
+                        self.current_index = i
+                        self.play()
+                        return
+                self.status_bar.showMessage(
+                    "Track is not in the current queue", 3000)
+                return
+            is_url = key.startswith(("http://", "https://"))
+            if not is_url and not os.path.exists(key):
+                self.status_bar.showMessage(
+                    "File no longer exists: " + os.path.basename(key), 4000)
+                return
+            try:
+                idx = self.playlist.index(key)
+            except ValueError:
+                self.playlist.append(key)
+                if is_url:
+                    label = (os.path.basename(key.split("?", 1)[0].rstrip("/"))
+                             or key) + " (Stream)"
+                else:
+                    label = os.path.basename(key)
+                self.playlist_widget.addItem(label)
+                idx = len(self.playlist) - 1
+            self.current_index = idx
+            self.play()
+        except Exception:
+            pass
+
     def _restore_window_geometry(self):
         """Apply the saved window size/position, when there is one."""
         try:
@@ -3324,7 +3481,8 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         # never skip the others (a close that ate the playlists file was
         # the failure mode this guards against).
         for step in (self.save_media_folders, self.save_clouds,
-                     self.save_playlists, self._save_window_geometry):
+                     self.save_playlists, self._save_window_geometry,
+                     self._save_play_history):
             try:
                 step()
             except Exception as e:
