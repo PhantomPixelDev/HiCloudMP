@@ -273,6 +273,15 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         
     def _create_menubar(self):
         """Standard top menu bar: File / Playback / Tools / Help."""
+        self._build_menubar()
+        # Restore the user's playback speed (after the actions exist).
+        try:
+            self._apply_playback_rate(
+                int(round(self._playback_rate() * 100)), announce=False)
+        except Exception:
+            pass
+
+    def _build_menubar(self):
         mb = self.menuBar()
         # Widget-backed bar: native bars on Windows are handled out-of-process,
         # which makes Python-side wrappers transient and hides QSS styling.
@@ -306,6 +315,15 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
         self.repeat_action = playback_menu.addAction("Repeat")
         self.repeat_action.setCheckable(True)
         self.repeat_action.toggled.connect(self.toggle_repeat)
+        playback_menu.addSeparator()
+        self.speed_menu = playback_menu.addMenu("Speed")
+        self.speed_actions = {}
+        for pct in (50, 75, 100, 125, 150, 200):
+            act = self.speed_menu.addAction(f"{pct / 100:g}x")
+            act.setCheckable(True)
+            act.triggered.connect(
+                lambda _checked=False, p=pct: self._apply_playback_rate(p))
+            self.speed_actions[pct] = act
         mb.addMenu(playback_menu)
 
         # --- Tools ---
@@ -964,6 +982,12 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
 
                 # Force an immediate metadata update
                 QTimer.singleShot(100, self.update_metadata_display)
+
+                # Every new native track starts at the chosen speed.
+                try:
+                    self.player.setPlaybackRate(self._playback_rate())
+                except Exception:
+                    pass
         self.highlight_current_track()
         # Update tray UI
         if hasattr(self, 'update_tray_ui'):
@@ -1311,6 +1335,52 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin):
                     self._eq_gains() if on else (0.0,) * 10)
 
         return apply_cb
+
+    def _playback_rate(self):
+        """User-chosen rate, validated (0.5x-2x; anything else = 1x)."""
+        try:
+            rate = self.settings.value("audio/playback_rate", 1.0, type=float)
+        except Exception:
+            rate = 1.0
+        try:
+            rate = float(rate)
+        except (TypeError, ValueError):
+            rate = 1.0
+        if not (0.5 <= rate <= 2.0):
+            rate = 1.0
+        return rate
+
+    def _apply_playback_rate(self, pct, announce=True):
+        """Set the native-player rate from a percent (100 = normal). The EQ
+        engine has no rate control: keep the stored rate at 1x there and
+        say so rather than pretending it applied."""
+        try:
+            rate = max(0.5, min(2.0, float(pct) / 100.0))
+            if getattr(self, '_using_engine', False):
+                self.settings.setValue("audio/playback_rate", 1.0)
+                self.settings.sync()
+                self._sync_speed_actions(100)
+                if announce:
+                    self.status_bar.showMessage(
+                        "Playback speed needs the equalizer off "
+                        "(the EQ engine has no rate control)", 5000)
+                return
+            self.settings.setValue("audio/playback_rate", rate)
+            self.settings.sync()
+            self.player.setPlaybackRate(rate)
+            self._sync_speed_actions(int(round(rate * 100)))
+            if announce:
+                self.status_bar.showMessage(
+                    f"Playback speed {rate:g}x", 2500)
+        except Exception:
+            pass
+
+    def _sync_speed_actions(self, pct):
+        try:
+            for p, act in self.speed_actions.items():
+                act.setChecked(p == pct)
+        except Exception:
+            pass
 
     def set_volume(self, volume):
         # Dragging the slider is an explicit level choice: leave mute. (The
