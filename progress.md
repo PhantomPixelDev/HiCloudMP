@@ -176,6 +176,23 @@ Landed with this commit (`feat: tray icon is an accent badge ...`):
   undecodable-file playback error UX (modal QMessageBox risk noted
   during probing).
 
-Next in line: P2b playlist UI hook (import/export menus + drop),
-P3 playlist UX, P4 hardening pack, P5b perf round, P6 release (gated).
+`36ab5f3` feat: playlist import/export wired into the File menu
+- Plan P2b: the a016783 format engine got its UI. File menu gains
+  Import Playlist… / Export Playlist….
+- Import: m3u/m3u8/pls/xspf; relatives resolve vs the playlist's own
+  folder; only supported local audio appended (is_music_file+isfile);
+  first-ever import readies track 0; missing rows + stream URLs
+  skipped-with-count (URL queue entries -> P3); failures -> status.
+- Export: selection or whole queue; cloud rows excluded with explicit
+  count; format by save dialog, M3U8 first (default decision); writer
+  relativizes entries under the export folder.
+- P1 followup: Add Files dialog filter stale ( fourth opinion) -> built
+  from SUPPORTED_EXTS so dialog/scan/cloud agree.
+- Tests tests/test_playlist_menu.py red->green (6); suite cold
+  `279 passed, 2 skipped` (test-content fixes: m3u fixtures resolve
+  relative to the playlist's own folder).
+
+Next in line: P3 playlist UX (context menu enrichment, multi-select
+ops, Play Next queue, keyboard ops, dup detection), P4 hardening pack,
+P5b perf round, P6 release (gated on user go).
 
