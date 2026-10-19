@@ -502,3 +502,19 @@ Landed with this commit (`7b3093b`):
 
 Suite: 417 passed, 2 skipped.
 Version remains 1.0.4 until explicit go for 1.0.5.
+
+## 2026-10-20 — fix: library double-click appends to the queue
+
+Landed with this commit:
+
+- Library clicks replaced `self.app.playlist = [item]` and cleared the
+  playlist widget - every left-list click destroyed the queue the user
+  was building. Local and cloud file clicks now APPEND a queue row and
+  play it at its index; playlist/category clicks keep their load paths.
+- Added `MetadataController.queue_label()` as the single shared
+  'Artist – Title' formatter for queue rows (catalog-resolved, no
+  probing); library insertion uses it now, next: queue table + streams.
+- Palette: Subsonic rows keep the title in `name`.
+
+Suite: 419 passed, 2 skipped.
+Version remains 1.0.4 until explicit go for 1.0.5.
