@@ -706,3 +706,18 @@ Suite: 444 passed, 2 skipped. Ruff: clean.
   flows, 446 total green) proves the async signals arrive harmlessly.
 
 Suite: 446 passed, 2 skipped.
+
+## 2026-10-20 — feat: Subsonic token auth + error-41 fallback
+
+- Auth now defaults to t=md5(password+salt)/s=salt (fresh salt per
+  request); ping failure with error code 41 switches the whole session
+  to legacy u/p (Nextcloud Music answers 41 by design).
+- Stored catalog URLs (stream/cover) embed t/s pairs instead of the
+  plaintext password.
+- Ruling: automatic fallback rather than a config flag - the app must
+  keep working against the previously-verified Nextcloud instance out
+  of the box; a flag would silently disable hashing for everyone.
+- Removed the now-dead QApplication import (last user was the deleted
+  processEvents) and a duplicate mid-file hashlib import.
+
+Suite: 448 passed, 2 skipped.
