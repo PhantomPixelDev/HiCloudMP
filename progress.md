@@ -750,3 +750,19 @@ Suite: 453 passed, 2 skipped. Ruff: clean.
   answer with a redirect).
 
 Suite: 454 passed, 2 skipped. Ruff: clean.
+
+## 2026-10-20 - docs: regenerate screenshots from the real UI
+
+- New `tools/make_screenshots.py`: boots the actual MusicPlayer on the
+  offscreen platform against a throwaway demo library (stubbed
+  platformdirs, ini-file QSettings, synthesized tagged MP3s with cover
+  art), stages a playing queue/playlist and grabs 2x PNGs.
+- Registers Segoe UI explicitly: the offscreen platform ships an empty
+  font database, which rendered every glyph as tofu.
+- Replaces the old hand-made mockup `screen.png` (single-column queue,
+  no real widgets) with the current three-column UI; adds
+  `docs/assets/main.png` + `docs/assets/equalizer.png` for the site.
+- Screenshot-only staging (sidebar width, hidden clipped tree column)
+  stays in the generator; no app behavior changes.
+
+Suite: 454 passed, 2 skipped. Ruff: clean.
