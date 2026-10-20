@@ -3,7 +3,6 @@
 Queries the GitHub releases API off the UI thread; pops a dialog only
 when a NEWER release exists (user-initiated check, not per-track noise).
 """
-import pytest
 
 from PySide6.QtWidgets import QMessageBox
 

@@ -6,7 +6,6 @@ old track when the swap happens). Shuffle, Play Next, cloud rows and the
 last row deliberately stay on the normal path.
 """
 import numpy as np
-import pytest
 
 import eq_engine as eq_mod
 

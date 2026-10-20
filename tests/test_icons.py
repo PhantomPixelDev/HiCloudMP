@@ -1,7 +1,5 @@
 """Accent-colored Feather icon set (QtSvg-rendered) replacing stock QStyle icons."""
-import pytest
 
-from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 
 import player as player_mod
@@ -87,7 +85,6 @@ def test_player_buttons_carry_factory_icons(music_player):
         assert not btn.icon().isNull(), f"{glyph}: transport button empty"
 
     # toggle glyph tint tracks its state: accent when checked, dim when not
-    import icons as _icons
     role = "accent" if mp.shuffle_btn.isChecked() else "dim"
     acc = getattr(mp.icon_factory, f"{role}_color")
     got = mp.shuffle_btn.icon().pixmap(20, 20).toImage()

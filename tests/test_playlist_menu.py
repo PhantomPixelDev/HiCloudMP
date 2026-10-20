@@ -6,7 +6,6 @@ import os
 
 from PySide6.QtWidgets import QFileDialog
 
-import player as player_mod
 from utils import SUPPORTED_EXTS
 
 

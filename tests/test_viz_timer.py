@@ -5,7 +5,6 @@ or not — 20 event-loop wakeups per second for a dead spectrum. Now the
 tick stops itself when nothing plays (or the window is hidden), and
 state changes (native or engine) restart it.
 """
-import pytest
 
 
 def _fake_engine(playing):
@@ -28,6 +27,18 @@ def test_timer_runs_while_playing(music_player):
     music_player._using_engine = True
     music_player.eq_engine = _fake_engine(True)
     music_player._update_visualizer()
+    assert music_player._viz_timer.isActive()
+
+
+def test_show_restarts_a_parked_pump(music_player):
+    """A tick while the window was hidden parks the pump (nothing to paint);
+    showing the window while audio plays must restart it. Regression guard
+    for the suite-order race (fixture setup ticks park the pump before
+    show() happens)."""
+    music_player._using_engine = True
+    music_player.eq_engine = _fake_engine(True)
+    music_player._viz_timer.stop()   # parked by an earlier idle tick
+    music_player.show()
     assert music_player._viz_timer.isActive()
 
 

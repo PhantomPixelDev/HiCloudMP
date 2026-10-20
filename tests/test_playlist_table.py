@@ -5,9 +5,8 @@ queue becomes a multi-column table fed by the scanned cloud catalog; the
 widget keeps the QListWidget surface (count()/item()/takeItem()/...)
 because the whole app speaks it.
 """
-import os
 
-from PySide6.QtCore import QPointF, QPoint
+from PySide6.QtCore import QPoint
 from PySide6.QtWidgets import QTreeWidgetItem
 
 

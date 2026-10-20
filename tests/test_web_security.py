@@ -1,9 +1,6 @@
 import pytest
 
 
-import pytest
-
-
 @pytest.fixture()
 def web_server(music_player, monkeypatch):
     """Real WebControlServer against an isolated MusicPlayer, explicit token.
@@ -71,7 +68,6 @@ def test_socket_bad_payload_is_ignored(sio_client_drained):
 
 
 def test_cors_not_wildcard():
-    import re
     from pathlib import Path
 
     src_txt = (Path(__file__).resolve().parents[1] / "web_control.py").read_text(encoding="utf-8")
@@ -82,7 +78,6 @@ def test_cors_not_wildcard():
 def test_player_uses_settings_stored_token(music_player):
     """First enable generates a token and stores it; later reads reuse it."""
     music_player.settings.setValue("web/token", "stored-token-abc")
-    import player as player_mod
 
     music_player.web_port = 0  # never bound in this test
     started = []

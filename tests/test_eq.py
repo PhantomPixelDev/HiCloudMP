@@ -1,7 +1,7 @@
 """Equalizer session: settings gate, dialog apply/cancel, engine routing."""
 import pytest
 
-from PySide6.QtWidgets import QDialog, QMessageBox
+from PySide6.QtWidgets import QMessageBox
 
 import dsp
 from dialogs import EqualizerDialog

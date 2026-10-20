@@ -1,6 +1,5 @@
 """Cloud scan UX: status-bar driven (no modal dialog), parallel Subsonic fetch."""
 import time
-import types
 
 from PySide6.QtWidgets import QProgressDialog
 

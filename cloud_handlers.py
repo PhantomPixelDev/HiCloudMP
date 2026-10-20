@@ -366,12 +366,9 @@ CLOUD_TYPES = {
 }
 
 import hashlib
-import random
-import string
 import time
 import urllib.parse
 import xml.etree.ElementTree as ET
-from io import BytesIO
 import requests
 
 _AMPACHE_API_TIMEOUT = (10, 30)
@@ -442,7 +439,6 @@ class AmpacheHandler(_HTTPCloudHandler):
         # --- paginate the catalog ---
         limit = 1000
         offset = 0
-        songs_xml = None
         while True:
             r = self._http_get(self.endpoint, params={
                 "action": "songs", "limit": limit, "offset": offset, **self._api_params,

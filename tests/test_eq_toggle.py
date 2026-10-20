@@ -10,7 +10,6 @@ engine route (flat gains then).
 """
 import os
 
-from PySide6.QtCore import QUrl
 
 
 def _seed_local_track(mp, tmp_path):

@@ -1,7 +1,6 @@
 """Library as data: an in-memory store built by a background worker.
 The UI tree renders from the store - os.walk must never run on the UI
 thread, and search must never touch the filesystem."""
-import pytest
 
 from library_store import LibraryStore
 
@@ -155,7 +154,6 @@ def test_view_tree_and_search_use_store_not_walk(music_player, tmp_path, monkeyp
     """update_library_tree + search_music render from the store; os.walk
     in the library module is forbidden (UI-thread freeze regression)."""
     import library_view
-    from PySide6.QtWidgets import QTreeWidgetItem
 
     mp = music_player
     mp.media_folders = [str(tmp_path)]

@@ -4,7 +4,6 @@ the action explains that instead of silently doing nothing.
 """
 import pytest
 
-from PySide6.QtMultimedia import QMediaPlayer
 
 
 @pytest.fixture()

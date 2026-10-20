@@ -13,7 +13,6 @@ from io import BytesIO
 
 from PIL import Image
 
-import cover_extractor
 from cover_extractor import CoverExtractor
 
 

@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QFormLayout,
-    QLineEdit, QTabWidget, QWidget, QLabel, QDialogButtonBox, QComboBox,
+    QLineEdit, QWidget, QLabel, QDialogButtonBox, QComboBox,
     QStackedWidget, QCheckBox, QSlider, QListWidget, QListWidgetItem,
     QGroupBox, QScrollArea, QFrame, QToolButton, QColorDialog, QFileDialog,
     QApplication, QMessageBox
@@ -827,7 +827,7 @@ class SettingsDialog(QDialog):
         if error is not None:
             self.update_result_label.setText(f"Update check failed: {error}")
             return
-        from updates_check import APP_VERSION, compare_versions
+        from updates_check import APP_VERSION, RELEASES_PAGE, compare_versions
         verdict = None
         if latest:
             verdict = compare_versions(APP_VERSION, latest)

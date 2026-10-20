@@ -2,7 +2,6 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon, QWidgetAction, QSlider, QInputDialog
 from PySide6.QtWidgets import QStyle
 import os
-import subprocess
 
 import icons as _icons
 from utils import open_folder

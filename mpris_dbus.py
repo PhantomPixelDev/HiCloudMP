@@ -1,6 +1,5 @@
 import os
 import threading
-import time
 import dbus
 import dbus.service
 import dbus.mainloop.glib
@@ -228,12 +227,15 @@ class MprisService:
         try:
             dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
             self._bus = dbus.SessionBus()
-            # Try preferred name, then PID fallback
-            name = None
+            # Try preferred name, then PID fallback. The BusName object must
+            # stay referenced for the process lifetime or dbus-python may
+            # release the name.
+            bus_name = None
             try:
-                name = dbus.service.BusName(MPRIS_SERVICE, bus=self._bus, allow_replacement=True, replace_existing=True, do_not_queue=False)
+                bus_name = dbus.service.BusName(MPRIS_SERVICE, bus=self._bus, allow_replacement=True, replace_existing=True, do_not_queue=False)
             except Exception:
-                name = dbus.service.BusName(f"{MPRIS_SERVICE}.{os.getpid()}", bus=self._bus)
+                bus_name = dbus.service.BusName(f"{MPRIS_SERVICE}.{os.getpid()}", bus=self._bus)
+            self._bus_name = bus_name
             self._obj = _MprisObject(self._bus, self._app)
             # Emit initial state via PropertiesChanged
             try:

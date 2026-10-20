@@ -1,6 +1,5 @@
 import sys
 import os
-import json
 import tempfile
 from datetime import datetime
 
@@ -30,7 +29,7 @@ except Exception:
     pass
 
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import QSettings, Qt as _Qt, qInstallMessageHandler, QtMsgType
+from PySide6.QtCore import QSettings, qInstallMessageHandler, QtMsgType
 
 
 def _qt_message(mode, ctx, msg):
@@ -53,7 +52,6 @@ def _qt_message(mode, ctx, msg):
 qInstallMessageHandler(_qt_message)
 
 # Import custom modules
-from utils import HAS_WIN32
 from player import MusicPlayer
 import theme
 

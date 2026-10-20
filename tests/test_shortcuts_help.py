@@ -3,7 +3,7 @@ playlist) that were discoverable only by accident. Help > Keyboard
 Shortcuts now opens a dialog generated from one data table, so the doc
 cannot drift from the actions it describes.
 """
-from PySide6.QtWidgets import QLabel, QMenu
+from PySide6.QtWidgets import QLabel
 
 import player as player_mod
 

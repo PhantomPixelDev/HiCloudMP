@@ -11,7 +11,6 @@ visualizer saw their choices revert to defaults after every crash:
 any future hard death (power loss, task-kill, unrelated crash) can
 never eat a preference again.
 """
-import pytest
 
 
 def _spy_sync(mp, monkeypatch):

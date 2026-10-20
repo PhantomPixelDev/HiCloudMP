@@ -1,10 +1,8 @@
 import os
 import threading
-import concurrent.futures
 import requests
-from PySide6.QtCore import QObject, Signal, QThread
+from PySide6.QtCore import QObject, Signal
 from io import BytesIO
-from urllib.parse import urlparse
 from cover_extractor import CoverExtractor
 from cloud_handlers import CLOUD_TYPES
 from utils import is_music_file

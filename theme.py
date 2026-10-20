@@ -12,7 +12,6 @@ apply_theme() resolves values from QSettings and applies them to any widget
 widgets QSS cannot reach lives in apply_app_palette().
 """
 
-from datetime import datetime
 import hashlib
 import os
 

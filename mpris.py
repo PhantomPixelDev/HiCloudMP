@@ -1,4 +1,4 @@
-from PySide6.QtCore import QObject, Slot, Property, QByteArray, QTimer
+from PySide6.QtCore import QObject, Slot, Property, QTimer
 from PySide6.QtDBus import (
     QDBusAbstractAdaptor,
     QDBusConnection,
@@ -410,10 +410,12 @@ class Mpris(QObject):
             # Try PID suffix on primary
             service_name = f"{MPRIS_SERVICE_PRIMARY}.{pid}"
             ok = self._conn.registerService(service_name)
-        if not ok:
-            print(f"[MPRIS] Failed to register service name(s). Tried: {service_candidates + [service_name]}.")
-        else:
+        if ok:
+            # Teardown unregisters exactly what was registered.
+            self._service_name = service_name
             print(f"[MPRIS] Registered service: {service_name}")
+        else:
+            print(f"[MPRIS] Failed to register service name(s). Tried: {service_candidates + [service_name]}.")
 
         # Create exported QObject and attach adaptors BEFORE registering the object
         self._export_obj = QObject(self)
@@ -438,6 +440,10 @@ class Mpris(QObject):
         except Exception:
             pass
         try:
-            self._conn.unregisterService(MPRIS_SERVICE)
+            # Unregister the name this instance actually holds (the
+            # candidates loop / PID fallback), not a nonexistent constant.
+            name = getattr(self, "_service_name", None)
+            if name and self._conn.isConnected():
+                self._conn.unregisterService(name)
         except Exception:
             pass

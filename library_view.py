@@ -1,5 +1,5 @@
 import os
-from PySide6.QtWidgets import QMenu, QTreeWidgetItem, QMessageBox, QStyle, QAbstractItemView
+from PySide6.QtWidgets import QTreeWidgetItem, QStyle, QAbstractItemView
 from PySide6.QtCore import Qt
 
 class LibraryView:

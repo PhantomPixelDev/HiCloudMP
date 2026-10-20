@@ -1,14 +1,10 @@
 import os
-import io
 import json
 import time
 import random
 import tempfile
 from datetime import datetime
-from urllib.parse import urlparse
 from platformdirs import user_data_dir, user_cache_dir
-from cover_extractor import CoverExtractor
-import subprocess
 from tray import TrayController
 from metadata import MetadataController
 from playlists_manager import PlaylistsManager
@@ -17,7 +13,10 @@ from playlist_widget import (PlaylistQueueWidget,  # noqa: F401 (queued table)
                              ORIGINAL_SEQ_ROLE)
 # dialogs live in dialogs.py; re-export so existing imports/patches
 # (player.SettingsDialog, monkeypatched player.CloudAccountsDialog) keep working
-from dialogs import CloudAccountsDialog, SettingsDialog  # noqa: F401
+from dialogs import (AddCloudDialog, CloudAccountsDialog,  # noqa: F401 (re-exports)
+                     SettingsDialog)
+
+from web_control import WebControlServer  # noqa: F401  (binds player.WebControlServer for web glue/tests)
 from playback import PlaybackEngineMixin
 from history import PlayHistoryMixin, HISTORY_LIMIT  # noqa: F401
 from folder_watch import (FolderWatchMixin, FOLDER_WATCH_DEBOUNCE_MS,  # noqa: F401
@@ -28,17 +27,13 @@ import icons
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-    QLabel, QSlider, QListWidget, QFileDialog, QMessageBox, QTreeWidget, 
-    QTreeWidgetItem, QSplitter, QLineEdit, QDialog, QFormLayout, QTabWidget, 
-    QToolButton, QStatusBar, QStyle, QFrame, QMenu, QProgressBar, QSystemTrayIcon,
-    QComboBox, QInputDialog, QListWidgetItem, QRadioButton, QDialogButtonBox, QProgressDialog,
-    QCheckBox, QWidgetAction, QGroupBox, QGridLayout, QStackedWidget, QColorDialog,
-    QScrollArea
+    QLabel, QSlider, QFileDialog, QMessageBox, QTreeWidget, 
+    QLineEdit, QDialog, QToolButton, QStatusBar, QFrame, QMenu, QProgressBar, QSystemTrayIcon,
+    QComboBox, QInputDialog, QRadioButton, QDialogButtonBox, QGridLayout
 )
-from PySide6.QtGui import QPainter
-from PySide6.QtCore import Qt, QTimer, Signal, QObject, QThread, QUrl, QSize, QEvent, QSettings
-from PySide6.QtGui import QIcon, QAction, QKeySequence, QKeyEvent, QPalette, QColor, QPixmap
-from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput, QMediaFormat
+from PySide6.QtCore import Qt, QTimer, Signal, QThread, QUrl, QSize, QEvent, QSettings
+from PySide6.QtGui import QIcon, QAction, QKeySequence, QColor
+from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 
 # Import custom modules
 from utils import (
@@ -46,12 +41,9 @@ from utils import (
     MEDIA_FOLDERS_FILE, CLOUD_FILES_FILE, PLAYLISTS_FILE,
     open_folder, atomic_write_text
 )
-from cloud_handlers import CLOUD_TYPES
 from playlist import Playlist
-from dialogs import AddCloudDialog, EditCloudDialog
-from workers import DownloadWorker, ScanCloudWorker, CoverArtWorker
+from workers import DownloadWorker, ScanCloudWorker
 
-from web_control import WebControlServer
 
 # Playlist files that can be dropped onto the queue (they get imported);
 # audio rows are decided by utils.is_music_file.
@@ -1324,6 +1316,15 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
         except Exception:
             pass
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        # A pump parked while the window was hidden (or during startup
+        # event processing before show()) must resume once showing.
+        try:
+            self._viz_follow_state()
+        except Exception:
+            pass
+
     def _update_visualizer(self):
         """Feed the visualizer: engine spectrum when active, else native tap.
 
@@ -1716,10 +1717,6 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
             # Media is loaded, but not yet playing
             current_item = self.playlist[self.current_index] if self.playlist and 0 <= self.current_index < len(self.playlist) else None
             if current_item:
-                if isinstance(current_item, dict):
-                    name = os.path.basename(current_item.get('path', 'Unknown'))
-                else:
-                    name = os.path.basename(str(current_item))
                 # Update labels once media is ready
                 try:
                     self.update_metadata_display()
@@ -1731,10 +1728,6 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
             if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
                 current_item = self.playlist[self.current_index] if self.playlist and 0 <= self.current_index < len(self.playlist) else None
                 if current_item:
-                    if isinstance(current_item, dict):
-                        name = os.path.basename(current_item.get('path', 'Unknown'))
-                    else:
-                        name = os.path.basename(str(current_item))
                     # Ensure metadata labels are accurate when buffered
                     try:
                         self.update_metadata_display()
@@ -1768,9 +1761,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
             current_item = self.playlist[self.current_index] if self.playlist and 0 <= self.current_index < len(self.playlist) else None
             
             # Check if this is a network-related error
-            is_network_issue = False
             if isinstance(current_item, dict) and 'url' in current_item:
-                is_network_issue = True
                 error_msg = f"Network error playing {os.path.basename(current_item.get('path', 'media'))}. Retrying..."
                 self.status_bar.showMessage(error_msg, 5000)
                 
@@ -2264,19 +2255,13 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
         try:
             # For WebDAV, we can stream directly with authentication
             if cloud_type == "webdav" and config:
-                from urllib.parse import quote_plus
-                from base64 import b64encode
-                
                 # Get credentials
                 username = config.get("webdav_login", "")
                 password = config.get("webdav_password", "")
                 
                 if username and password:
-                    # Create authenticated URL
-                    auth_string = f"{username}:{password}"
-                    encoded_auth = b64encode(auth_string.encode()).decode('utf-8')
-                    
-                    # Create the streaming URL with basic auth
+                    # Embed the userinfo directly (the stream backend
+                    # resolves it); the b64 route was never wired up.
                     parsed_url = url.split('://', 1)
                     if len(parsed_url) == 2:
                         scheme, path = parsed_url
@@ -2464,8 +2449,6 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
         for idx in file_indices:
             if idx < 0 or idx >= len(files):
                 continue
-
-            file_info = files[idx]
 
             # Add to playlist widget (catalog-resolved table cells)
             row = {"type": "cloud", "cloud_idx": cloud_idx, "file_idx": idx}
@@ -3671,8 +3654,6 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
             for idx in file_indices:
                 if idx < 0 or idx >= len(files):
                     continue
-
-                file_info = files[idx]
 
                 # Add to playlist widget (catalog-resolved table cells)
                 row = {"type": "cloud", "cloud_idx": cloud_idx,

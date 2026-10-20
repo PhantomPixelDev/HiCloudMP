@@ -1,6 +1,5 @@
 import pytest
 
-from conftest import session_appdata
 
 
 def test_write_and_no_leftovers(tmp_path):

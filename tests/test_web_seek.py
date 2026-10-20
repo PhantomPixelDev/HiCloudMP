@@ -4,7 +4,6 @@ Root cause shared with the desktop seek bug: the handler had been
 calling the NATIVE QMediaPlayer only; with EQ/visualizer routing the
 engine plays and native setPosition is a no-op on an idle player.
 """
-import pytest
 
 
 def test_web_seek_routes_through_player_seek(

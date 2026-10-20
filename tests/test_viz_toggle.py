@@ -9,9 +9,7 @@ engine route).
 """
 import os
 
-import pytest
 
-from PySide6.QtCore import QUrl
 
 
 def test_enabling_viz_re_routes_current_track(music_player, monkeypatch, tmp_path):

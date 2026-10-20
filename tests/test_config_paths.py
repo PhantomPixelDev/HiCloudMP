@@ -1,4 +1,3 @@
-import os
 
 from conftest import session_appdata
 

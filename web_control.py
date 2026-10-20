@@ -2,7 +2,7 @@ import threading
 import os
 import secrets
 import time
-from flask import Flask, request, render_template_string, send_from_directory, jsonify
+from flask import Flask, request, send_from_directory, jsonify
 from flask_socketio import SocketIO, emit
 
 DEFAULT_HOST = "127.0.0.1"

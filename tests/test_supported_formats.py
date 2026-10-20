@@ -5,7 +5,6 @@ add-files dialog advertised aac/m4a/wma — files the ffmpeg backend happily
 plays became invisible to scanning. Formats the backend decodes must be
 owned by one list.
 """
-import string
 
 import pytest
 

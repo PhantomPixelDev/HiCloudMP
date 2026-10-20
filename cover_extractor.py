@@ -1,5 +1,4 @@
 import os
-import io
 import logging
 import subprocess
 import sys
@@ -16,8 +15,8 @@ from mutagen.id3 import ID3, APIC, ID3NoHeaderError
 from mutagen.flac import Picture, FLAC, FLACNoHeaderError
 from mutagen.oggopus import OggOpus, OggOpusHeaderError
 from mutagen.oggvorbis import OggVorbis, OggVorbisHeaderError
-from mutagen.mp4 import MP4, MP4Cover, MP4StreamInfoError
-from urllib.request import urlopen, Request
+from mutagen.mp4 import MP4, MP4StreamInfoError
+from urllib.request import urlopen
 from urllib.error import URLError, HTTPError
 import requests
 from requests.auth import HTTPBasicAuth

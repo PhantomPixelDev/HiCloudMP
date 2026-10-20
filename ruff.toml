@@ -1,0 +1,13 @@
+# Keep the lint contract deliberately small: syntax errors + pyflakes
+# (undefined names, unused imports/variables, mistaken redefinitions).
+# No formatting, no style opinions - this is a correctness tripwire that
+# a CI job can run in seconds, not a naming cop.
+target-version = "py312"
+line-length = 120
+
+[lint]
+select = ["E9", "F"]
+
+[lint.per-file-ignores]
+# Test harness locals are documentation, not bugs.
+"tests/**" = ["F841"]

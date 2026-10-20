@@ -5,7 +5,6 @@ n_bands log-spaced energy values in [0, 1] (60 dB floor). Pure numpy —
 runs on the engine's pump thread budget in microseconds.
 """
 import numpy as np
-import pytest
 
 from spectrum import compute_spectrum
 

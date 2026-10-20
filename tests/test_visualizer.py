@@ -4,10 +4,7 @@ Only the engine path has real audio data to show. When the EQ engine is
 off the visualizer shows a calm idle baseline - never a fake dance (the
 EQ must not be placebo, and neither may the visualizer).
 """
-import numpy as np
-import pytest
 
-from PySide6.QtWidgets import QApplication
 
 
 def test_widget_paints_more_bars_with_data(qapp):
@@ -66,6 +63,27 @@ def test_visualizer_polls_engine_only_in_engine_mode(music_player, monkeypatch):
     assert feeds[-1] is None
 
 
-def test_viz_timer_runs_at_20hz(music_player):
-    assert music_player._viz_timer.interval() == 50
-    assert music_player._viz_timer.isActive()
+def test_viz_timer_pumps_at_20hz_only_while_playing(music_player):
+    """The pump cadence is ~20 Hz, but it parks when nothing plays and
+    restarts on a play-state change (deep coverage: tests/test_viz_timer.py).
+    v1.0.4 ran it forever, even stopped."""
+    mp = music_player
+    assert mp._viz_timer.interval() == 50
+    mp.show()
+
+    class _Playing:
+        def is_playing(self):
+            return True
+
+    mp._using_engine = True
+    mp.eq_engine = _Playing()
+    mp._update_visualizer()
+    assert mp._viz_timer.isActive()
+
+    class _Stopped:
+        def is_playing(self):
+            return False
+
+    mp.eq_engine = _Stopped()
+    mp._update_visualizer()
+    assert not mp._viz_timer.isActive()

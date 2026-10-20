@@ -8,7 +8,6 @@ underran the sink and playback 'hopped'. bufferReady must WAKE the pump
 be deep enough to smooth network streams.
 """
 import numpy as np
-import pytest
 
 import dsp
 from eq_engine import EQEngine

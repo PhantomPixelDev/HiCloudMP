@@ -8,7 +8,6 @@ cache and never touch the filesystem on the UI thread.
 import os
 import wave
 
-import pytest
 
 from library_store import LibraryStore
 from workers import LibraryScanWorker

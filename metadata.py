@@ -47,7 +47,7 @@ class CoverArtWorker(QThread):
                 self.finished.emit(b"")
                 return
             self.finished.emit(data)
-        except Exception as e:
+        except Exception:
             try:
                 # Emit empty on error
                 self.finished.emit(b"")

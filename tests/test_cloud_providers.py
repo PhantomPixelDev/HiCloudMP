@@ -18,7 +18,6 @@ def test_cloud_types_register_new_providers():
 
 def test_ampache_double_hash_handshake_and_song_parse(monkeypatch, tmp_path):
     import cloud_handlers as ch
-    import xml.etree.ElementTree as ET
 
     catalog_xml = (
         '<root><auth>t0ken123</auth><songcount>2</songcount>'

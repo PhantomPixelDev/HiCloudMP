@@ -6,7 +6,6 @@ push-mode QIODevice, so after eq_engine.seek() the pump silently writes
 nothing (bytesFree()==0 no-ops) - playback dies and the position freezes
 at the seek target.
 """
-import os
 import time
 import wave
 import struct
@@ -14,7 +13,6 @@ import math
 
 import pytest
 
-from PySide6.QtCore import QCoreApplication
 
 from PySide6.QtMultimedia import QMediaDevices, QtAudio
 

@@ -20,7 +20,6 @@ def test_end_of_media_advances_after_stream_attempt(music_player, monkeypatch, q
     """Task 11 regression: after one cloud-stream attempt, EndOfMedia on a later
     local track must still auto-advance. The old blanket disconnect() permanently
     killed the app's own mediaStatusChanged subscription."""
-    import player as player_mod
 
     # Make stream retries deterministic (no background timers during the test)
     monkeypatch.setattr(music_player, "_schedule_stream_retry", lambda *a, **k: None)

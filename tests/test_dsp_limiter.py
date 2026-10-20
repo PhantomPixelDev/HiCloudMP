@@ -10,7 +10,6 @@ The EQ-off/flat contract stays bit-exact: samples at or below 0 dBFS
 are untouched (the knee engages strictly above 0 dBFS).
 """
 import numpy as np
-import pytest
 
 import dsp
 

@@ -99,7 +99,6 @@ def test_remove_duplicates_keeps_first_occurrence(music_player):
 
     mp.remove_duplicates_from_playlist()
 
-    keys = [os if False else (str(i)) for i in mp.playlist]
     paths = [p for p in mp.playlist if not isinstance(p, dict)]
     clouds = [c for c in mp.playlist if isinstance(c, dict)]
     assert len(paths) == 3, paths      # alpha, beta, gamma - one alpha only

@@ -12,7 +12,6 @@ bypassed by class-level descriptors and is not trustworthy here.
 """
 from types import SimpleNamespace
 
-import pytest
 
 
 class _NativeStub:

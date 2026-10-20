@@ -4,7 +4,6 @@ The web panel and the tray both read the NATIVE player state, which sits
 idle while the EQ engine plays - the panel showed "stopped" and the tray
 icon showed "stop" during engine playback. effective_playback_state()
 gives both the engine-aware answer."""
-import pytest
 
 
 class _NativeStub:
@@ -42,7 +41,6 @@ def _make(player_state, using_engine=False, engine=None):
 
 
 def test_engine_playing_reports_playing():
-    from playback import PlaybackEngineMixin
     obj = _make(_NativeStub(_NativeStub._State.StoppedState),
                 using_engine=True,
                 engine=_EngineStub(True, False))

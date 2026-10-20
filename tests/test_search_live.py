@@ -3,7 +3,6 @@
 Search reads the in-memory index now (instant), so it should fire per
 keystroke, debounced, instead of waiting for the user to press Enter.
 """
-import pytest
 
 QTIMER_MS = 150
 
