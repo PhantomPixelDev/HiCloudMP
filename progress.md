@@ -721,3 +721,20 @@ Suite: 446 passed, 2 skipped.
   processEvents) and a duplicate mid-file hashlib import.
 
 Suite: 448 passed, 2 skipped.
+
+## 2026-10-20 — feat: DPAPI vault for cloudfiles.json
+
+- New `secure_store.py`: CryptProtectData/CryptUnprotectData
+  (CurrentUser) via ctypes, MAGIC-prefixed base64 payloads,
+  atomic_write_text underneath; load_json reads both vault and legacy
+  plaintext (upgrade-on-next-save).
+- `save_clouds`/`load_clouds` now route through the vault.
+- Ruling: corruption fails LOUDLY (existing error dialog), never
+  silently resets to [] - a silent reset would wipe the user's saved
+  cloud library on one bad decrypt. Non-Windows hosts remain plaintext
+  (packaged app is Windows).
+- Ruling: encrypt-on-nt on save; a vault written on one user account
+  is unreadable on another and raises with a clear message (DPAPI is
+  per-account by design, that is the feature).
+
+Suite: 453 passed, 2 skipped. Ruff: clean.
