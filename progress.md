@@ -589,3 +589,22 @@ Suite: 430 passed, 2 skipped.
   queue-appending semantics rather than restarting the stamp counter.
 
 Suite: 434 passed, 2 skipped.
+
+## 2026-10-20 — feat: queue view state persists
+
+- `_save_queue_view_state()` writes `ui/queue_sort_mode` +
+  `ui/queue_filter`, added to the closeEvent save list.
+- Startup restores both after the queue widget exists (the sort
+  restore fires the normal signal; on the empty startup queue that is
+  a no-op — an earlier restore position crashed on a missing
+  playlist_widget).
+- `_apply_queue_view_state()` re-applies sort (skipped in Original
+  mode: rebuilds already deliver load order) + filter; hooked at the
+  four rebuild sites (load_playlist, load_folder_playlist,
+  load_cloud_folder_playlist, remove_duplicates_from_playlist) and
+  filter-only for append paths.
+- Ruling: Original mode intentionally re-applies nothing on rebuild
+  (load order IS the original); appends never re-sort (only the
+  filter hides non-matching rows).
+
+Suite: 438 passed, 2 skipped.
