@@ -544,3 +544,13 @@ Landed with these commits:
 
 Suite: 424 passed, 2 skipped.
 Version remains 1.0.4 (git) — v1.0.5 tag/push/release awaits explicit go.
+
+## 2026-10-20 — release: v1.0.5 (user-authorized)
+
+- `a5` (this commit) Bumps `APP_VERSION` to 1.0.5 and ships the tag. Carries
+  the four user-reported fixes (history naming `6af1c35`, EQ enable-on-touch
+  `7b3093b`, library click appends `efcd9a5`, queue Title/Artist/Album table
+  `b2eb0fa`) plus the packaged-stack pin to PySide6 6.10.3 (`4fab01f`).
+- Release step in CI fires only on `refs/tags/v*`; pushing main never publishes.
+
+Suite: 424 passed, 2 skipped.

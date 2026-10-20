@@ -8,7 +8,7 @@ import re
 
 import requests
 
-APP_VERSION = "1.0.4"  # bump together with every release tag
+APP_VERSION = "1.0.5"  # bump together with every release tag
 RELEASES_URL = ("https://api.github.com/repos/PhantomPixelDev/"
                 "HiCloudMP/releases/latest")
 RELEASES_PAGE = "https://github.com/PhantomPixelDev/HiCloudMP/releases"
