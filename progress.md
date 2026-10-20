@@ -608,3 +608,18 @@ Suite: 434 passed, 2 skipped.
   filter hides non-matching rows).
 
 Suite: 438 passed, 2 skipped.
+
+## 2026-10-20 — perf: idle visualizer pump costs zero
+
+- `_viz_wanted()` = playing (engine is_playing / native
+  playbackState) AND visible AND not minimized; `_update_visualizer`
+  parks the timer after one last baseline tick when not wanted.
+- Native `playbackStateChanged` + engine `state_changed` +
+  `changeEvent(WindowStateChange)` restart the pump (`_viz_follow_state`);
+  probe failures fail open (keep pumping) so a dead backend never
+  freezes a live spectrum.
+- Ruling: parked state paints no further decay; the widget keeps its
+  idle baseline because the parking tick already fed the final
+  baseline set_spectrum(None / idle spectrum).
+
+Suite: 442 passed, 2 skipped.
