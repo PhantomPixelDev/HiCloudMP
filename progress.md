@@ -785,3 +785,15 @@ Suite: 454 passed, 2 skipped. Ruff: clean.
   `.../HiCloudMP-portable.zip`.
 
 Suite: 454 passed, 2 skipped. Ruff: clean.
+
+## 2026-10-20 - docs: publish the landing page on GitHub Pages
+
+- Enabled Pages (branch `main`, folder `/docs`, legacy build) via the API;
+  the site is live at https://phantompixeldev.github.io/HiCloudMP/ and
+  serves the page plus both screenshots and the favicon (all HTTP 200).
+- Repo homepage set to the site; README and site download links use the
+  permanent release aliases (both answer 302 → current assets).
+- CI run on the pre-docs commit 5598731 confirmed success; the new main
+  push runs the workflow with the alias step.
+
+Suite: 454 passed, 2 skipped. Ruff: clean.
