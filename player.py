@@ -278,6 +278,16 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
         self._viz_timer.setInterval(50)
         self._viz_timer.timeout.connect(self._update_visualizer)
         self._viz_timer.start()
+        # The pump parks itself when nothing plays (idle cost: zero). Play
+        # starts on either backend must restart it: both state signals.
+        try:
+            self.player.playbackStateChanged.connect(self._viz_follow_state)
+        except Exception:
+            pass
+        try:
+            self.eq_engine.state_changed.connect(self._viz_follow_state)
+        except Exception:
+            pass
         
         # Folder watching: new/removed files in library folders refresh the
         # Local Media tree automatically (debounced burst -> one scan).
@@ -1281,8 +1291,45 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
         except Exception:
             pass
 
+    def _viz_wanted(self):
+        """True when the visualizer has something to paint: playing on
+        either backend AND a visible window."""
+        try:
+            if not self.isVisible() or self.isMinimized():
+                return False
+        except Exception:
+            return True
+        try:
+            if getattr(self, "_using_engine", False):
+                return self.eq_engine.is_playing()
+            return self.player.playbackState() == QMediaPlayer.PlayingState
+        except Exception:
+            return True   # unknown state -> fail open (keep pumping)
+
+    def _viz_follow_state(self, *_args):
+        """Restart the parked visualizer pump on a play-state or window
+        change; the next tick parks it again if the state says so."""
+        try:
+            if not self._viz_timer.isActive():
+                self._viz_timer.start()
+        except Exception:
+            pass
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        try:
+            if event is not None and \
+                    event.type() == QEvent.Type.WindowStateChange:
+                self._viz_follow_state()
+        except Exception:
+            pass
+
     def _update_visualizer(self):
-        """Feed the visualizer: engine spectrum when active, else native tap."""
+        """Feed the visualizer: engine spectrum when active, else native tap.
+
+        Self-parking: when nothing is playing (or the window cannot show
+        the result) the timer stops after one final baseline tick, so an
+        idle app costs zero timer wakeups."""
         try:
             if getattr(self, "_using_engine", False):
                 data = self.eq_engine.get_spectrum()
@@ -1298,6 +1345,12 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
             self.visualizer.set_spectrum(data)
         except Exception:
             pass
+        try:
+            wanted = self._viz_wanted()
+        except Exception:
+            wanted = True
+        if not wanted:
+            self._viz_timer.stop()
 
     def update_position(self, position):
         self.seek_slider.blockSignals(True)
