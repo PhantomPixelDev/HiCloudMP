@@ -797,3 +797,11 @@ Suite: 454 passed, 2 skipped. Ruff: clean.
   push runs the workflow with the alias step.
 
 Suite: 454 passed, 2 skipped. Ruff: clean.
+
+## 2026-10-20 - docs(site): single hero screenshot
+
+- Removed the duplicate main-window figure from the "closer look"
+  section; the hero already shows it, so that section is now the
+  equalizer split alone. No content or link changes.
+
+Suite: 454 passed, 2 skipped. Ruff: clean.
