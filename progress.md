@@ -623,3 +623,16 @@ Suite: 438 passed, 2 skipped.
   baseline set_spectrum(None / idle spectrum).
 
 Suite: 442 passed, 2 skipped.
+
+## 2026-10-20 — build: reproducible CI pins (ffmpeg, nuitka)
+
+- Packaged ffmpeg is now the permanent versioned URL
+  (codexffmpeg 9.0.2 essentials, sha256 60f46726…2047ba in the
+  workflow comment), replacing the floating gyan.dev
+  "release-essentials" alias.
+- Nuitka pinned to 4.3.1 (the version verified with PySide6 6.10.3
+  packaging).
+- Release v1.0.5 confirmed published by CI earlier today: portable zip
+  (111.6 MB) + Setup 1.0.5 exe (74.9 MB), auto-generated notes.
+
+Suite: release-packaging tests green.
