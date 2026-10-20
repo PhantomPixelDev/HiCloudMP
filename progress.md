@@ -738,3 +738,15 @@ Suite: 448 passed, 2 skipped.
   per-account by design, that is the feature).
 
 Suite: 453 passed, 2 skipped. Ruff: clean.
+
+## 2026-10-20 - ci: stable-named installer alias for direct downloads
+
+- Release step now copies the versioned installer to
+  `HiCloudMP-Setup.exe` and publishes both, so the README and site can
+  link `releases/latest/download/HiCloudMP-Setup.exe` permanently.
+- Contract test asserts the alias copy and the release file list.
+- Backfilled the alias onto the existing v1.0.5 release via `gh` so the
+  permanent link works before the next tag (verified: both direct links
+  answer with a redirect).
+
+Suite: 454 passed, 2 skipped. Ruff: clean.

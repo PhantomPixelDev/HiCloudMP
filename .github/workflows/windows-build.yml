@@ -99,6 +99,10 @@ jobs:
           choco install innosetup -y --no-progress
           $ver = $env:GITHUB_REF_NAME.TrimStart('v')
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=$ver packaging\HiCloudMP.iss
+          # Stable-named alias so README/site can link
+          # releases/latest/download/HiCloudMP-Setup.exe forever (the
+          # versioned file remains the canonical download page asset).
+          Copy-Item "packaging\Output\HiCloudMP-Setup-$ver.exe" packaging\Output\HiCloudMP-Setup.exe
 
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -107,4 +111,5 @@ jobs:
           files: |
             HiCloudMP-portable.zip
             packaging/Output/HiCloudMP-Setup-*.exe
+            packaging/Output/HiCloudMP-Setup.exe
           generate_release_notes: true

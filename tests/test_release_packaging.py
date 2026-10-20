@@ -44,6 +44,17 @@ def test_workflow_bundles_ffmpeg():
     assert "nuitka==" in wf
 
 
+def test_workflow_publishes_stable_named_installer_alias():
+    """The README/site link a permanent direct download:
+    releases/latest/download/HiCloudMP-Setup.exe. The build must publish
+    that unversioned copy next to the versioned installer every tag."""
+    wf = _wf()
+    assert "HiCloudMP-Setup-$ver.exe" in wf, \
+        "installer copy step must derive the alias from the tag version"
+    assert "packaging/Output/HiCloudMP-Setup.exe" in wf, \
+        "release files must include the stable-named installer"
+
+
 def test_workflow_bundles_qt_multimedia_backend():
     """v1.0.0 regression: Nuitka ships qt6multimedia.dll but NOT the
     qt-plugins\\multimedia ffmpeg backend (the only audio decoder since
