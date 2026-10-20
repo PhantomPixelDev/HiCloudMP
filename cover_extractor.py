@@ -1,5 +1,4 @@
 import os
-import json
 import io
 import logging
 import subprocess
@@ -9,7 +8,7 @@ from base64 import b64decode
 from PIL import Image, UnidentifiedImageError
 import mutagen
 
-# Windows: child processes (ffmpeg/ffprobe) must never flash a console
+# Windows: child processes (ffmpeg) must never flash a console
 # window in the packaged GUI build.
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 from mutagen import MutagenError
@@ -350,79 +349,6 @@ class CoverExtractor:
             logger.error(f"Unexpected error in extract_cover: {e}", exc_info=True)
             return None
 
-    @staticmethod
-    def extract_metadata(file_path_or_url, is_url=False, timeout=5):
-        """Extract basic metadata (title/artist/album) via ffprobe quickly.
-        Returns dict with keys: title, artist, album if found.
-        """
-        try:
-            target = file_path_or_url
-            headers = None
-            if is_url:
-                # If URL contains creds, move them to a Basic Auth header and strip from URL
-                try:
-                    from urllib.parse import urlparse, urlunparse, quote
-                    parsed = urlparse(file_path_or_url)
-                    if parsed.username and parsed.password:
-                        import base64
-                        auth = f"{parsed.username}:{parsed.password}".encode()
-                        headers = 'Authorization: Basic ' + base64.b64encode(auth).decode()
-                    # Strip creds and percent-encode path
-                    netloc = parsed.hostname or ''
-                    if parsed.port:
-                        netloc += f":{parsed.port}"
-                    path = quote(parsed.path or '', safe='/')
-                    target = urlunparse((parsed.scheme, netloc, path, parsed.params, parsed.query, parsed.fragment))
-                except Exception:
-                    pass
-
-            cmd = [
-                'ffprobe',
-                '-v', 'quiet',
-                '-print_format', 'json',
-                '-show_format',
-            ]
-            if is_url and headers:
-                # Pass HTTP header to ffprobe for auth
-                cmd += ['-headers', headers]
-            cmd.append(target)
-
-            try:
-                result = subprocess.run(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    timeout=timeout,
-                    creationflags=_NO_WINDOW,
-                )
-            except subprocess.TimeoutExpired:
-                logger.warning("ffprobe metadata extraction timed out")
-                return {}
-
-            if result.returncode != 0 or not result.stdout:
-                return {}
-            try:
-                data = json.loads(result.stdout)
-            except Exception:
-                return {}
-
-            tags = (data.get('format') or {}).get('tags') or {}
-            title = tags.get('title') or tags.get('TITLE') or ''
-            artist = tags.get('artist') or tags.get('ARTIST') or ''
-            album = tags.get('album') or tags.get('ALBUM') or ''
-            out = {}
-            if title:
-                out['title'] = title
-            if artist:
-                out['artist'] = artist
-            if album:
-                out['album'] = album
-            return out
-        except Exception as e:
-            logger.warning(f"Metadata extraction failed: {e}")
-            return {}
-    
     @staticmethod
     def _extract_id3_cover(file_path_or_obj):
         """Extract cover art from ID3 tags (MP3)"""

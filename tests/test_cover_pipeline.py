@@ -140,9 +140,8 @@ def test_update_cover_art_prefers_row_cover_url(music_player, monkeypatch):
     assert captured == {"src": "https://s/getCoverArt?id=ca1", "isu": True}, captured
 
 
-def test_no_now_playing_toasts(music_player, monkeypatch):
-    mp = music_player
-    monkeypatch.setattr(metadata_mod.CoverExtractor, "extract_metadata", lambda *a, **k: {})
+def test_no_now_playing_toasts(music_player):
+    mp = music_player   # the blocking ffprobe path no longer exists at all
 
     calls = []
 
@@ -163,15 +162,11 @@ def test_no_now_playing_toasts(music_player, monkeypatch):
     assert calls == [], f"toast spam: {len(calls)} 'Now Playing' notifications shown"
 
 
-def test_metadata_display_skips_ffprobe_when_row_complete(music_player, monkeypatch):
+def test_metadata_display_skips_ffprobe_when_row_complete(music_player):
+    import cover_extractor as cover_mod
     mp = music_player
-    probe_calls = []
-
-    def fake_probe(*a, **k):
-        probe_calls.append(1)
-        return {}
-
-    monkeypatch.setattr(metadata_mod.CoverExtractor, "extract_metadata", fake_probe)
+    # Structural: no ffprobe path exists to call (see the deletion ruling).
+    assert not hasattr(cover_mod.CoverExtractor, "extract_metadata")
     mp.tray = types.SimpleNamespace(tray_icon=None, update_tray_ui=lambda: None)
 
     mp.clouds = [{"name": "T Cloud", "config": {}, "files": [
@@ -182,4 +177,4 @@ def test_metadata_display_skips_ffprobe_when_row_complete(music_player, monkeypa
 
     mp.meta.update_metadata_display()
 
-    assert probe_calls == [], "ffprobe must not run when scan rows already carry full metadata"
+    assert "S" in mp.track_title_label.text()

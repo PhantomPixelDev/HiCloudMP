@@ -119,6 +119,8 @@ def test_subprocesses_never_flash_console():
     src = (ROOT / "cover_extractor.py").read_text(encoding="utf-8")
     assert "CREATE_NO_WINDOW" in src
     runs = src.count("creationflags=_NO_WINDOW")
-    assert runs >= 2, f"expected every ffmpeg/ffprobe spawn flagged, got {runs}"
+    # Exactly one spawn remains: the ffmpeg cover extraction (the ffprobe
+    # metadata spawn was deleted — dead code, and ffprobe.exe never shipped).
+    assert runs >= 1, f"expected the ffmpeg spawn flagged, got {runs}"
     # the helper must be a no-op off Windows
     assert 'os.name == "nt"' in src

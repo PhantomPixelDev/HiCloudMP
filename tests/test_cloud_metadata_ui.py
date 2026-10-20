@@ -20,18 +20,14 @@ def _cloud_item(**overrides):
 
 
 def test_cloud_track_uses_scan_name_without_a_blocking_probe(
-        music_player, monkeypatch):
-    import metadata as metadata_mod
+        music_player):
+    import cover_extractor as cover_mod
 
-    calls = []
+    # Structural: the blocking ffprobe metadata path no longer exists (the
+    # packaged build never shipped ffprobe.exe; metadata comes from the
+    # scan worker's mutagen tags).
+    assert not hasattr(cover_mod.CoverExtractor, "extract_metadata")
 
-    def fake_extract(*args, **kwargs):
-        calls.append((args, kwargs))
-        time.sleep(1.0)          # a real remote ffprobe is slower than this
-        return {"title": "From the network"}
-
-    monkeypatch.setattr(metadata_mod.CoverExtractor, "extract_metadata",
-                        staticmethod(fake_extract))
     mp = music_player
     mp.playlist = [_cloud_item()]
     mp.current_index = 0
@@ -40,21 +36,13 @@ def test_cloud_track_uses_scan_name_without_a_blocking_probe(
     mp.meta.update_metadata_display()
     elapsed = time.perf_counter() - started
 
-    assert calls == [], "cloud metadata must not be probed on the UI thread"
     assert elapsed < 0.5, f"display blocked for {elapsed:.2f}s"
     assert "Glock 40 (Radio Edit)" in mp.track_title_label.text()
     assert "Various Artists" in mp.track_artist_label.text()
     assert "Unknown album" in mp.track_album_label.text()
 
 
-def test_cloud_track_falls_back_to_path_basename(music_player, monkeypatch):
-    import metadata as metadata_mod
-
-    calls = []
-    monkeypatch.setattr(
-        metadata_mod.CoverExtractor, "extract_metadata",
-        staticmethod(lambda *a, **k: calls.append(1) or {}))
-
+def test_cloud_track_falls_back_to_path_basename(music_player):
     mp = music_player
     mp.playlist = [{
         "type": "cloud",
@@ -65,7 +53,6 @@ def test_cloud_track_falls_back_to_path_basename(music_player, monkeypatch):
     mp.current_index = 0
     mp.meta.update_metadata_display()
 
-    assert calls == []
     assert "Track Name" in mp.track_title_label.text()
     assert "Unknown Artist" in mp.track_artist_label.text()
     assert "Unknown Album" in mp.track_album_label.text()
