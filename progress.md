@@ -690,3 +690,19 @@ Suite: 443 passed, 2 skipped.
   exposed: startup event processing parks the pump before show()).
 
 Suite: 444 passed, 2 skipped. Ruff: clean.
+
+## 2026-10-20 — refactor: zero processEvents in production
+
+- Removed the 4 remaining QApplication.processEvents() calls in
+  play_cloud_file / play_downloaded_file: 2 paint-now straws (status
+  bar repaints on the next loop turn anyway) and 2 stop/setSource
+  "settle" pumps that closeEvent already performs bare (the close-path
+  comment cites that exact sequence as crash-fix, unpumped).
+- Guarded by tests/test_unpumped_flows.py: behavioral (flows run with
+  processEvents monkeypatched to a recorder - must stay silent) and
+  structural (source tripwire forbids reintroduction).
+- Ruling: re-entrant delivery during stop/remount is the failure mode
+  processEvents is infamous for, and the suite (buffering/seek/close
+  flows, 446 total green) proves the async signals arrive harmlessly.
+
+Suite: 446 passed, 2 skipped.
