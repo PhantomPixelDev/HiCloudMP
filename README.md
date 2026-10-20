@@ -1,169 +1,137 @@
-# HiCloud MP
+<p align="center">
+  <img src="cover.png" width="132" alt="HiCloud MP logo — a vinyl record">
+</p>
 
-A modern desktop music player for your local files and your cloud libraries —
-with a **real 10-band equalizer**, a **phone-friendly web remote**, cover art,
-and a Windows installer built automatically by CI.
+<h1 align="center">HiCloud MP</h1>
 
-![HiCloud MP — main window, dark theme with the accent play circle and themed icons](screen.png)
+<p align="center">
+  <strong>Your music, local and cloud, in one quiet player.</strong><br>
+  A friendly Windows music player with a real 10-band equalizer,
+  playlists, cover art and a remote for your phone.
+</p>
+
+<p align="center">
+  <a href="https://github.com/PhantomPixelDev/HiCloudMP/releases/latest/download/HiCloudMP-Setup.exe"><img src="https://img.shields.io/badge/Download_for_Windows-Installer-10b981?style=for-the-badge&logo=windows&logoColor=white" alt="Download the Windows installer"></a>
+  <a href="https://github.com/PhantomPixelDev/HiCloudMP/releases/latest/download/HiCloudMP-portable.zip"><img src="https://img.shields.io/badge/Portable_version-ZIP-334155?style=for-the-badge&logo=files&logoColor=white" alt="Download the portable ZIP"></a>
+</p>
+
+<p align="center">
+  <sub>Windows 10 / 11 &nbsp;·&nbsp; free and open source (MIT) &nbsp;·&nbsp; no account, no telemetry</sub>
+</p>
+
+![HiCloud MP — library, queue and now-playing card in the dark theme](screen.png)
+
+## Download
+
+Both buttons always download the newest release — no version hunting.
 
 | | |
 |---|---|
-| ![Python](https://img.shields.io/badge/Python-3.12%2B-blue) | ![PySide6](https://img.shields.io/badge/Qt-PySide6-green) |
-| ![CI](https://github.com/PhantomPixelDev/HiCloudMP/actions/workflows/windows-build.yml/badge.svg) | ![License](https://img.shields.io/badge/License-MIT-lightgrey) |
+| **Installer** <br><sub>recommended</sub> | [**HiCloudMP-Setup.exe**](https://github.com/PhantomPixelDev/HiCloudMP/releases/latest/download/HiCloudMP-Setup.exe) — about 75 MB. Adds HiCloud MP to the Start menu and installs an uninstaller. No Python or extra codecs needed. |
+| **Portable** | [**HiCloudMP-portable.zip**](https://github.com/PhantomPixelDev/HiCloudMP/releases/latest/download/HiCloudMP-portable.zip) — about 112 MB. Unzip it anywhere, run `HiCloudMP.exe`, and take your player with you. |
 
-## Highlights
+> **First launch and SmartScreen.** The app isn't code-signed yet, so Windows
+> may show *"Windows protected your PC"*. Click **More info → Run anyway** —
+> the builds come straight from this repository's GitHub Actions.
+>
+> Want release notes or an older version? See
+> [all releases](https://github.com/PhantomPixelDev/HiCloudMP/releases).
 
-- ☁️ **Cloud libraries** — Nextcloud/WebDAV, Ampache and Subsonic servers.
-  Albums are scanned in parallel (8×) and stream directly, so a song is
-  audible seconds after you press play.
-- 🎚️ **Real 10-band equalizer** — decoding → FFT overlap-add DSP → audio
-  sink for *every* played track (local or streamed). Presets and custom
-  gains apply live; zero-gain settings are a bit-exact bypass, and any
-  engine problem falls back to native playback automatically.
-- 🖼️ **Cover art pipeline** — pulled from tags (ID3/Vorbis/MP4/FLAC),
-  stream metadata, or extracted with ffmpeg when nothing else has it.
-- 🌐 **Web remote that normal people can use** — Settings shows one
-  ready-to-open link; the panel shows a live connection pill (`Connected ·
-  42 ms` / `Offline`). Tokens are handled for you (embedded in the link,
-  then hidden from the browser URL); LAN exposure is one checkbox.
-- 🎨 **Theme system** — Dark/Light, 12 accent presets or *any* custom
-  color, comfortable/compact density, and an optional background image
-  ("wallpaper mode") with an adjustable darkness slider. Icons are
-  rendered from code and re-tinted with the theme — no stale asset files.
-- 🧰 **Full remote control from everywhere** — in-app menus, tray menu
-  with transport + volume + seek, and MPRIS media keys on Linux desktops.
-- 🔒 **Security by default** — the web server binds to `127.0.0.1` unless
-  you explicitly allow the LAN; every route and socket requires the token;
-  config files are written atomically so a crash can't corrupt them.
+## What you can do
 
-## Downloads (Windows)
+- **Bring your library together.** Add your music folders once, then browse
+  by name, artist and album — with instant search and a queue you can filter
+  and sort.
+- **Stream from your cloud.** Connect Nextcloud or any WebDAV server, a
+  Subsonic-compatible server, or Ampache. Albums scan in the background and
+  play directly — nothing to sync, nothing to download twice.
+- **Shape the sound.** A real 10-band equalizer with presets and custom
+  curves. Changes apply while the music plays, and flat settings are a
+  bit-exact bypass.
+- **Keep the queue moving.** Title / artist / album columns, drag to reorder,
+  Play Next, shuffle, repeat — and the queue remembers its sort and filter
+  between sessions.
+- **Use your phone as the remote.** Settings → Web Remote gives you a link
+  that works on the same Wi-Fi, with no app to install. It's token protected
+  and stays local unless you allow other devices.
+- **Stay private.** No account, no telemetry. Settings and playlists stay on
+  your PC, and saved cloud passwords are encrypted with Windows DPAPI (locked
+  to your Windows user).
 
-Grab the latest release from
-[**Releases**](https://github.com/PhantomPixelDev/HiCloudMP/releases):
+## Get started in three steps
 
-- `HiCloudMP-Setup-x.y.z.exe` — standard installer (program files, start
-  menu, optional desktop shortcut). **No Python needed** — everything is
-  bundled.
-- `HiCloudMP-portable.zip` — unzip anywhere and run `HiCloudMP.exe`,
-  nothing is installed.
+1. **Install** the app — or unzip the portable build.
+2. **Add your music** — `Add Folder` for local files, or `Add Cloud` →
+   `Scan Cloud` for a server.
+3. **Press play.** `Tools → Equalizer` and `Settings → Web Remote` are one
+   click away.
 
-Both are built automatically on every version tag by GitHub Actions
-(Nuitka standalone + Inno Setup, ffmpeg bundled for cover extraction).
+<img src="docs/assets/equalizer.png" width="430" alt="The 10-band equalizer with the Rock preset">
 
-Your data (settings, playlists, cloud accounts) lives in per-user app data
-and is never touched by installs, upgrades or uninstall.
+Works with **WebDAV** servers (Nextcloud, ownCloud), **Subsonic-compatible**
+servers (Subsonic, Navidrome, Airsonic, Nextcloud Music) and
+**Ampache-compatible** servers. You'll need the server address and your login;
+an app password is fine.
 
-## Running from source
+Your data lives in `%LOCALAPPDATA%\HiCloudMP\HiCloudMP`. Installing,
+upgrading or uninstalling never touches your settings, playlists or music.
 
-Requirements: Python 3.12+ and `pip`.
+## Good to know
+
+- **Requirements:** Windows 10 or 11, 64-bit.
+- **Updates:** *Settings → Check for updates* compares your version with the
+  latest GitHub release.
+- **Uninstall:** *Settings → Apps → HiCloud MP*. Your music and settings stay
+  untouched.
+- **Linux:** the source runs on Linux (with MPRIS media keys); packaged
+  builds are Windows-only for now.
+
+## For developers
+
+<details>
+<summary><strong>Run from source, tests and packaging</strong></summary>
+
+**Run from source** (Python 3.12+):
 
 ```bash
-git clone https://github.com/phantompixeldev/HiCloudMP.git
+git clone https://github.com/PhantomPixelDev/HiCloudMP.git
 cd HiCloudMP
-python -m venv venv
-venv\Scripts\activate          # Windows
-source venv/bin/activate       # macOS/Linux
+python -m venv .venv
+.venv\Scripts\activate          # Windows
+source .venv/bin/activate       # macOS / Linux
 pip install -r requirements.txt
-# Linux desktops with MPRIS/media keys:
-pip install -r requirements-linux.txt
 python main.py
 ```
 
-Linux desktop only: install the DBus/GLib bits if your distro doesn't have
-them — `sudo pacman -S python-gobject` (Arch) or
-`sudo apt-get install python3-gi gir1.2-glib-2.0` (Debian/Ubuntu).
+On Linux, also install `requirements-linux.txt` (MPRIS/media keys) and the
+PyGObject packages your distro needs.
 
-## Using it
-
-### Music library
-
-- **Add Folder / Add Files** builds a local library (mp3, flac, wav, ogg,
-  aac, m4a, wma) with cover art and searchable, album-grouped browsing.
-- **Add Cloud** connects Nextcloud/WebDAV, Ampache or Subsonic — enter the
-  server URL and credentials, then **Scan Cloud**. Status flows through
-  the status bar (no blocking dialogs); a failed account can't stall the
-  others.
-
-### Playback
-
-- Full transport (play/pause, stop, next/prev), shuffle, repeat,
-  drag-seek, volume.
-- **Tools → Equalizer** for the 10-band engine: pick a preset, tweak
-  sliders, apply live. Close = keep; Cancel = restore.
-- Tray menu mirrors everything: Now Playing, play/pause, next/prev, stop,
-  seek, shuffle/repeat, mute, volume slider, show/hide, quit.
-- Keyboard media keys through MPRIS on Linux desktops.
-
-Verify MPRIS (optional, Linux):
+**Tests** (headless/offscreen, no audio device required):
 
 ```bash
-playerctl -l
-playerctl -p hicloudmp status
-playerctl -p hicloudmp play-pause
-playerctl -p hicloudmp metadata
+pip install -r requirements-dev.txt
+.venv\Scripts\python -m pytest -q
 ```
 
-### Web remote
+**Packaging:** `.github/workflows/windows-build.yml` builds the standalone app
+with Nuitka on every push. Pushing a `v*` tag additionally compiles the Inno
+Setup installer and publishes the release with `HiCloudMP-portable.zip`, the
+versioned installer, and the stable `HiCloudMP-Setup.exe` alias used by the
+download buttons above.
 
-1. **Settings → Web Remote**: turn it on.
-2. Click **Copy link** (or **Open in browser**).
-3. Open the link on your phone/tablet — same Wi-Fi, zero setup.
-4. Want it from other devices on the network? Enable
-   *Allow other devices on this network*.
+**Screenshots:** `tools/make_screenshots.py` renders the real UI headlessly
+against a throwaway demo library, so `screen.png` and the site images can be
+regenerated after UI changes.
 
-> The panel is token-protected; the token is embedded in the link Settings
-> generates and is stored only in the browser session — it's stripped from
-> the visible URL so it can't leak through bookmarks or shared tabs. The
-> ping endpoint affects nothing about the player (liveness only).
+Contributions are welcome — keep the suite green and open a PR.
 
-### Playlists
+[![CI](https://github.com/PhantomPixelDev/HiCloudMP/actions/workflows/windows-build.yml/badge.svg)](https://github.com/PhantomPixelDev/HiCloudMP/actions/workflows/windows-build.yml)
 
-Add tracks to the queue → **New Playlist** → name it → **Save Playlist**.
-Everything is stored in plain JSON in per-user app data
-(`mediafolders.json`, `cloudfiles.json`, `playlists.json`).
+</details>
 
-## Building & packaging
+## Links
 
-- **Tests**: `pip install -r requirements-dev.txt` then `pytest tests/`
-  from the repo root (all headless/offscreen).
-- **Windows builds**: `.github/workflows/windows-build.yml` runs Nuitka
-  standalone (PySide6 plugin, console-free, app icon) on every push/PR and
-  attaches a portable zip artifact. Pushing a `v*` tag additionally
-  compiles the Inno Setup installer (`packaging/HiCloudMP.iss`) and
-  publishes both files as a GitHub Release.
-- Local packaging: build with the same Nuitka flags, place `ffmpeg.exe`
-  next to the exe (it is found automatically by `cover_extractor`), then
-  `ISCC /DAppVersion=1.2.3 packaging/HiCloudMP.iss`.
-
-## Troubleshooting
-
-- **Media keys not working (Linux)** but `playerctl` works: close other
-  media apps so the desktop routes the keys to HiCloud MP, and make sure
-  it is the last active player. Ensure a DBus user bus exists (normal on
-  desktop Linux).
-- **Web remote unreachable from the phone**: enable *Allow other devices
-  on this network* (Settings → Web Remote) and check that both devices
-  are on the same Wi-Fi; then copy the link again — it will contain the
-  desktop's LAN address.
-- **A track skips or stutters**: check CPU load and that the output
-  device isn't in exclusive mode. The equalizer engine keeps seconds of
-  buffered audio on purpose; if something still disrupts playback the app
-  falls back to the native pipeline automatically (watch the status bar).
-- **Web remote fails to start**: Flask and Flask-SocketIO come from
-  `requirements.txt` — reinstall them.
-
-## Roadmap
-
-- Visualizer view for the currently playing track
-- Custom per-cloud artwork caching improvements
-- Packaging for macOS / Linux (AppImage)
-
-## Contributing
-
-Contributions are welcome! Please open a PR — CI runs installer +
-portable builds on every branch push, and `pytest tests/` must stay
-green before merging.
-
-## License
-
-[MIT](LICENSE)
+[Website](https://PhantomPixelDev.github.io/HiCloudMP/) ·
+[Releases](https://github.com/PhantomPixelDev/HiCloudMP/releases) ·
+[Issues](https://github.com/PhantomPixelDev/HiCloudMP/issues) ·
+[MIT license](LICENSE)

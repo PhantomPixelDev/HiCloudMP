@@ -766,3 +766,22 @@ Suite: 454 passed, 2 skipped. Ruff: clean.
   stays in the generator; no app behavior changes.
 
 Suite: 454 passed, 2 skipped. Ruff: clean.
+
+## 2026-10-20 - docs: user-first README + GitHub Pages landing page
+
+- README rewritten for listeners, not developers: direct installer and
+  portable buttons that always resolve to the newest release, one
+  screenshot of the real app, plain-language features, three-step start,
+  SmartScreen note, data location and uninstall notes.
+- Privacy copy corrected: saved cloud passwords are DPAPI-encrypted (the
+  old README still described `cloudfiles.json` as plaintext).
+- Developer content (source run, tests, packaging, screenshot
+  regeneration) moved into a collapsed details block.
+- New self-contained `docs/index.html` (no JS, no external fonts or
+  assets) with hero screenshot, feature grid, equalizer section, download
+  cards, FAQ and footer; `.nojekyll` + favicon included.
+- Both download surfaces use the stable aliases:
+  `releases/latest/download/HiCloudMP-Setup.exe` and
+  `.../HiCloudMP-portable.zip`.
+
+Suite: 454 passed, 2 skipped. Ruff: clean.

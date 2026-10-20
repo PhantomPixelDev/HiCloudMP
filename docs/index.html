@@ -1,0 +1,917 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HiCloud MP — your music, local and cloud</title>
+<meta name="description" content="A friendly Windows music player for local files and cloud libraries, with a real 10-band equalizer, playlists and a web remote for your phone. Free and open source.">
+<meta name="theme-color" content="#0b0f14">
+<meta property="og:type" content="website">
+<meta property="og:title" content="HiCloud MP — your music, local and cloud">
+<meta property="og:description" content="A friendly Windows music player with a real 10-band equalizer, cloud streaming and a phone remote. Free, open source, no account.">
+<meta property="og:image" content="https://raw.githubusercontent.com/PhantomPixelDev/HiCloudMP/main/screen.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="favicon.ico">
+<style>
+  :root {
+    --bg: #0b0f14;
+    --surface: #141a23;
+    --surface-2: #18202b;
+    --border: #26303d;
+    --border-soft: #1e2733;
+    --text: #e8edf5;
+    --muted: #9aa7b8;
+    --faint: #728094;
+    --accent: #10b981;
+    --accent-strong: #34d399;
+    --accent-ink: #04160f;
+    --radius: 16px;
+    --max: 1120px;
+    --font: "Segoe UI Variable Display", "Segoe UI", system-ui, -apple-system,
+            "Helvetica Neue", Arial, sans-serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html {
+    color-scheme: dark;
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    margin: 0;
+    font-family: var(--font);
+    color: var(--text);
+    background:
+      radial-gradient(900px 480px at 12% -8%, rgba(16, 185, 129, .14), transparent 62%),
+      radial-gradient(1000px 540px at 92% -2%, rgba(56, 189, 248, .07), transparent 58%),
+      var(--bg);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection { background: rgba(16, 185, 129, .32); color: #fff; }
+
+  img { max-width: 100%; height: auto; display: block; }
+
+  a { color: inherit; }
+
+  .wrap {
+    width: 100%;
+    max-width: var(--max);
+    margin: 0 auto;
+    padding: 0 24px;
+  }
+
+  .skip {
+    position: absolute;
+    left: -9999px;
+    top: 8px;
+    padding: 10px 16px;
+    background: var(--accent);
+    color: var(--accent-ink);
+    border-radius: 8px;
+    font-weight: 700;
+    z-index: 100;
+  }
+  .skip:focus { left: 16px; }
+
+  :focus-visible {
+    outline: 2px solid var(--accent-strong);
+    outline-offset: 3px;
+    border-radius: 6px;
+  }
+
+  /* ------------------------------- header ------------------------------- */
+  .site-header {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: rgba(11, 15, 20, .74);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border-bottom: 1px solid rgba(38, 48, 61, .7);
+  }
+
+  .header-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    height: 66px;
+  }
+
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    text-decoration: none;
+    font-weight: 700;
+    font-size: 1.06rem;
+    letter-spacing: -.01em;
+  }
+
+  .brand svg { color: var(--accent-strong); flex: none; }
+
+  .brand .brand-accent { color: var(--accent-strong); }
+
+  .site-nav {
+    display: flex;
+    align-items: center;
+    gap: 26px;
+    font-size: .92rem;
+  }
+
+  .site-nav a {
+    color: var(--muted);
+    text-decoration: none;
+    transition: color .18s ease;
+  }
+
+  .site-nav a:hover { color: var(--text); }
+
+  .site-nav .nav-gh {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text);
+    padding: 8px 14px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: rgba(20, 26, 35, .7);
+  }
+
+  .site-nav .nav-gh:hover { border-color: #3a4a5e; }
+
+  /* -------------------------------- hero -------------------------------- */
+  .hero { padding: 92px 0 24px; text-align: center; }
+
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    margin: 0 0 22px;
+    padding: 7px 14px;
+    font-size: .82rem;
+    font-weight: 600;
+    letter-spacing: .02em;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: rgba(20, 26, 35, .66);
+  }
+
+  .eyebrow .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent-strong);
+    box-shadow: 0 0 12px rgba(52, 211, 153, .8);
+  }
+
+  .hero h1 {
+    margin: 0 auto;
+    max-width: 900px;
+    font-size: clamp(2.7rem, 6vw, 4.6rem);
+    line-height: 1.02;
+    letter-spacing: -.035em;
+    font-weight: 800;
+  }
+
+  .hero h1 .grad {
+    background: linear-gradient(100deg, #a7f3d0 5%, var(--accent-strong) 45%, #0ea5e9 110%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .lede {
+    max-width: 690px;
+    margin: 24px auto 0;
+    font-size: clamp(1rem, 1.6vw, 1.15rem);
+    line-height: 1.72;
+    color: var(--muted);
+  }
+
+  .cta-row {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 34px;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 13px 22px;
+    border-radius: 12px;
+    border: 1px solid transparent;
+    font: inherit;
+    font-weight: 650;
+    font-size: .98rem;
+    text-decoration: none;
+    cursor: pointer;
+    transition: transform .16s ease, background .16s ease,
+                border-color .16s ease, box-shadow .16s ease;
+  }
+
+  .btn:hover { transform: translateY(-1px); }
+
+  .btn-primary {
+    background: var(--accent);
+    color: var(--accent-ink);
+    box-shadow: 0 14px 34px -14px rgba(16, 185, 129, .65);
+  }
+
+  .btn-primary:hover {
+    background: var(--accent-strong);
+    box-shadow: 0 18px 40px -14px rgba(16, 185, 129, .8);
+  }
+
+  .btn-ghost {
+    color: var(--text);
+    background: rgba(20, 26, 35, .8);
+    border-color: var(--border);
+  }
+
+  .btn-ghost:hover {
+    background: var(--surface-2);
+    border-color: #3a4a5e;
+  }
+
+  .btn-block { width: 100%; margin-top: auto; }
+
+  .fineprint {
+    margin: 18px 0 0;
+    font-size: .84rem;
+    color: var(--faint);
+  }
+
+  .hero-shot {
+    position: relative;
+    margin: 58px auto 0;
+    max-width: 1080px;
+  }
+
+  .hero-shot::before {
+    content: "";
+    position: absolute;
+    inset: 6% 12% -6%;
+    background: radial-gradient(closest-side, rgba(16, 185, 129, .22), transparent 72%);
+    filter: blur(42px);
+    z-index: 0;
+    pointer-events: none;
+  }
+
+  .hero-shot img {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    height: auto;
+    border-radius: 18px;
+    border: 1px solid #2a3544;
+    box-shadow:
+      0 40px 90px -30px rgba(0, 0, 0, .85),
+      0 0 0 1px rgba(255, 255, 255, .02) inset;
+  }
+
+  /* -------------------------------- stats ------------------------------- */
+  .stats { padding: 44px 0 0; }
+
+  .stats-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    padding: 24px 8px;
+    background: linear-gradient(180deg, rgba(20, 26, 35, .8), rgba(16, 21, 28, .6));
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius);
+    text-align: center;
+  }
+
+  .stats-row > div + div { border-left: 1px solid var(--border-soft); }
+
+  .stats-row strong {
+    display: block;
+    font-size: 1.02rem;
+    letter-spacing: -.01em;
+  }
+
+  .stats-row span {
+    display: block;
+    margin-top: 2px;
+    font-size: .82rem;
+    color: var(--faint);
+  }
+
+  /* ------------------------------- sections ----------------------------- */
+  .section { padding: 96px 0 0; }
+
+  .section-head { max-width: 720px; }
+
+  .section h2 {
+    margin: 10px 0 14px;
+    font-size: clamp(1.85rem, 3.5vw, 2.6rem);
+    line-height: 1.12;
+    letter-spacing: -.025em;
+  }
+
+  .section-lede {
+    max-width: 640px;
+    margin: 0;
+    color: var(--muted);
+    font-size: 1rem;
+    line-height: 1.72;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+    margin-top: 42px;
+  }
+
+  .card {
+    padding: 26px 24px 24px;
+    background: linear-gradient(180deg, #151c26, #121821);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius);
+    transition: transform .18s ease, border-color .18s ease;
+  }
+
+  .card:hover {
+    transform: translateY(-2px);
+    border-color: #33465b;
+  }
+
+  .card-icon {
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    margin-bottom: 18px;
+    border-radius: 12px;
+    color: var(--accent-strong);
+    background: rgba(16, 185, 129, .09);
+    border: 1px solid rgba(16, 185, 129, .24);
+  }
+
+  .card h3 {
+    margin: 0 0 8px;
+    font-size: 1.02rem;
+    letter-spacing: -.01em;
+  }
+
+  .card p {
+    margin: 0;
+    font-size: .92rem;
+    line-height: 1.68;
+    color: var(--muted);
+  }
+
+  /* ------------------------------ screenshots --------------------------- */
+  .shot-main { margin: 46px 0 0; }
+
+  .shot-main img {
+    width: 100%;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    box-shadow: 0 30px 70px -34px rgba(0, 0, 0, .9);
+  }
+
+  .shot-main figcaption {
+    margin-top: 12px;
+    text-align: center;
+    font-size: .82rem;
+    color: var(--faint);
+  }
+
+  .split {
+    display: grid;
+    grid-template-columns: 1.05fr .95fr;
+    gap: 54px;
+    align-items: center;
+    margin-top: 76px;
+  }
+
+  .eq-shot {
+    padding: 18px;
+    background: linear-gradient(180deg, #151c26, #111720);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+
+  .eq-shot img { border-radius: 10px; }
+
+  .split h3 {
+    margin: 0 0 12px;
+    font-size: clamp(1.4rem, 2.6vw, 1.85rem);
+    line-height: 1.2;
+    letter-spacing: -.02em;
+  }
+
+  .split p {
+    margin: 0 0 18px;
+    color: var(--muted);
+    line-height: 1.72;
+  }
+
+  .checks {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 10px;
+  }
+
+  .checks li {
+    position: relative;
+    padding-left: 28px;
+    color: var(--text);
+    font-size: .94rem;
+  }
+
+  .checks li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: .18em;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: rgba(16, 185, 129, .14);
+    border: 1px solid rgba(16, 185, 129, .4);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2334d399' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 12 4 4 8-9'/%3E%3C/svg%3E");
+    background-size: 11px 11px;
+    background-position: center;
+    background-repeat: no-repeat;
+  }
+
+  /* -------------------------------- download ---------------------------- */
+  .download-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+    margin-top: 42px;
+  }
+
+  .download-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 30px 28px 28px;
+    background: linear-gradient(180deg, #151c26, #121821);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+  }
+
+  .download-card.primary-card {
+    border-color: rgba(16, 185, 129, .5);
+    background:
+      radial-gradient(420px 180px at 100% 0%, rgba(16, 185, 129, .13), transparent 70%),
+      linear-gradient(180deg, #16211f, #121821);
+    box-shadow: 0 22px 60px -34px rgba(16, 185, 129, .45);
+  }
+
+  .tag {
+    align-self: flex-start;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: .72rem;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--accent-strong);
+    background: rgba(16, 185, 129, .12);
+    border: 1px solid rgba(16, 185, 129, .3);
+  }
+
+  .download-card h3 {
+    margin: 2px 0 0;
+    font-size: 1.34rem;
+    letter-spacing: -.015em;
+  }
+
+  .download-card p {
+    margin: 0;
+    color: var(--muted);
+    font-size: .93rem;
+    line-height: 1.66;
+  }
+
+  .download-card .size {
+    margin-top: 2px;
+    font-size: .8rem;
+    color: var(--faint);
+  }
+
+  .download-card .btn { margin-top: 20px; }
+
+  .notice {
+    margin-top: 24px;
+    padding: 18px 20px;
+    border: 1px solid var(--border-soft);
+    border-radius: 12px;
+    background: rgba(20, 26, 35, .5);
+    color: var(--muted);
+    font-size: .87rem;
+    line-height: 1.7;
+  }
+
+  .notice strong { color: var(--text); }
+
+  .notice a {
+    color: var(--accent-strong);
+    text-decoration: none;
+    white-space: nowrap;
+  }
+
+  .notice a:hover { text-decoration: underline; }
+
+  /* --------------------------------- faq -------------------------------- */
+  .faq-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 56px;
+    margin-top: 34px;
+  }
+
+  .faq-item {
+    padding: 24px 0;
+    border-top: 1px solid var(--border-soft);
+  }
+
+  .faq-item h3 {
+    margin: 0 0 6px;
+    font-size: .98rem;
+  }
+
+  .faq-item p {
+    margin: 0;
+    color: var(--muted);
+    font-size: .9rem;
+    line-height: 1.7;
+  }
+
+  .faq-item code {
+    padding: 2px 6px;
+    border-radius: 5px;
+    border: 1px solid var(--border-soft);
+    background: #10161e;
+    color: #cbd5e1;
+    font-size: .84em;
+    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    word-break: break-word;
+  }
+
+  /* -------------------------------- footer ------------------------------ */
+  .site-footer {
+    margin-top: 96px;
+    padding: 38px 0 44px;
+    border-top: 1px solid var(--border-soft);
+    background: rgba(8, 11, 15, .5);
+  }
+
+  .footer-inner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 22px;
+  }
+
+  .footer-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 700;
+    font-size: .98rem;
+  }
+
+  .footer-brand svg { color: var(--accent-strong); }
+
+  .footer-brand span { color: var(--faint); font-weight: 400; }
+
+  .footer-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 22px;
+    font-size: .87rem;
+  }
+
+  .footer-links a {
+    color: var(--muted);
+    text-decoration: none;
+  }
+
+  .footer-links a:hover { color: var(--text); }
+
+  .footer-legal {
+    width: 100%;
+    margin: 10px 0 0;
+    padding-top: 22px;
+    border-top: 1px solid var(--border-soft);
+    font-size: .78rem;
+    color: var(--faint);
+  }
+
+  /* ------------------------------ responsive ---------------------------- */
+  @media (max-width: 940px) {
+    .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .split { grid-template-columns: 1fr; gap: 34px; }
+    .hero { padding-top: 68px; }
+  }
+
+  @media (max-width: 720px) {
+    .site-nav { gap: 16px; }
+    .site-nav a:not(.nav-gh) { display: none; }
+    .hero h1 { letter-spacing: -.03em; }
+    .stats-row { grid-template-columns: repeat(2, 1fr); gap: 18px 0; padding: 22px 8px; }
+    .stats-row > div + div { border-left: 0; }
+    .stats-row > div:nth-child(even) { border-left: 1px solid var(--border-soft); }
+    .grid { grid-template-columns: 1fr; }
+    .download-grid { grid-template-columns: 1fr; }
+    .faq-grid { grid-template-columns: 1fr; gap: 0; }
+    .section { padding-top: 72px; }
+    .site-footer { margin-top: 72px; }
+    .cta-row .btn { width: 100%; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { transition: none !important; }
+    .btn:hover, .card:hover { transform: none; }
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap header-inner">
+    <a class="brand" href="#top" aria-label="HiCloud MP — back to top">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+        <circle cx="12" cy="12" r="9.2"/>
+        <circle cx="12" cy="12" r="3.1"/>
+        <circle cx="12" cy="12" r=".9" fill="currentColor" stroke="none"/>
+      </svg>
+      <span>HiCloud <span class="brand-accent">MP</span></span>
+    </a>
+
+    <nav class="site-nav" aria-label="Primary">
+      <a href="#features">Features</a>
+      <a href="#screens">Screenshots</a>
+      <a href="#download">Download</a>
+      <a class="nav-gh" href="https://github.com/PhantomPixelDev/HiCloudMP">
+        GitHub
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M7 17 17 7"/><path d="M8 7h9v9"/>
+        </svg>
+      </a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <section class="hero" id="top">
+    <div class="wrap">
+      <p class="eyebrow"><span class="dot" aria-hidden="true"></span>Free &amp; open source · Windows 10 / 11</p>
+      <h1>All your music.<br><span class="grad">One quiet place.</span></h1>
+      <p class="lede">
+        HiCloud MP plays your local files and the music you keep in the cloud —
+        with a real 10-band equalizer, a queue that behaves, and your phone as
+        the remote.
+      </p>
+
+      <div class="cta-row">
+        <a class="btn btn-primary" href="https://github.com/PhantomPixelDev/HiCloudMP/releases/latest/download/HiCloudMP-Setup.exe">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>
+          </svg>
+          Download installer
+        </a>
+        <a class="btn btn-ghost" href="https://github.com/PhantomPixelDev/HiCloudMP/releases/latest/download/HiCloudMP-portable.zip">
+          Portable ZIP
+        </a>
+      </div>
+
+      <p class="fineprint">Always the newest release · about 75 MB · no account needed</p>
+
+      <figure class="hero-shot">
+        <img src="assets/main.png" width="2560" height="1760" fetchpriority="high"
+             alt="HiCloud MP main window: a library sidebar, a now-playing card with vinyl cover art, a queue with title, artist and album columns, and the transport bar.">
+      </figure>
+    </div>
+  </section>
+
+  <section class="stats" aria-label="At a glance">
+    <div class="wrap">
+      <div class="stats-row">
+        <div><strong>Local + cloud</strong><span>One library</span></div>
+        <div><strong>10 bands</strong><span>Real DSP</span></div>
+        <div><strong>Phone remote</strong><span>No app needed</span></div>
+        <div><strong>MIT</strong><span>Free, forever</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="features" aria-labelledby="features-title">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Features</p>
+        <h2 id="features-title">Everything you need.<br>Nothing you don't.</h2>
+      </div>
+
+      <div class="grid">
+        <article class="card">
+          <div class="card-icon" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+            </svg>
+          </div>
+          <h3>Your library, organized</h3>
+          <p>Add your folders once. Browse by name, artist and album, search as you type, and filter the queue without waiting.</p>
+        </article>
+
+        <article class="card">
+          <div class="card-icon" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M17.5 19H7a4 4 0 0 1-.6-7.96A6 6 0 0 1 18 9.5a4.75 4.75 0 0 1-.5 9.5Z"/>
+            </svg>
+          </div>
+          <h3>Cloud without the sync</h3>
+          <p>Stream from Nextcloud or any WebDAV server, a Subsonic-compatible server, or Ampache. Albums scan in the background; tracks play directly.</p>
+        </article>
+
+        <article class="card">
+          <div class="card-icon" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 21v-7"/><path d="M4 10V3"/><path d="M12 21v-9"/><path d="M12 8V3"/><path d="M20 21v-5"/><path d="M20 12V3"/>
+              <path d="M2 14h4"/><path d="M10 8h4"/><path d="M18 16h4"/>
+            </svg>
+          </div>
+          <h3>A real 10-band EQ</h3>
+          <p>Presets or your own curve, applied live to local and streamed audio. Flat settings are a bit-exact bypass.</p>
+        </article>
+
+        <article class="card">
+          <div class="card-icon" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/>
+              <circle cx="18" cy="18" r="2.4"/>
+            </svg>
+          </div>
+          <h3>A queue that behaves</h3>
+          <p>Title, artist and album columns, drag to reorder, Play Next, sort and filter — all remembered between sessions.</p>
+        </article>
+
+        <article class="card">
+          <div class="card-icon" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="7" y="2.5" width="10" height="19" rx="2.5"/>
+              <path d="M11 18.5h2"/>
+            </svg>
+          </div>
+          <h3>Your phone is the remote</h3>
+          <p>Turn on the web remote and open the link from the same Wi-Fi. No app to install, token protected, local unless you allow it.</p>
+        </article>
+
+        <article class="card">
+          <div class="card-icon" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 3 4.5 6v5c0 4.8 3.2 8.4 7.5 10 4.3-1.6 7.5-5.2 7.5-10V6z"/>
+              <path d="m9 12 2 2 4-4.5"/>
+            </svg>
+          </div>
+          <h3>Private by default</h3>
+          <p>No account, no telemetry. Settings and playlists stay on your PC; saved cloud passwords are encrypted with Windows DPAPI.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="screens" aria-labelledby="screens-title">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">A closer look</p>
+        <h2 id="screens-title">Small app. Serious sound.</h2>
+      </div>
+
+      <figure class="shot-main">
+        <img src="assets/main.png" width="2560" height="1760" loading="lazy"
+             alt="HiCloud MP showing a local library, a 12-track queue and the now-playing card with cover art.">
+        <figcaption>The real app — no mockups. Library, queue and now-playing card in the dark theme.</figcaption>
+      </figure>
+
+      <div class="split">
+        <figure class="eq-shot">
+          <img src="assets/equalizer.png" width="840" height="640" loading="lazy"
+               alt="HiCloud MP's 10-band equalizer dialog with the Rock preset selected.">
+        </figure>
+        <div>
+          <h3>Tune the room, not just the volume.</h3>
+          <p>Ten bands from 31 Hz to 16 kHz, with presets for rock, bass, vocals and more. Move a slider and hear the change immediately.</p>
+          <ul class="checks">
+            <li>Presets and custom curves</li>
+            <li>Live changes while the music plays</li>
+            <li>Bit-exact bypass at flat settings</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="download" aria-labelledby="download-title">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Download</p>
+        <h2 id="download-title">Pick your flavour.</h2>
+        <p class="section-lede">Both files come from the latest GitHub release and include everything the app needs. Your music and settings are never touched by upgrades.</p>
+      </div>
+
+      <div class="download-grid">
+        <article class="download-card primary-card">
+          <span class="tag">Recommended</span>
+          <h3>Installer</h3>
+          <p>Adds HiCloud MP to your Start menu and installs an uninstaller. No Python, no extra codecs.</p>
+          <p class="size">Windows 10 / 11 · 64-bit · about 75 MB</p>
+          <a class="btn btn-primary btn-block" href="https://github.com/PhantomPixelDev/HiCloudMP/releases/latest/download/HiCloudMP-Setup.exe">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>
+            </svg>
+            Download installer
+          </a>
+        </article>
+
+        <article class="download-card">
+          <h3>Portable</h3>
+          <p>Unzip anywhere and run HiCloudMP.exe. Ideal for a USB stick or a PC you don't administer.</p>
+          <p class="size">Windows 10 / 11 · 64-bit · about 112 MB</p>
+          <a class="btn btn-ghost btn-block" href="https://github.com/PhantomPixelDev/HiCloudMP/releases/latest/download/HiCloudMP-portable.zip">
+            Download portable ZIP
+          </a>
+        </article>
+      </div>
+
+      <div class="notice">
+        <strong>First launch:</strong> the app isn't code-signed yet, so Windows may show “Windows protected your PC”. Choose <em>More info → Run anyway</em>.
+        <a href="https://github.com/PhantomPixelDev/HiCloudMP/releases">All releases &amp; notes →</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="faq-title">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Good to know</p>
+        <h2 id="faq-title">Small print, plainly.</h2>
+      </div>
+
+      <div class="faq-grid">
+        <div class="faq-item">
+          <h3>Where does my data live?</h3>
+          <p>Settings, playlists and cloud accounts live in <code>%LOCALAPPDATA%\HiCloudMP\HiCloudMP</code>. Installing, upgrading or uninstalling never deletes them.</p>
+        </div>
+        <div class="faq-item">
+          <h3>Does it phone home?</h3>
+          <p>No telemetry and no account. The app only talks to the servers you add, and to GitHub when you ask it to check for updates.</p>
+        </div>
+        <div class="faq-item">
+          <h3>How do I uninstall it?</h3>
+          <p>Settings → Apps → HiCloud MP. Your music and settings stay exactly where they are.</p>
+        </div>
+        <div class="faq-item">
+          <h3>What about Linux?</h3>
+          <p>The source runs on Linux with MPRIS media keys; packaged builds are Windows-only for now.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap footer-inner">
+    <div class="footer-brand">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+        <circle cx="12" cy="12" r="9.2"/>
+        <circle cx="12" cy="12" r="3.1"/>
+        <circle cx="12" cy="12" r=".9" fill="currentColor" stroke="none"/>
+      </svg>
+      HiCloud MP <span>· your music, local and cloud</span>
+    </div>
+    <nav class="footer-links" aria-label="Footer">
+      <a href="https://github.com/PhantomPixelDev/HiCloudMP">GitHub</a>
+      <a href="https://github.com/PhantomPixelDev/HiCloudMP/releases">Releases</a>
+      <a href="https://github.com/PhantomPixelDev/HiCloudMP/issues">Issues</a>
+      <a href="https://github.com/PhantomPixelDev/HiCloudMP/blob/main/LICENSE">MIT license</a>
+    </nav>
+    <p class="footer-legal">
+      MIT licensed · Built by PhantomPixelDev · Not affiliated with Nextcloud, Subsonic, Ampache or Navidrome.
+    </p>
+  </div>
+</footer>
+</body>
+</html>
