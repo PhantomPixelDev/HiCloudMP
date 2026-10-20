@@ -31,7 +31,9 @@ jobs:
           # blamed for; ">=6.10.1" otherwise floats to the newest minor.
           python -m pip install "PySide6==6.10.3"
           python -m pip install -r requirements.txt
-          python -m pip install nuitka
+          # Pin the compiler too: reproducible builds need the same Nuitka
+          # major series (4.3.x handled the PySide6 6.10 packaging fine).
+          python -m pip install "nuitka==4.3.1"
 
       - name: Build with Nuitka (standalone, PySide6 plugin)
         run: >
@@ -59,7 +61,10 @@ jobs:
 
       - name: Bundle ffmpeg for cover extraction
         run: |
-          curl -L -o ffmpeg.zip https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip
+          # Version-pinned (a "release-essentials" alias silently changes
+          # behavior when Gyan publishes a new build). 9.0.2 essentials:
+          # sha256 60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba
+          curl -L -o ffmpeg.zip https://github.com/GyanD/codexffmpeg/releases/download/9.0.2/ffmpeg-9.0.2-essentials_build.zip
           powershell -Command "Expand-Archive -Path ffmpeg.zip -DestinationPath ffmpegbuild -Force"
           $ff = Get-ChildItem -Path ffmpegbuild -Recurse -Filter ffmpeg.exe | Select-Object -First 1
           Copy-Item $ff.FullName build\main.dist\ffmpeg.exe
