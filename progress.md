@@ -649,3 +649,19 @@ Suite: release-packaging tests green.
   floating-alias regression.
 
 Suite: 442 passed, 2 skipped (full run at commit time).
+
+## 2026-10-20 — refactor: dead ffprobe path deleted
+
+- `CoverExtractor.extract_metadata()` (ffprobe) had zero callers and
+  ffprobe.exe never shipped in the package, so it could only fail
+  into {}. Metadata now comes exclusively from the scan worker's
+  mutagen tag cache.
+- ffmpeg.exe is untouched (still the cover-art extractor).
+- Ruling (delete over bundle): bundling ffprobe would add ~35-70 MB to
+  the 105 MB package for a feature nothing called; the structural
+  guarantee "no UI-thread probe" is now enforced by absence.
+- Four tests updated to the structural contract (no hasattr patch of
+  the removed method; createflags count >= 1); one new regression test
+  asserts the attribute never returns.
+
+Suite: 443 passed, 2 skipped.
