@@ -665,3 +665,28 @@ Suite: 442 passed, 2 skipped (full run at commit time).
   asserts the attribute never returns.
 
 Suite: 443 passed, 2 skipped.
+
+## 2026-10-20 — build: ruff tripwire + CI lint job
+
+- `ruff.toml`: E9+F only (syntax + pyflakes), line-length 120,
+  tests/** exempt from F841 (harness locals are documentation).
+- `lint` job (ubuntu, seconds) added to windows-build.yml, runs before
+  build.
+- Real findings fixed: dialogs.py RELEASES_PAGE NameError path,
+  mpris.py teardown unregistered a nonexistent MPRIS_SERVICE
+  (now unregisters exactly the registered name), mpris_dbus.py dropped
+  the BusName object (kept referenced now: dbus-python may release the
+  name otherwise), player.py dead `name`/`file_info`/`is_network_issue`
+  locals, unwired b64 WebDAV auth chain removed (URL userinfo is what
+  ships), broken `os if False else` test ternary, duplicate pytest
+  import, ~98 unused imports auto-fixed with re-exports noqa-pinned
+  (WebControlServer binding is load-bearing for tests).
+- Ruling: F841 stays on for production code, off for tests - unused
+  locals in prod hid two real dead code paths; in tests they hold
+  fixture intent.
+- Ruling (test): test_viz_timer_runs_at_20hz pinned the always-on pump;
+  rewritten as cadence-at-rest + park-when-idle + restart-on-show
+  (test_show_restarts_a_parked_pump covers the race a full-suite run
+  exposed: startup event processing parks the pump before show()).
+
+Suite: 444 passed, 2 skipped. Ruff: clean.
