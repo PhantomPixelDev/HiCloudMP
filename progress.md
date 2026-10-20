@@ -573,3 +573,19 @@ Suite: 424 passed, 2 skipped.
   files because the scanner already read exactly those tags.
 
 Suite: 430 passed, 2 skipped.
+
+## 2026-10-20 — feat: sort mode "Original" works
+
+- Rows now carry a load-order stamp (ORIGINAL_SEQ_ROLE, column-scoped
+  data on the queue item). `sqlite`-free, assigned by
+  PlaylistQueueWidget.addItem/insertItem (new rows only; reinserted
+  rows keep theirs); clear() resets the counter so a rebuilt queue's
+  "original" is its new load order.
+- sort_playlist drops the `TODO: restore original order if needed`
+  no-op: Original sorts by stamp; Title/Artist/Album unchanged (still
+  stable sorts, so full-key ties keep relative order).
+- Ruling: rows appended while another sort is active land at the tail
+  in Original mode (their stamp is the newest) — that matches
+  queue-appending semantics rather than restarting the stamp counter.
+
+Suite: 434 passed, 2 skipped.
