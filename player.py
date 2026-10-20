@@ -1906,7 +1906,6 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
             file_name = os.path.basename(file_info["path"])
             
             self.status_bar.showMessage(f"Preparing to stream: {file_name}...")
-            QApplication.processEvents()  # Update UI
             
             # Track info used by every branch (provider catalogs carry it)
             base_name = os.path.splitext(file_name)[0]
@@ -1919,7 +1918,6 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
             
             self.player.stop()
             self.player.setSource(QUrl())
-            QApplication.processEvents()  # Process events to ensure clean state
 
             if cloud_type == "webdav":
                 # Nextcloud/ownCloud DAV serves files only behind Basic auth,
@@ -2380,13 +2378,11 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
                 
             file_name = os.path.basename(path)
             self.status_bar.showMessage(f"Playing: {file_name}")
-            QApplication.processEvents()  # Ensure UI updates
             
             try:
                 # Stop any currently playing media
                 self.player.stop()
                 self.player.setSource(QUrl())
-                QApplication.processEvents()  # Process events to ensure clean state
                 
                 # Set the new media source with absolute path
                 abs_path = os.path.abspath(path)
