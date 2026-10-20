@@ -26,7 +26,7 @@ from slider import ClickJumpSlider
 import icons
 
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QLabel, QSlider, QFileDialog, QMessageBox, QTreeWidget, 
     QLineEdit, QDialog, QToolButton, QStatusBar, QFrame, QMenu, QProgressBar, QSystemTrayIcon,
     QComboBox, QInputDialog, QRadioButton, QDialogButtonBox, QGridLayout

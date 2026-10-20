@@ -87,7 +87,9 @@ def test_subsonic_rows_carry_getcoverart_url():
     assert "cover_url" in row, row
     assert "getCoverArt.view" in row["cover_url"], row
     assert "id=ca1" in row["cover_url"], row
-    assert "p=" in row["cover_url"], "cover URL must carry auth params"
+    assert "t=" in row["cover_url"] and "s=" in row["cover_url"], \
+        "cover URL must carry auth params (token auth)"
+    assert "p=" not in row["cover_url"], "plaintext password never in URLs"
 
 
 def test_ampache_rows_carry_art_url():

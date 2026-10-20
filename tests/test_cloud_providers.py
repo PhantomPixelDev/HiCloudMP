@@ -117,10 +117,128 @@ def test_subsonic_legacy_password_scan(monkeypatch):
     assert "stream" in f["url"] and "id=3204" in f["url"]
     # REST base normalization appended /rest exactly once
     assert h.rest_base.rstrip("/").endswith("/rest")
-    # legacy plain-password auth carried
-    assert any(params.get("p") == "pw-of-test" for params in
-               [fake_get_call for fake_get_call in []]) or True
-    assert h._common_params()["p"] == "pw-of-test"
+    # token auth on the wire: t/s carried, plaintext password absent
+    params = h._common_params()
+    assert "t" in params and "s" in params and "p" not in params
+
+
+def test_subsonic_token_auth_scan(monkeypatch):
+    """Token auth (t=md5(pw+salt), s=salt) is the wire default: plaintext
+    passwords must not ride in URLs that get stored on disk."""
+    import cloud_handlers as ch
+
+    ping = {"subsonic-response": {"status": "ok"}}
+    albums = {"subsonic-response": {"albumList2": {"album": [
+        {"id": "album-559", "name": "Al", "artist": "Ar"},
+    ]}}}
+    album = {"subsonic-response": {"album": {"song": [
+        {"id": "3204", "title": "Track", "artist": "Ar", "album": "Al"},
+    ]}}}
+
+    captured = []
+
+    class FakeResp:
+        def __init__(self, payload):
+            self._p = payload
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self._p
+
+    def fake_get(url, params=None, timeout=None):
+        captured.append(dict(params or {}))
+        if "ping" in url:
+            return FakeResp(ping)
+        if "getAlbumList2" in url:
+            return FakeResp(albums)
+        if "getAlbum" in url:
+            return FakeResp(album)
+        raise AssertionError(f"unexpected {url}")
+
+    monkeypatch.setattr(ch.requests, "get", fake_get)
+
+    h = ch.SubsonicHandler({
+        "subsonic_url": "https://srv/apps/music/subsonic",
+        "subsonic_user": "Admin",
+        "subsonic_password": "pw-of-test",
+    })
+    h.scan()
+    files = h.get_links()
+    assert len(files) == 1
+    f = files[0]
+    assert f["name"] == "Track" and f["artist"] == "Ar" and f["album"] == "Al"
+    assert "stream" in f["url"] and "id=3204" in f["url"]
+
+    # Every request authenticates with t/s; the plaintext password never
+    # hits the wire (and never lands in the stored catalog URLs).
+    for params in captured:
+        assert "t" in params and "s" in params
+        assert "p" not in params
+    assert "p=pw-of-test" not in f["url"]
+
+    # The token is verifiable: t == md5(password + salt) for the salty
+    # pair the request carried.
+    import hashlib
+    for params in captured:
+        assert params["t"] == hashlib.md5(
+            ("pw-of-test" + params["s"]).encode()).hexdigest()
+
+
+def test_subsonic_falls_back_to_legacy_on_error_41(monkeypatch):
+    """Servers without token support (Nextcloud Music answers Subsonic
+    error 41 'Token authentication not supported') must keep working:
+    fall back silently to legacy u/p auth for the session."""
+    import cloud_handlers as ch
+
+    def resp(status_key, code=None):
+        body = {"subsonic-response": {"status": status_key}}
+        if code:
+            body["subsonic-response"]["error"] = {"code": code,
+                                                  "message": "nope"}
+        return body
+
+    captured = []
+
+    class FakeResp:
+        def __init__(self, payload):
+            self._p = payload
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self._p
+
+    def fake_get(url, params=None, timeout=None):
+        captured.append(dict(params or {}))
+        if "ping" in url:
+            if "t" in params:
+                return FakeResp(resp("failed", 41))   # token attempt
+            return FakeResp(resp("ok"))               # legacy attempt
+        return FakeResp(albums) if "getAlbumList2" in url \
+            else FakeResp({"subsonic-response": {"album": {"song": []}}})
+
+    albums = {"subsonic-response": {"albumList2": {"album": []}}}
+
+    monkeypatch.setattr(ch.requests, "get", fake_get)
+
+    h = ch.SubsonicHandler({
+        "subsonic_url": "https://srv/apps/music/subsonic",
+        "subsonic_user": "Admin",
+        "subsonic_password": "pw-of-test",
+    })
+    h.scan()
+
+    assert "p" in h._common_params(), "session must run legacy auth"
+    token_attempts = [p for p in captured if "t" in p]
+    legacy_attempts = [p for p in captured if "p" in p]
+    assert token_attempts, "first attempt must be the token auth"
+    assert legacy_attempts, "fallback must have carried every later call"
+    # Everything AFTER the first legacy ping stays legacy.
+    first_legacy = next(i for i, p in enumerate(captured) if "p" in p)
+    assert all("t" not in p for p in captured[first_legacy:])
 
 
 def test_webdav_file_url_includes_root(monkeypatch):

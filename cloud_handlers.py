@@ -1,4 +1,6 @@
+import hashlib
 import os
+import secrets
 import concurrent.futures
 import threading
 from utils import is_music_file, SUPPORTED_EXTS
@@ -365,7 +367,6 @@ CLOUD_TYPES = {
     "subsonic": None,
 }
 
-import hashlib
 import time
 import urllib.parse
 import xml.etree.ElementTree as ET
@@ -487,9 +488,11 @@ class AmpacheHandler(_HTTPCloudHandler):
 class SubsonicHandler(_HTTPCloudHandler):
     """Subsonic-compatible API (Nextcloud Music app "Subsonic" address).
 
-    Auth: legacy plain-password param u/p (token t/s auth rejected by
-    Nextcloud Music with error 41 "Token-based authentication not
-    supported") — verified empirically on the user's instance.
+    Auth: token auth (t=md5(password+salt), s=salt, fresh salt per
+    request) is the wire default. Servers without token support answer
+    Subsonic error 41 "Token authentication not supported" - Nextcloud
+    Music does, verified on the user's instance - and the session
+    silently falls back to legacy u/p auth after the first such ping.
     """
 
     _API_VERSION = "1.16.1"
@@ -499,10 +502,20 @@ class SubsonicHandler(_HTTPCloudHandler):
         super().__init__(config)
         base = config.get("subsonic_url", "").rstrip("/")
         self.rest_base = base if base.endswith("/rest") else base + "/rest"
+        self._token_auth = True
+
+    def _auth_params(self):
+        user = self.config.get("subsonic_user", "")
+        if self._token_auth:
+            salt = secrets.token_hex(6)
+            token = hashlib.md5(
+                (self.config.get("subsonic_password", "") + salt)
+                .encode("utf-8")).hexdigest()
+            return {"u": user, "t": token, "s": salt}
+        return {"u": user, "p": self.config.get("subsonic_password", "")}
 
     def _common_params(self):
-        return {"u": self.config.get("subsonic_user", ""),
-                "p": self.config.get("subsonic_password", ""),
+        return {**self._auth_params(),
                 "v": self._API_VERSION, "c": self._CLIENT, "f": "json"}
 
     def _get_json(self, endpoint, **extra):
@@ -516,7 +529,16 @@ class SubsonicHandler(_HTTPCloudHandler):
         self.status_message = "Connecting to Subsonic..."
         ping = self._get_json("ping.view")
         if ping.get("status") != "ok":
-            raise Exception(f"Subsonic ping failed: {ping}")
+            err = ping.get("error") or {}
+            if self._token_auth and err.get("code") == 41:
+                # Token auth unsupported (Nextcloud Music & friends):
+                # stay on legacy u/p auth for the whole session.
+                self._token_auth = False
+                ping = self._get_json("ping.view")
+                if ping.get("status") != "ok":
+                    raise Exception(f"Subsonic ping failed: {ping}")
+            else:
+                raise Exception(f"Subsonic ping failed: {ping}")
 
         # albums, paged
         albums = []
