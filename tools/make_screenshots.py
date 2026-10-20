@@ -189,6 +189,11 @@ def main():
     app.setStyle("Fusion")
     load_ui_fonts(app)
     settings = _settings_factory()
+    # Match the packaged app icon (purple note): the site's primary color and
+    # these screenshots use the same accent so the whole product reads as one.
+    settings.setValue("ui/accent", "#ab45ed")
+    settings.setValue("theme", "Dark")
+    settings.sync()
     theme.apply_app_theme(app, settings=settings)
 
     import player as player_mod
@@ -215,7 +220,6 @@ def main():
     for path in paths:
         mp.playlist_widget.addQueueRow(*mp.meta.queue_cells(path))
     mp.playlist_widget.setCurrentRow(0)
-    mp.highlight_current_track()
     mp.update_metadata_display()
 
     # Cover art extraction runs on a worker: wait for the real pixmap.

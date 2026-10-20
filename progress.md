@@ -815,3 +815,21 @@ Suite: 454 passed, 2 skipped. Ruff: clean.
 - Regression test asserts the vertical rules exist and carry the accent.
 
 Suite: 455 passed, 2 skipped. Ruff: clean.
+
+## 2026-10-20 - docs(site): flat redesign around the real app icon
+
+- Site primary color is now the app icon's purple (`#ab45ed`, with
+  `#962fbf` for filled buttons) instead of the emerald theme default.
+- Removed every gradient, glow, blur, gradient headline, colored shadow
+  and the oversized marketing stats strip.
+- Uses the real `icon.ico` exported to `icon.png` and
+  `docs/assets/app-icon.png` for the header, hero, footer and README, and
+  the exact Feather geometries from `icons.py` for the feature icons.
+- Simplified the layout to flat surfaces and plain section headings;
+  feature list instead of glowing cards, direct download cards.
+- Regenerated `screen.png`, `docs/assets/main.png` and
+  `docs/assets/equalizer.png` with the icon's purple accent so the
+  screenshots match the site and README.
+- README logo switched to the app icon; installer badge recolored purple.
+
+Suite: 455 passed, 2 skipped. Ruff: clean.

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="cover.png" width="132" alt="HiCloud MP logo — a vinyl record">
+  <img src="icon.png" width="104" alt="HiCloud MP app icon — a white music note and play triangle on a purple circle">
 </p>
 
 <h1 align="center">HiCloud MP</h1>
@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/PhantomPixelDev/HiCloudMP/releases/latest/download/HiCloudMP-Setup.exe"><img src="https://img.shields.io/badge/Download_for_Windows-Installer-10b981?style=for-the-badge&logo=windows&logoColor=white" alt="Download the Windows installer"></a>
+  <a href="https://github.com/PhantomPixelDev/HiCloudMP/releases/latest/download/HiCloudMP-Setup.exe"><img src="https://img.shields.io/badge/Download_for_Windows-Installer-ab45ed?style=for-the-badge&logo=windows&logoColor=white" alt="Download the Windows installer"></a>
   <a href="https://github.com/PhantomPixelDev/HiCloudMP/releases/latest/download/HiCloudMP-portable.zip"><img src="https://img.shields.io/badge/Portable_version-ZIP-334155?style=for-the-badge&logo=files&logoColor=white" alt="Download the portable ZIP"></a>
 </p>
 
