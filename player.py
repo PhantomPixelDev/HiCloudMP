@@ -892,6 +892,21 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
         content_row.addWidget(self.playlist_widget, 1)
         stage_col.addLayout(content_row, 1)
 
+        # Restore the queue view state saved at close: the standing sort
+        # mode and the filter text. Both fire their normal signals here;
+        # on the (still empty) queue they are cheap no-ops. Must come after
+        # playlist_widget exists (sort_playlist touches it).
+        try:
+            saved_sort = self.settings.value("ui/queue_sort_mode", 0, type=int)
+            if 0 <= saved_sort < self.playlist_sort_combo.count():
+                self.playlist_sort_combo.setCurrentIndex(saved_sort)
+            saved_filter = str(
+                self.settings.value("ui/queue_filter", "") or "")
+            if saved_filter:
+                self.playlist_search_input.setText(saved_filter)
+        except Exception as e:
+            print(f"Warning: queue view restore failed: {e}")
+
         # Transport bar
         self.transport_bar = QFrame()
         self.transport_bar.setObjectName("transportBar")
@@ -2417,6 +2432,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
             self.status_bar.showMessage(f"Loaded {added} tracks from cloud folder")
         else:
             self.status_bar.showMessage("No music files found in cloud folder")
+        self._apply_queue_view_state()
 
     def load_media_folders(self):
         """Load saved media folders from file"""
@@ -2640,6 +2656,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
                 self.current_index = len(self.playlist) - 1
             if self.active_playlist:
                 self.active_playlist.modified = datetime.now().isoformat()
+            self._apply_queue_view_state()
         self.status_bar.showMessage(
             (f"Removed {dupes} duplicate{'s' if dupes != 1 else ''}"
              if dupes else "No duplicates in the playlist"), 4000)
@@ -3272,7 +3289,8 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
         if self.playlist:
             self.current_index = 0
             self.status_bar.showMessage(f"Loaded playlist: {playlist.name}")
-    
+        self._apply_queue_view_state()
+
     def load_playlist_by_id(self, playlist_id):
         """Load a playlist by its ID"""
         for playlist in self.playlists:
@@ -3335,7 +3353,8 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
             self.status_bar.showMessage(f"Loaded {len(self.playlist)} tracks from {folder}")
         else:
             self.status_bar.showMessage("No music files found in folder")
-    
+        self._apply_queue_view_state()
+
     def open_folder(self):
         """Open a folder dialog and load music files"""
         folder = QFileDialog.getExistingDirectory(self, "Open Music Folder")
@@ -3462,7 +3481,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
         # the failure mode this guards against).
         for step in (self.save_media_folders, self.save_clouds,
                      self.save_playlists, self._save_window_geometry,
-                     self._save_play_history):
+                     self._save_play_history, self._save_queue_view_state):
             try:
                 step()
             except Exception as e:
@@ -3764,6 +3783,29 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
                 item.setHidden(not widget.matches_filter(i, text))
         finally:
             widget.setUpdatesEnabled(True)
+
+    def _save_queue_view_state(self):
+        """Persist the queue view so a restart resumes the standing sort
+        mode and filter text (closeEvent save-list step)."""
+        try:
+            self.settings.setValue("ui/queue_sort_mode",
+                                   self.playlist_sort_combo.currentIndex())
+            self.settings.setValue("ui/queue_filter",
+                                   self.playlist_search_input.text())
+        except Exception as e:
+            print(f"Warning: queue view state save failed: {e}")
+
+    def _apply_queue_view_state(self):
+        """Re-apply the standing queue view to freshly rebuilt rows:
+        the non-Original sort mode (Original means 'as loaded', which a
+        rebuild just did) and the filter."""
+        try:
+            if self.playlist_sort_combo.currentIndex() != 0:
+                self.sort_playlist()
+            if self.playlist_search_input.text().strip():
+                self.filter_playlist()
+        except Exception as e:
+            print(f"Warning: queue view re-apply failed: {e}")
 
     def sort_playlist(self):
         widget = self.playlist_widget
