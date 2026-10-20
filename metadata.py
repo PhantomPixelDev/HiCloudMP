@@ -186,8 +186,10 @@ class MetadataController:
         """(title, artist, album) cells for a queue row — the table and the
         playlist sort/filter read these instead of one display string.
 
-        Local paths resolve the title to their basename (tags are NOT read
-        here: this must never block). Cloud rows resolve from the in-memory
+        Local paths resolve from the scan-time tag cache in
+        LibraryStore (never the disk: this must never block); with no cache
+        entry the title falls back to the basename and the cells stay empty.
+        Cloud rows resolve from the in-memory
         catalog (rows persist only the indices; the catalog carries the
         scanned name/artist/album — Subsonic rows keep the title in `name`).
         """
@@ -215,6 +217,13 @@ class MetadataController:
             album = (item.get('album')
                      if isinstance(item, dict) else None) \
                 or row.get('album') or ''
+            if isinstance(item, str):
+                store = getattr(self.app, 'library_store', None)
+                cached = store.tags(item) if store else ("", "", "")
+                if cached and (cached[0] or cached[1] or cached[2]):
+                    title = cached[0] or title
+                    artist = artist or cached[1]
+                    album = album or cached[2]
             return (str(title) if title else '',
                     str(artist) if artist else '',
                     str(album) if album else '')

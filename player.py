@@ -769,7 +769,11 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
         side.addWidget(self.search_input)
 
         self.library_tree = QTreeWidget()
-        self.library_tree.setHeaderHidden(True)
+        self.library_tree.setColumnCount(3)
+        self.library_tree.setHeaderLabels(["Name", "Artist", "Album"])
+        self.library_tree.header().resizeSection(0, 250)
+        self.library_tree.header().resizeSection(1, 130)
+        self.library_tree.header().resizeSection(2, 130)
         self.library_tree.itemDoubleClicked.connect(self.on_library_item_clicked)
         self.library_tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.library_tree.customContextMenuRequested.connect(self.show_library_context_menu)
@@ -3089,6 +3093,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
         worker.on_files = lambda f, c: self._on_local_files_scanned(gen, f, c)
         worker.on_indexed = lambda p: self._on_local_indexed(gen, p)
         worker.on_finished = lambda t: self._on_local_scan_finished(gen, t)
+        worker.on_tags = lambda pairs: self._on_local_tags_scanned(gen, pairs)
         self._local_scan_worker = worker
         thread = _threading.Thread(target=worker.run, daemon=True,
                                    name="library-scan")
@@ -3116,6 +3121,17 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
             return
         self.library_store.add_indexed(paths)
         self.status_bar.showMessage(f"Library: {self.library_store.local_count()} tracks", 3000)
+
+    def _on_local_tags_scanned(self, gen, pairs):
+        """Cache the scan worker's tag batch and repaint the Local Media
+        rows that gained real names (one repaint per batch, worker-paced)."""
+        if self._superseded(gen) or not pairs:
+            return
+        self.library_store.add_tags(pairs)
+        # Only repaint once rows actually exist; heavy folders repaint
+        # again right after their tag batch lands.
+        if not self.search_input.text().strip():
+            self._refresh_local_section()
 
     def _on_local_scan_finished(self, gen, total):
         if self._superseded(gen):
@@ -3769,7 +3785,14 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
                             "artist": "", "album": ""}
                 elif isinstance(entry, str) and os.path.exists(entry):
                     title, artist, album = self.meta.queue_cells(entry)
-                    if not artist or not album:
+                    # Files the scanner visited carry their tags in the
+                    # store cache — authoritative, never re-read here.
+                    # Only unscanned paths (dropped files etc.) may parse
+                    # tags on this thread.
+                    cached = (self.library_store.tags(entry)
+                              if hasattr(self, 'library_store')
+                              else ("", "", ""))
+                    if (not artist or not album) and not any(cached):
                         rt_artist, rt_album = read_sort_tags(entry)
                         artist = artist or rt_artist
                         album = album or rt_album

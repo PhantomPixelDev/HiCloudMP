@@ -90,12 +90,25 @@ class LibraryView:
                 subdir_item.setData(0, Qt.UserRole, {"type": "local_folder", "path": dir_path})
                 subdir_item.setIcon(0, folder_icon)
             for fpath in entry.get("files", []):
-                file_item = QTreeWidgetItem(folder_item, [os.path.basename(fpath)])
+                title, artist, album = self._local_cells(fpath)
+                file_item = QTreeWidgetItem(
+                    folder_item, [title, artist, album])
                 file_item.setData(0, Qt.UserRole, {"type": "local_file", "path": fpath})
                 file_item.setIcon(0, file_icon)
         open_folder_item = QTreeWidgetItem(local_root, ["Open Folder..."])
         open_folder_item.setData(0, Qt.UserRole, {"type": "open_folder"})
         open_folder_item.setIcon(0, folder_icon)
+
+    def _local_cells(self, fpath):
+        """(name, artist, album) cells for a local file row. Tags come from
+        the scan cache; the Name cell falls back to the basename."""
+        try:
+            cached = self.app.library_store.tags(fpath)
+        except Exception:
+            cached = ("", "", "")
+        title = cached[0] or os.path.splitext(
+            os.path.basename(fpath))[0]
+        return (title, cached[1], cached[2])
 
     def _insert_playlists_root(self, position):
         tree = self.app.library_tree
@@ -150,7 +163,15 @@ class LibraryView:
                     folder_item.setIcon(0, folder_icon)
                     for f in files:
                         file_info = cloud["files"][f["file_index"]]
-                        file_item = QTreeWidgetItem(folder_item, [f["name"]])
+                        # Catalog cells: title comes from `name`
+                        # (Subsonic rows carry it there), the remote
+                        # filename is only the fallback cell.
+                        title = str(file_info.get("name")
+                                    or f["name"] or "")
+                        artist = str(file_info.get("artist") or "")
+                        album = str(file_info.get("album") or "")
+                        file_item = QTreeWidgetItem(
+                            folder_item, [title, artist, album])
                         file_item.setData(0, Qt.UserRole, {
                             "type": "cloud_file",
                             "cloud_index": idx,
@@ -175,7 +196,9 @@ class LibraryView:
         local_results.setExpanded(True)
         found_local = False
         for path in self.app.library_store.search_local(term):
-            result_item = QTreeWidgetItem(local_results, [os.path.basename(path)])
+            title, artist, album = self._local_cells(path)
+            result_item = QTreeWidgetItem(
+                local_results, [os.path.basename(path), artist, album])
             result_item.setData(0, Qt.UserRole, {"type": "local_file", "path": path})
             found_local = True
         if not found_local:
@@ -189,7 +212,11 @@ class LibraryView:
                 for file_idx, file in enumerate(cloud["files"]):
                     file_name = os.path.basename(file["path"])
                     if term in file_name.lower():
-                        result_item = QTreeWidgetItem(cloud_results, [f"{file_name} ({cloud['name']})"])
+                        result_item = QTreeWidgetItem(
+                            cloud_results,
+                            [f"{file_name} ({cloud['name']})",
+                             str(file.get("artist") or ""),
+                             str(file.get("album") or "")])
                         result_item.setData(0, Qt.UserRole, {"type": "cloud_file", "cloud_index": cloud_idx, "file_index": file_idx})
                         found_cloud = True
         if not found_cloud:

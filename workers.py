@@ -29,6 +29,7 @@ class LibraryScanWorker:
         self.on_folder = None        # fn(folder, subdirs)
         self.on_files = None         # fn(folder, tree_chunk)
         self.on_indexed = None       # fn(paths)
+        self.on_tags = None          # fn([(path, title, artist, album)])
         self.on_finished = None      # fn(total)
 
     def run(self):
@@ -60,14 +61,58 @@ class LibraryScanWorker:
                 if chunk:
                     self._indexed_total += len(chunk)
                     self._emit(self.on_indexed, chunk)
+                    self._emit_tags(chunk)
         self._emit(self.on_folder, folder, subdirs)
         self._indexed_total += len(top_files)
         if top_files:
             self._emit(self.on_indexed, list(top_files))
+            self._emit_tags(top_files)
         for i in range(0, len(top_files), self.CHUNK):
             if self._abort:
                 return
             self._emit(self.on_files, folder, top_files[i:i + self.CHUNK])
+
+    def _emit_tags(self, paths):
+        """Read embedded tags for a chunk of files (worker thread) and hand
+        (path, title, artist, album) pairs to the UI thread. Per-file errors
+        are swallowed into neutral cells; a broken file must never break the
+        scan."""
+        pairs = []
+        for path in paths:
+            title, artist, album = self._read_tags(path)
+            pairs.append((path, title, artist, album))
+        if pairs:
+            self._emit(self.on_tags, pairs)
+
+    @staticmethod
+    def _read_tags(path):
+        try:
+            import mutagen
+            audio = mutagen.File(path, easy=True)
+            if audio is None:
+                return ("", "", "")
+
+            def first(*keys):
+                # easy=True maps keys for most formats, but not for WAVE +
+                # embedded ID3 (frames stay raw TIT2/TPE1/TALB there). A
+                # raw frame has no len(); index it instead.
+                for key in keys:
+                    value = audio.get(key)
+                    if value is None:
+                        continue
+                    try:
+                        text = value[0]
+                    except (IndexError, KeyError, TypeError):
+                        continue
+                    if text:
+                        return str(text)
+                return ""
+
+            return (first("title", "TIT2"),
+                    first("artist", "TPE1"),
+                    first("album", "TALB"))
+        except Exception:
+            return ("", "", "")
 
     def _emit(self, cb, *args):
         if cb is not None:

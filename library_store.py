@@ -16,6 +16,7 @@ class LibraryStore:
     def reset(self):
         self._folders = {}   # folder path -> {"subdirs": [names], "files": [paths]}
         self._all = []       # every music file path found recursively
+        self._tags = {}      # path -> (title, artist, album) from the scan
 
     # -------------------------------------------------- worker callbacks
     def add_folder(self, folder, subdirs):
@@ -31,7 +32,21 @@ class LibraryStore:
         if paths:
             self._all.extend(paths)
 
+    def add_tags(self, pairs):
+        """Cache (path, title, artist, album) produced by the scan worker.
+
+        Everything UI-side (tree labels, queue cells, playlist sort) reads
+        tags from this cache so no code path ever parses a file on the UI
+        thread. A missing file simply has no entry."""
+        for path, title, artist, album in pairs or []:
+            self._tags[path] = (str(title or ""), str(artist or ""),
+                                str(album or ""))
+
     # ------------------------------------------------------------- reads
+    def tags(self, path):
+        """(title, artist, album) cache entry for a path, neutral if absent."""
+        return self._tags.get(path, ("", "", ""))
+
     def local_tree_data(self):
         return {f: {"subdirs": list(v["subdirs"]), "files": list(v["files"])}
                 for f, v in self._folders.items()}
