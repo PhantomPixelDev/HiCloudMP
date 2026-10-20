@@ -36,6 +36,7 @@ from PySide6.QtGui import QIcon, QAction, QKeySequence, QColor
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 
 # Import custom modules
+import secure_store
 from utils import (
     SUPPORTED_EXTS, is_music_file, scan_music_files, format_time, 
     MEDIA_FOLDERS_FILE, CLOUD_FILES_FILE, PLAYLISTS_FILE,
@@ -2479,11 +2480,11 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
         self._refresh_folder_watcher()
 
     def load_clouds(self):
-        """Load saved cloud accounts from file"""
+        """Load saved cloud accounts from file (accepts the DPAPI vault
+        written by save_clouds and pre-vault plaintext files)"""
         if os.path.exists(CLOUD_FILES_FILE):
             try:
-                with open(CLOUD_FILES_FILE, "r") as f:
-                    self.clouds = json.load(f)
+                self.clouds = secure_store.load_json(CLOUD_FILES_FILE)
             except Exception as e:
                 QMessageBox.warning(self, "Error", f"Could not load cloud accounts: {e}")
                 self.clouds = []
@@ -3401,9 +3402,10 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
             QMessageBox.warning(self, "Error", f"Could not save media folders: {e}")
     
     def save_clouds(self):
-        """Save cloud accounts to file"""
+        """Save cloud accounts to file (DPAPI-encrypted vault on Windows;
+        pre-vault plaintext files upgrade on this next save)"""
         try:
-            atomic_write_text(CLOUD_FILES_FILE, json.dumps(self.clouds))
+            secure_store.save_json(CLOUD_FILES_FILE, self.clouds)
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Could not save cloud accounts: {e}")
     
