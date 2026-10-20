@@ -19,6 +19,11 @@ from PySide6.QtWidgets import (QAbstractItemView, QTreeWidget, QTreeWidgetItem)
 TITLE, ARTIST, ALBUM = 0, 1, 2
 COLS = ("Title", "Artist", "Album")
 
+# data() role holding each row's load-order stamp: sort mode "Original"
+# re-permutes rows by it. Stored on the item, so sorts and internal
+# drag-drops move the row without losing its place in the load order.
+ORIGINAL_SEQ_ROLE = Qt.ItemDataRole.UserRole + 1001
+
 
 class PlaylistQueueItem(QTreeWidgetItem):
     """Queue row: QTreeWidgetItem whose text() defaults to column 0, so
@@ -55,24 +60,37 @@ class PlaylistQueueWidget(QTreeWidget):
         self.header().resizeSection(TITLE, 300)
         self.header().resizeSection(ARTIST, 150)
         self.header().resizeSection(ALBUM, 150)
+        self._row_seq = 0
+
+    def _stamp(self, item):
+        """Give a NEW row its place in the load order."""
+        item.setData(0, ORIGINAL_SEQ_ROLE, self._row_seq)
+        self._row_seq += 1
+
+    def clear(self):
+        """Rebuilding the queue starts a new 'original' life."""
+        self._row_seq = 0
+        super().clear()
 
     # ------------------------------------------------------------ insertion
     def addItem(self, value):
         """Append a row. `value` is a string (title-only, QListWidget
         compatible) or (title, artist[, album]) cells."""
         item = PlaylistQueueItem(_cells(value))
+        self._stamp(item)
         self.addTopLevelItem(item)
         return item
 
     def insertItem(self, row, value):
         """QListWidget-style insert used by the row-move helpers; accepts a
-        PlaylistQueueItem/QTreeWidgetItem (reinsertion) or the same input as
-        addItem()."""
+        PlaylistQueueItem/QTreeWidgetItem (reinsertion — keeps its load-order
+        stamp) or the same input as addItem() (new row — stamped)."""
         row = max(0, row)
         if isinstance(value, QTreeWidgetItem):
             self.insertTopLevelItem(min(row, self.topLevelItemCount()), value)
             return value
         item = PlaylistQueueItem(_cells(value))
+        self._stamp(item)
         self.insertTopLevelItem(min(row, self.topLevelItemCount()), item)
         return item
 

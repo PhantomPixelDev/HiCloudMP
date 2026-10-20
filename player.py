@@ -13,7 +13,8 @@ from tray import TrayController
 from metadata import MetadataController
 from playlists_manager import PlaylistsManager
 from library_view import LibraryView
-from playlist_widget import PlaylistQueueWidget  # noqa: F401  (queued table)
+from playlist_widget import (PlaylistQueueWidget,  # noqa: F401 (queued table)
+                             ORIGINAL_SEQ_ROLE)
 # dialogs live in dialogs.py; re-export so existing imports/patches
 # (player.SettingsDialog, monkeypatched player.CloudAccountsDialog) keep working
 from dialogs import CloudAccountsDialog, SettingsDialog  # noqa: F401
@@ -3767,9 +3768,6 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
     def sort_playlist(self):
         widget = self.playlist_widget
         mode = self.playlist_sort_combo.currentText()
-        if mode == "Original":
-            # TODO: restore original order if needed
-            return
         widget.setUpdatesEnabled(False)
         try:
             # Rows sort off their table cells; local rows fall back to the
@@ -3802,8 +3800,15 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
                     title, artist, album = self.meta.queue_cells(entry)
                     meta = {"title": title or display,
                             "artist": artist, "album": album}
-                items.append((entry, item, meta))
-            if mode == "Title":
+                # Load-order stamp: rows a sort/rebuild may have moved keep
+                # theirs; exotic rows without one stay where they are.
+                seq = (item.data(0, ORIGINAL_SEQ_ROLE)
+                       if item is not None else None)
+                items.append((entry, item, meta,
+                              seq if seq is not None else i))
+            if mode == "Original":
+                items.sort(key=lambda x: x[3])
+            elif mode == "Title":
                 items.sort(key=lambda x: x[2]["title"].lower())
             elif mode == "Artist":
                 items.sort(key=lambda x: (x[2]["artist"].lower(),
@@ -3819,10 +3824,10 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
             for it in row_items:
                 if it is not None:
                     widget.takeItem(widget.row(it))
-            for i, (entry, item, meta) in enumerate(items):
+            for i, (entry, item, meta, _seq) in enumerate(items):
                 if item is not None:
                     widget.insertItem(i, item)
-            new_playlist = [entry for entry, _i, _m in items]
+            new_playlist = [entry for entry, _i, _m, _s in items]
         finally:
             widget.setUpdatesEnabled(True)
         # Update the underlying playlist data
