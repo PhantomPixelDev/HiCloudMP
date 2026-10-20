@@ -32,8 +32,16 @@ def test_workflow_builds_with_nuitka_pyside6():
 
 def test_workflow_bundles_ffmpeg():
     wf = _wf()
-    assert "ffmpeg-release-essentials.zip" in wf
+    # The binary must come from a permanent versioned release, never from
+    # the floating "release-essentials" alias (its behavior changes
+    # whenever Gyan publishes a new build).
+    assert "ffmpeg-release-essentials.zip" not in wf
+    assert "releases/download/" in wf
+    assert "essentials_build.zip" in wf
     assert "main.dist\\ffmpeg.exe" in wf
+    # Reproducible toolchain: multimedia stack + compiler pinned.
+    assert "PySide6==" in wf
+    assert "nuitka==" in wf
 
 
 def test_workflow_bundles_qt_multimedia_backend():
