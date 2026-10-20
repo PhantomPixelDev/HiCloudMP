@@ -805,3 +805,13 @@ Suite: 454 passed, 2 skipped. Ruff: clean.
   equalizer split alone. No content or link changes.
 
 Suite: 454 passed, 2 skipped. Ruff: clean.
+
+## 2026-10-20 - fix(theme): accent-colored vertical sliders
+
+- The equalizer dialog's vertical sliders fell back to Qt's default blue
+  because the stylesheet only defined `QSlider::*:horizontal`. Added
+  vertical groove, sub-page, add-page and handle rules so they follow the
+  theme accent like the seek and volume sliders.
+- Regression test asserts the vertical rules exist and carry the accent.
+
+Suite: 455 passed, 2 skipped. Ruff: clean.

@@ -20,6 +20,19 @@ def test_build_qss_interpolates_accent():
     assert 'QPushButton[accentActive="true"]' in qss
 
 
+def test_build_qss_styles_vertical_sliders_with_accent():
+    """The EQ dialog uses vertical sliders. Without explicit vertical rules
+    they fall back to Qt's default blue fill and ignore the theme accent."""
+    qss = theme_mod.build_qss(theme="Dark", accent="#ab45ed", density="comfortable")
+    assert "QSlider::groove:vertical" in qss
+    assert "QSlider::sub-page:vertical" in qss
+    assert "QSlider::add-page:vertical" in qss
+    sub_page = qss.split("QSlider::sub-page:vertical", 1)[1].split("}", 1)[0]
+    assert "#ab45ed" in sub_page
+    handle = qss.split("QSlider::handle:vertical", 1)[1].split("}", 1)[0]
+    assert "#ab45ed" in handle
+
+
 def test_build_qss_dark_and_light_differ():
     dark = theme_mod.build_qss(theme="Dark", accent="#10b981", density="comfortable")
     light = theme_mod.build_qss(theme="Light", accent="#10b981", density="comfortable")

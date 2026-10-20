@@ -316,6 +316,21 @@ def build_qss(theme="Dark", accent=None, density="comfortable", bg=None):
         border: 2px solid {accent};
     }}
     QSlider::handle:horizontal:hover {{ background: {accent}; }}
+    QSlider::groove:vertical {{
+        width: 6px;
+        border-radius: 3px;
+        background: {tk['border']};
+    }}
+    QSlider::sub-page:vertical {{ background: {accent}; border-radius: 3px; }}
+    QSlider::add-page:vertical {{ background: {tk['border']}; border-radius: 3px; }}
+    QSlider::handle:vertical {{
+        height: 14px;
+        margin: 0 -5px;
+        border-radius: 7px;
+        background: {tk['surface']};
+        border: 2px solid {accent};
+    }}
+    QSlider::handle:vertical:hover {{ background: {accent}; }}
     QProgressBar {{
         background: {tk['input_bg']};
         border: 1px solid {tk['border']};
