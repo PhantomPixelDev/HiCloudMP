@@ -554,3 +554,22 @@ Version remains 1.0.4 (git) — v1.0.5 tag/push/release awaits explicit go.
 - Release step in CI fires only on `refs/tags/v*`; pushing main never publishes.
 
 Suite: 424 passed, 2 skipped.
+
+## 2026-10-20 — feat: library tree carries real tags
+
+- Queue table cells and labels for LOCAL files now resolve from a
+  scan-time tag cache (see below) instead of basename-only display.
+- `LibraryScanWorker` reads tags per file (mutagen, worker thread) and
+  emits `on_tags` batches; `LibraryStore.add_tags/tags` cache them;
+  `_on_local_tags_scanned` repainteds the Local Media root per batch.
+- The library tree is a Name|Artist|Album table: rows show cached tags
+  (title falls back to basename), cloud rows use the catalog's
+  name/artist/album from the saved scan, search results gain the extra
+  columns. `queue_cells(str)` prefers the cache; playlist sort skips
+  the on-UI-thread `read_sort_tags` fallback entirely for scanned
+  files (only dropped/unscanned paths still parse tags at sort time).
+- Ruling: a scan-cache entry is authoritative; the sort fallback that
+  re-reads the disk to complete a partial entry is skipped for cached
+  files because the scanner already read exactly those tags.
+
+Suite: 430 passed, 2 skipped.
