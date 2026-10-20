@@ -636,3 +636,16 @@ Suite: 442 passed, 2 skipped.
   (111.6 MB) + Setup 1.0.5 exe (74.9 MB), auto-generated notes.
 
 Suite: release-packaging tests green.
+
+## 2026-10-20 — test: packaging contract follows the pins
+
+- `test_workflow_bundles_ffmpeg` demanded the old floating
+  "ffmpeg-release-essentials.zip" alias; rewrote it to forbid the
+  alias, require a versioned release URL, and assert PySide6==/nuitka==
+  pins.
+- Ruling: the test documents contract, and the contract changed on
+  purpose (reproducible CI assets). Updated with the change, not
+  against it; the new assertions fail on both the old and any future
+  floating-alias regression.
+
+Suite: 442 passed, 2 skipped (full run at commit time).
