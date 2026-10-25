@@ -189,13 +189,9 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
         # _retire_qthread(). Destroying a running QThread aborts the process.
         self._retired_qthreads = []
         
-        # Media player. Both objects are parented to the window: an unparented
-        # QMediaPlayer/QAudioOutput is only freed by the cyclic GC, whose
-        # collection point is arbitrary - the C++ destructor can then run
-        # while the media backend still touches it (segfault; and
-        # setAudioOutput() does NOT take ownership of the output).
-        self.player = QMediaPlayer(self)
-        self.audio_output = QAudioOutput(self)
+        # Media player
+        self.player = QMediaPlayer()
+        self.audio_output = QAudioOutput()
         self.player.setAudioOutput(self.audio_output)
         self.audio_output.setVolume(0.7)  # 70% volume default
         # Native spectrum tap: the visualizer stays alive on the fallback
@@ -3201,15 +3197,11 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
 
     # ------------------------------------------------ audio output device
     def _make_native_output(self, device):
-        """Build the QAudioOutput for `device` (None = system default).
-
-        Parented to the window for the same reason as the initial output:
-        the replacement must be destroyed with the window, not by the GC at
-        an arbitrary point (see __init__)."""
+        """Build the QAudioOutput for `device` (None = system default)."""
         from PySide6.QtMultimedia import QAudioOutput
         if device is None:
-            return QAudioOutput(self)
-        return QAudioOutput(device, self)
+            return QAudioOutput()
+        return QAudioOutput(device)
 
     def apply_output_device_setting(self):
         """Resolve audio/output_device and apply to native + engine."""
