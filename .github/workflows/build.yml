@@ -236,3 +236,104 @@ jobs:
             HiCloudMP-*-linux-x86_64.AppImage
             HiCloudMP-linux-x86_64.AppImage
             HiCloudMP-*-linux-x86_64.tar.gz
+
+  build-macos:
+    runs-on: macos-15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Same toolchain pins as the Windows/Linux jobs: one Qt, one
+          # Nuitka series on every platform.
+          python -m pip install "PySide6==6.10.3"
+          python -m pip install "nuitka==4.3.1"
+          python -m pip install -r requirements.txt
+          # Apple Silicon only build (free-hosted runners are arm64);
+          # README documents this. imageio-ffmpeg supplies a pinned static
+          # ffmpeg for cover extraction without any floating alias URL.
+          python -m pip install "imageio-ffmpeg==0.6.0"
+
+      - name: Test suite (offscreen Qt) before Nuitka
+        run: python -m pytest -x -q
+
+      - name: Generate .icns from icon.png
+        run: packaging/macos/make-icns.sh
+
+      - name: Build with Nuitka (standalone, PySide6, .app bundle)
+        run: >
+          python -m nuitka --standalone --assume-yes-for-downloads
+          --enable-plugin=pyside6
+          --macos-create-app-bundle
+          --macos-app-name="HiCloudMP"
+          --macos-app-icon=build/icon.icns
+          --output-dir=build
+          --output-filename=HiCloudMP
+          --include-data-file=web_panel.html=web_panel.html
+          --include-data-file=icon.png=icon.png
+          main.py
+
+      - name: Show bundle layout (layout-drift visibility for CI triage)
+        run: find build/main.dist/HiCloudMP.app -maxdepth 3 | head -n 40
+
+      - name: Bundle Qt multimedia backend (ffmpegmediaplugin)
+        run: |
+          set -e
+          # Same v1.0.0-class guard as Windows/Linux: without the multimedia
+          # ffmpeg backend the packaged app plays nothing (only audio decoder
+          # since Qt 6.8). Nuitka's bundler keeps the qt-plugins tree under
+          # PySide6 inside Contents/MacOS; the av/sw dylibs sit beside the
+          # executable.
+          ps=$(python -c "import PySide6, os; print(os.path.dirname(PySide6.__file__))")
+          src=""
+          for cand in "$ps/plugins/multimedia" "$ps/Qt/plugins/multimedia"; do
+            if [ -d "$cand" ]; then src="$cand"; break; fi
+          done
+          if [ -z "$src" ]; then echo "multimedia plugin dir not found under $ps"; ls "$ps"; exit 1; fi
+          app="build/main.dist/HiCloudMP.app/Contents/MacOS"
+          mkdir -p "$app/PySide6/qt-plugins/multimedia"
+          if ls "$src"/*.dylib >/dev/null 2>&1; then
+            cp "$src"/*.dylib "$app/PySide6/qt-plugins/multimedia/"
+          else
+            cp "$src"/*.so "$app/PySide6/qt-plugins/multimedia/"
+          fi
+          for lib in libavcodec libavformat libavutil libswresample libswscale; do
+            cp "$ps/$lib"*.dylib "$app/" 2>/dev/null || cp "$ps/Qt/$lib"*.dylib "$app/"
+          done
+
+      - name: Bundle ffmpeg for cover extraction
+        run: |
+          set -e
+          app="build/main.dist/HiCloudMP.app/Contents/MacOS"
+          ff=$(python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())")
+          cp "$ff" "$app/ffmpeg"
+          chmod +x "$app/ffmpeg"
+
+      - name: Ad-hoc code signature (required to launch unsigned apps on arm64)
+        run: codesign --force --deep --sign - build/main.dist/HiCloudMP.app
+
+      - name: Package DMG
+        run: |
+          set -e
+          hdiutil create -volname HiCloudMP -srcfolder build/main.dist/HiCloudMP.app \
+            -ov -format UDZO "HiCloudMP-${GITHUB_REF_NAME#v}-macos-arm64.dmg"
+
+      - name: Stable alias for releases/latest links
+        run: |
+          set -e
+          cp "HiCloudMP-${GITHUB_REF_NAME#v}-macos-arm64.dmg" HiCloudMP-macOS.dmg
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HiCloudMP-macos
+          path: |
+            HiCloudMP-*-macos-arm64.dmg
+            HiCloudMP-macOS.dmg

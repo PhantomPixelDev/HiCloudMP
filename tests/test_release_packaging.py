@@ -173,3 +173,30 @@ def test_linux_artifacts_and_stable_alias():
     wf = _wf()
     assert "HiCloudMP-linux-x86_64.AppImage" in wf  # stable alias name
     assert "linux-x86_64.tar.gz" in wf
+# ------------------------------------------------------------ workflow: macos job
+
+def test_workflow_has_macos_job():
+    wf = _wf()
+    assert "build-macos:" in wf
+    assert "runs-on: macos-15" in wf
+    assert "--macos-create-app-bundle" in wf
+    assert '--macos-app-name="HiCloudMP"' in wf
+    assert "make-icns.sh" in wf
+
+
+def test_workflow_adhoc_signs_app_bundle():
+    wf = _wf()
+    assert "codesign --force --deep --sign -" in wf
+
+
+def test_workflow_bundles_macos_qt_multimedia():
+    wf = _wf()
+    assert "*.dylib" in wf
+    assert "Contents/MacOS" in wf
+
+
+def test_macos_dmg_and_stable_alias():
+    wf = _wf()
+    assert "hdiutil create" in wf and "UDZO" in wf
+    assert "HiCloudMP-macOS.dmg" in wf
+    assert "macos-arm64.dmg" in wf
