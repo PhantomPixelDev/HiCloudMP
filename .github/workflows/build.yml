@@ -489,10 +489,15 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install "PySide6==6.10.3"
+          python -m pip install -r requirements.txt
       - name: Probe teardown variants
         env:
           QT_QPA_PLATFORM: offscreen
         run: python tools/probe_qt_destroy.py
+      - name: Probe real-app teardown
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tools/probe_app_teardown.py
       - name: Probe with PulseAudio null sink (linux)
         if: runner.os == 'Linux'
         env:
