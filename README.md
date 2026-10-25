@@ -113,7 +113,7 @@ pip install -r requirements-dev.txt
 .venv\Scripts\python -m pytest -q
 ```
 
-**Packaging:** `.github/workflows/windows-build.yml` builds the standalone app
+**Packaging:** `.github/workflows/build.yml` builds the standalone app
 with Nuitka on every push. Pushing a `v*` tag additionally compiles the Inno
 Setup installer and publishes the release with `HiCloudMP-portable.zip`, the
 versioned installer, and the stable `HiCloudMP-Setup.exe` alias used by the
@@ -125,7 +125,7 @@ regenerated after UI changes.
 
 Contributions are welcome — keep the suite green and open a PR.
 
-[![CI](https://github.com/PhantomPixelDev/HiCloudMP/actions/workflows/windows-build.yml/badge.svg)](https://github.com/PhantomPixelDev/HiCloudMP/actions/workflows/windows-build.yml)
+[![CI](https://github.com/PhantomPixelDev/HiCloudMP/actions/workflows/build.yml/badge.svg)](https://github.com/PhantomPixelDev/HiCloudMP/actions/workflows/build.yml)
 
 </details>
 

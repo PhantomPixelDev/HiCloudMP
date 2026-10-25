@@ -6,9 +6,16 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _wf():
-    wf = ROOT / ".github" / "workflows" / "windows-build.yml"
-    assert wf.exists(), ".github/workflows/windows-build.yml missing"
+    wf = ROOT / ".github" / "workflows" / "build.yml"
+    assert wf.exists(), ".github/workflows/build.yml missing"
     return wf.read_text(encoding="utf-8")
+
+
+def test_build_workflow_replaces_windows_only_workflow():
+    wf_path = ROOT / ".github" / "workflows" / "build.yml"
+    assert wf_path.exists(), ".github/workflows/build.yml missing"
+    assert not (ROOT / ".github" / "workflows" / "windows-build.yml").exists(), \
+        "windows-build.yml must be renamed, not duplicated"
 
 
 def _iss():
