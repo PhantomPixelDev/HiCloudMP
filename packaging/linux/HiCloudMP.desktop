@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=HiCloud MP
+Comment=Your music, local and cloud, in one quiet player
+Exec=HiCloudMP
+Icon=HiCloudMP
+Categories=Audio;AudioVideo;
+Terminal=false

@@ -142,3 +142,34 @@ def test_subprocesses_never_flash_console():
     assert runs >= 1, f"expected the ffmpeg spawn flagged, got {runs}"
     # the helper must be a no-op off Windows
     assert 'os.name == "nt"' in src
+# ------------------------------------------------------------ workflow: linux job
+
+def test_workflow_has_linux_job():
+    wf = _wf()
+    assert "build-linux:" in wf
+    assert "runs-on: ubuntu-latest" in wf
+    assert "--enable-plugin=pyside6" in wf
+    assert "requirements-linux.txt" in wf, "MPRIS deps must ride along"
+    assert "imageio-ffmpeg==" in wf, "linux ffmpeg must come from a pinned PyPI build"
+    assert "get_ffmpeg_exe" in wf
+    assert "chmod +x" in wf
+
+
+def test_workflow_bundles_linux_qt_multimedia():
+    wf = _wf()
+    assert "plugins/multimedia" in wf
+    assert "libavcodec" in wf and "libswresample" in wf
+
+
+def test_workflow_builds_appimage():
+    wf = _wf()
+    assert "appimagetool" in wf
+    assert "--appimage-extract-and-run" in wf
+    assert "appimagetool/releases/download/" in wf  # versioned release, not continuous
+    assert "HiCloudMP.desktop" in wf
+
+
+def test_linux_artifacts_and_stable_alias():
+    wf = _wf()
+    assert "HiCloudMP-linux-x86_64.AppImage" in wf  # stable alias name
+    assert "linux-x86_64.tar.gz" in wf

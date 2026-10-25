@@ -113,3 +113,126 @@ jobs:
             packaging/Output/HiCloudMP-Setup-*.exe
             packaging/Output/HiCloudMP-Setup.exe
           generate_release_notes: true
+
+  build-linux:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build prerequisites (MPRIS build deps + ccache)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ccache python3-dev libglib2.0-dev libdbus-1-dev libdbus-glib-1-dev
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Same toolchain pins as the Windows job: one Qt, one Nuitka series
+          # across every platform, so behavior and reproducibility match.
+          python -m pip install "PySide6==6.10.3"
+          python -m pip install "nuitka==4.3.1"
+          python -m pip install -r requirements.txt
+          # MPRIS (system media keys): PyGObject/dbus-python build from
+          # source against the apt packages installed above.
+          python -m pip install -r requirements-linux.txt
+          # Bundled ffmpeg for cover extraction comes from a pinned PyPI
+          # package (imageio-ffmpeg ships static per-arch binaries; versioned
+          # by PyPI, so no floating download aliases).
+          python -m pip install "imageio-ffmpeg==0.6.0"
+
+      - name: Test suite (offscreen Qt) before Nuitka
+        run: python -m pytest -x -q
+
+      - name: Build with Nuitka (standalone, PySide6 plugin)
+        run: >
+          python -m nuitka --standalone --assume-yes-for-downloads
+          --enable-plugin=pyside6
+          --output-dir=build
+          --output-filename=HiCloudMP
+          --include-data-file=web_panel.html=web_panel.html
+          --include-data-file=icon.png=icon.png
+          main.py
+
+      - name: Bundle Qt multimedia backend (ffmpegmediaplugin)
+        run: |
+          set -e
+          # Same v1.0.0-class guard as the Windows job: Nuitka ships the
+          # qt6multimedia libs but NOT the multimedia ffmpeg backend (the
+          # only audio decoder since Qt 6.8).
+          ps=$(python -c "import PySide6, os; print(os.path.dirname(PySide6.__file__))")
+          src=""
+          for cand in "$ps/plugins/multimedia" "$ps/Qt/plugins/multimedia"; do
+            if [ -d "$cand" ]; then src="$cand"; break; fi
+          done
+          if [ -z "$src" ]; then echo "multimedia plugin dir not found under $ps"; ls "$ps"; exit 1; fi
+          mkdir -p build/main.dist/PySide6/qt-plugins/multimedia
+          cp "$src"/*.so build/main.dist/PySide6/qt-plugins/multimedia/
+          # The backend's ffmpeg libs must ride along (wheels keep them in
+          # the PySide6 package dir; try the root first, then Qt/).
+          for lib in libavcodec libavformat libavutil libswresample libswscale; do
+            cp "$ps/$lib"*.so* build/main.dist/ 2>/dev/null || cp "$ps/Qt/$lib"*.so* build/main.dist/
+          done
+
+      - name: Bundle ffmpeg for cover extraction
+        run: |
+          set -e
+          ff=$(python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())")
+          cp "$ff" build/main.dist/ffmpeg
+          # cover_extractor.find_ffmpeg() looks beside the compiled binary
+          # first, then PATH - a bundled sibling hits the fast path.
+          chmod +x build/main.dist/ffmpeg
+
+      - name: Assemble AppDir
+        run: |
+          set -e
+          mkdir -p AppDir/usr/bin
+          cp -r build/main.dist/* AppDir/usr/bin/
+          if [ -f AppDir/usr/bin/main.bin ] && [ ! -f AppDir/usr/bin/HiCloudMP ]; then
+            mv -f AppDir/usr/bin/main.bin AppDir/usr/bin/HiCloudMP
+          fi
+          cp packaging/linux/HiCloudMP.desktop AppDir/HiCloudMP.desktop
+          cp build/main.dist/icon.png AppDir/HiCloudMP.png
+          ln -sf HiCloudMP.png AppDir/.DirIcon
+          # AppRun is an exec wrapper so the standalone dist keeps resolving
+          # its libs relative to usr/bin (a copied binary would not).
+          echo '#!/bin/sh' > AppDir/AppRun
+          echo 'exec "$(dirname "$0")/usr/bin/HiCloudMP" "$@"' >> AppDir/AppRun
+          chmod +x AppDir/AppRun AppDir/usr/bin/HiCloudMP
+
+      - name: Package AppImage (appimagetool 1.9.1, version-pinned)
+        run: |
+          set -e
+          # Pinned versioned release (asset updated 2025-12-04); continuous
+          # would track a moving target, same rule as the Windows ffmpeg pin.
+          # sha256 ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
+          curl -L -o appimagetool-x86_64.AppImage \
+            https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+          echo "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0  appimagetool-x86_64.AppImage" | sha256sum -c -
+          chmod +x appimagetool-x86_64.AppImage
+          ver="${GITHUB_REF_NAME#v}"
+          ./appimagetool-x86_64.AppImage --appimage-extract-and-run AppDir "HiCloudMP-$ver-linux-x86_64.AppImage"
+
+      - name: Package portable tarball
+        run: |
+          set -e
+          tar -czf "HiCloudMP-${GITHUB_REF_NAME#v}-linux-x86_64.tar.gz" -C build main.dist
+
+      - name: Stable alias for releases/latest links
+        run: |
+          set -e
+          cp "HiCloudMP-${GITHUB_REF_NAME#v}-linux-x86_64.AppImage" HiCloudMP-linux-x86_64.AppImage
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HiCloudMP-linux
+          path: |
+            HiCloudMP-*-linux-x86_64.AppImage
+            HiCloudMP-linux-x86_64.AppImage
+            HiCloudMP-*-linux-x86_64.tar.gz
