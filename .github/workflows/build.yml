@@ -122,7 +122,7 @@ jobs:
       - name: Install build prerequisites (MPRIS build deps + ccache)
         run: |
           sudo apt-get update
-          sudo apt-get install -y ccache python3-dev libglib2.0-dev libdbus-1-dev libdbus-glib-1-dev
+          sudo apt-get install -y ccache python3-dev libglib2.0-dev libdbus-1-dev libdbus-glib-1-dev libcairo2-dev pkg-config
 
       - name: Install dependencies
         run: |
@@ -139,6 +139,8 @@ jobs:
           # package (imageio-ffmpeg ships static per-arch binaries; versioned
           # by PyPI, so no floating download aliases).
           python -m pip install "imageio-ffmpeg==0.6.0"
+          # pytest etc. for the pre-build suite (NOT bundled into the app).
+          python -m pip install -r requirements-dev.txt
 
       - name: Test suite (offscreen Qt) before Nuitka
         run: python -m pytest -x -q
@@ -254,6 +256,8 @@ jobs:
           # README documents this. imageio-ffmpeg supplies a pinned static
           # ffmpeg for cover extraction without any floating alias URL.
           python -m pip install "imageio-ffmpeg==0.6.0"
+          # pytest etc. for the pre-build suite (NOT bundled into the app).
+          python -m pip install -r requirements-dev.txt
 
       - name: Test suite (offscreen Qt) before Nuitka
         run: python -m pytest -x -q
