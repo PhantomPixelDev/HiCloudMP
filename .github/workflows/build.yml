@@ -270,14 +270,18 @@ jobs:
           python -m pip install -r requirements-dev.txt
 
       - name: Test suite (smoke tier) before Nuitka
-        # Ruling (run 40173844475): the full suite segfaults on headless macOS
-        # VMs when the music_player fixture drives QtMultimedia device
-        # enumeration on a runner with no audio hardware (crash pinned to
-        # tests/test_eq_toggle.py fixture setup, exit 139). This smoke tier
-        # keeps import-time, vault and packaging regression coverage green on
-        # mac runners; real-hardware audio stack validation is a follow-up
-        # after the first Apple Silicon release ships.
-        run: python -m pytest tests/test_release_packaging.py tests/test_secure_cloud_store.py tests/test_platform_open.py tests/test_update_check.py "tests/test_main_import.py::test_main_imports_without_linux_backends" -q
+        run: |
+          # Two macOS-CI quirks (ledger run 40175625436):
+          # 1. audio-stack tests segfault on audio-less headless VMs ->
+          #    smoke tier only; real-hardware validation is a follow-up.
+          # 2. PySide6 teardown segfaults at interpreter exit AFTER the
+          #    [100%] line, masking pytest's exit code. pytest.main +
+          #    os._exit returns the real verdict before Qt teardown.
+          python -c "import pytest, os, sys; os._exit(pytest.main(sys.argv[1:]))" \
+            tests/test_release_packaging.py tests/test_secure_cloud_store.py \
+            tests/test_platform_open.py tests/test_update_check.py \
+            "tests/test_main_import.py::test_main_imports_without_linux_backends" \
+            -q -rf
 
       - name: Generate .icns from icon.png
         run: packaging/macos/make-icns.sh
