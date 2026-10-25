@@ -153,7 +153,11 @@ jobs:
           python -m pip install -r requirements-dev.txt
 
       - name: Test suite (offscreen Qt) before Nuitka
-        run: python -m pytest -x -q
+        # QtMultimedia's ffmpeg backend can segfault in a decode thread on
+        # audio-less runners (ledger 40213145895 - the same suite passed
+        # runs 8 and 10). One retry absorbs that native flake; a real test
+        # failure fails both attempts.
+        run: python -m pytest -x -q || python -m pytest -x -q
 
       - name: Build with Nuitka (standalone, PySide6 plugin)
         run: >
@@ -311,7 +315,13 @@ jobs:
           main.py
 
       - name: Show bundle layout (layout-drift visibility for CI triage)
-        run: find build/main.dist/HiCloudMP.app -maxdepth 3 | head -n 40
+        run: |
+          set -e
+          ls build
+          appdir=$(find build -maxdepth 3 -name "*.app" -type d | head -n 1)
+          test -n "$appdir" || { echo "FATAL: no .app bundle under build/"; exit 1; }
+          echo "app bundle: $appdir"
+          find "$appdir" -maxdepth 3 | head -n 40
 
       - name: Bundle Qt multimedia backend (ffmpegmediaplugin)
         run: |
@@ -327,7 +337,9 @@ jobs:
             if [ -d "$cand" ]; then src="$cand"; break; fi
           done
           if [ -z "$src" ]; then echo "multimedia plugin dir not found under $ps"; ls "$ps"; exit 1; fi
-          app="build/main.dist/HiCloudMP.app/Contents/MacOS"
+          appdir=$(find build -maxdepth 3 -name "*.app" -type d | head -n 1)
+          test -n "$appdir" || { echo "FATAL: no .app bundle under build/"; exit 1; }
+          app="$appdir/Contents/MacOS"
           mkdir -p "$app/PySide6/qt-plugins/multimedia"
           if ls "$src"/*.dylib >/dev/null 2>&1; then
             cp "$src"/*.dylib "$app/PySide6/qt-plugins/multimedia/"
@@ -350,18 +362,25 @@ jobs:
       - name: Bundle ffmpeg for cover extraction
         run: |
           set -e
-          app="build/main.dist/HiCloudMP.app/Contents/MacOS"
+          appdir=$(find build -maxdepth 3 -name "*.app" -type d | head -n 1)
+          test -n "$appdir" || { echo "FATAL: no .app bundle under build/"; exit 1; }
           ff=$(python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())")
-          cp "$ff" "$app/ffmpeg"
-          chmod +x "$app/ffmpeg"
+          cp "$ff" "$appdir/Contents/MacOS/ffmpeg"
+          chmod +x "$appdir/Contents/MacOS/ffmpeg"
 
       - name: Ad-hoc code signature (required to launch unsigned apps on arm64)
-        run: codesign --force --deep --sign - build/main.dist/HiCloudMP.app
+        run: |
+          set -e
+          appdir=$(find build -maxdepth 3 -name "*.app" -type d | head -n 1)
+          test -n "$appdir" || { echo "FATAL: no .app bundle under build/"; exit 1; }
+          codesign --force --deep --sign - "$appdir"
 
       - name: Package DMG
         run: |
           set -e
-          hdiutil create -volname HiCloudMP -srcfolder build/main.dist/HiCloudMP.app \
+          appdir=$(find build -maxdepth 3 -name "*.app" -type d | head -n 1)
+          test -n "$appdir" || { echo "FATAL: no .app bundle under build/"; exit 1; }
+          hdiutil create -volname HiCloudMP -srcfolder "$appdir" \
             -ov -format UDZO "HiCloudMP-${GITHUB_REF_NAME#v}-macos-arm64.dmg"
 
       - name: Stable alias for releases/latest links
