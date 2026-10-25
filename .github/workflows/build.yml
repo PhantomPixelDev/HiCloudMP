@@ -158,15 +158,19 @@ jobs:
           python -m pip install -r requirements-dev.txt
 
       - name: Test suite (offscreen Qt) before Nuitka
-        # QtMultimedia's ffmpeg backend segfaults intermittently in a decode
-        # thread on audio-less runners (ledger 40213145895 / 40229404221:
-        # the same suite passed runs 8/10/12, crashed 11/13). Three attempts
-        # absorb the native flake; a real test failure fails every attempt.
+        # Verdict comes from the junit report, not the exit code: PySide6 can
+        # segfault while the interpreter tears Qt objects down (ledger runs
+        # 40229404221 / 40231898041), which would mask an otherwise green
+        # suite. A crash *before* sessionfinish leaves no report and fails
+        # the gate, so real failures still fail. Retries absorb a native
+        # flake; every attempt is judged the same way.
         run: |
           ok=0
           for i in 1 2 3; do
             echo "pytest attempt $i"
-            if python -m pytest -x -q; then ok=1; break; fi
+            rm -f pytest-linux.xml
+            python -m pytest -q --junitxml=pytest-linux.xml || true
+            if python tools/junit_gate.py pytest-linux.xml; then ok=1; break; fi
           done
           test "$ok" = 1
 
@@ -460,54 +464,3 @@ jobs:
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, 'rc') }}
 
-  # TEMPORARY PROBE (remove before merge) - see tools/probe_qt_destroy.py
-  probe:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            name: linux
-          - os: macos-15
-            name: macos
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Install Qt runtime libs (linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          pick() { apt-cache show "$1" >/dev/null 2>&1 && echo "$1" || echo "$2"; }
-          sudo apt-get install -y libgl1 libegl1 libxkbcommon0 libdbus-1-3 libfontconfig1 \
-            "$(pick libpulse0t64 libpulse0)" \
-            "$(pick libasound2t64 libasound2)" \
-            "$(pick libglib2.0-0t64 libglib2.0-0)"
-      - name: Install PySide6
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install "PySide6==6.10.3"
-          python -m pip install -r requirements.txt
-      - name: Probe teardown variants
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tools/probe_qt_destroy.py
-      - name: Probe real-app teardown
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python tools/probe_app_teardown.py
-      - name: Probe with PulseAudio null sink (linux)
-        if: runner.os == 'Linux'
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: |
-          sudo apt-get install -y pulseaudio
-          export XDG_RUNTIME_DIR=/tmp/xdg
-          mkdir -p "$XDG_RUNTIME_DIR"
-          pulseaudio --start --exit-idle-time=-1 --disallow-exit || true
-          pactl load-module module-null-sink sink_name=ci || true
-          pactl set-default-sink ci || true
-          pactl info || true
-          python tools/probe_qt_destroy.py

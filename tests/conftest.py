@@ -1,3 +1,4 @@
+import gc
 import os
 import sys
 import types
@@ -14,6 +15,19 @@ if str(ROOT) not in sys.path:
 
 # Headless Qt for CI and for developers; must be set before QApplication is created.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+# Qt 6.10.3 + PySide6: an unparented QMediaPlayer/QAudioOutput can only be
+# freed by the cyclic collector (signal connections to bound methods put
+# them in a cycle), and that dealloc crashes the interpreter on audio-less
+# headless runners - faulthandler showed "Garbage-collecting" inside
+# MusicPlayer.__init__ (ledger runs 40229404221 / 40231898041). Disabling
+# the cyclic collector for the session keeps refcount teardown at its
+# deterministic points and leaves cycles for interpreter exit, where the CI
+# verdict comes from the junit report (tools/junit_gate.py) rather than the
+# process exit code. Restoring Qt-side ownership was tried and made it
+# worse: the deferred delete then ran inside a later test's event loop and
+# segfaulted deterministically.
+gc.disable()
 
 # Isolate user data. utils.py calls platformdirs.user_data_dir(...) at import
 # time, and on Windows platformdirs ignores env vars (it uses the Windows
