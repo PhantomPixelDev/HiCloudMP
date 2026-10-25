@@ -2674,7 +2674,11 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
             if isinstance(item, dict):
                 key = ("cloud", item.get("cloud_idx"), item.get("file_idx"))
             else:
-                key = os.path.normcase(str(item))
+                # normcase handles nt slashes/case; casefold keeps the
+                # "same track" dedupe semantics identical on every host
+                # (posix normcase is identity, but queues must dedupe the
+                # same way a windows-authored playlist collapses).
+                key = os.path.normcase(str(item)).lower()
             if key in seen:
                 continue
             seen.add(key)

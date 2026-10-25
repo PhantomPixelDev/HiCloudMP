@@ -133,9 +133,9 @@ def test_xspf_import_reads_namespaced_location(tmp_path):
 
 
 def test_xspf_windows_drive_uri_posix_hosts(monkeypatch):
-    """Windows playlists travel: file:///C:/... must land as the same
+    r"""Windows playlists travel: file:///C:/... must land as the same
     Windows filespec even on macOS/Linux, where POSIX url2pathname keeps
-    the leading "/" of the URI (regression: linux CI saw '\C:\music\...')."""
+    the leading "/" of the URI (regression: linux CI saw backslash-C:\...)."""
     import playlist_io as pio
     from urllib.parse import unquote as _unquote
 
