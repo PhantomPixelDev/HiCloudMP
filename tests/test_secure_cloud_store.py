@@ -35,6 +35,20 @@ def test_plaintext_file_still_loads(tmp_path):
     assert secure_store.load_json(p) == data
 
 
+def test_secure_store_importable_without_ctypes_wintypes(monkeypatch):
+    """Non-Windows hosts have no ctypes.wintypes: not bound on 'import
+    ctypes', not in sys.modules. secure_store must import cleanly under
+    that condition, or macOS/Linux CI dies at collection time."""
+    import ctypes
+    import importlib
+    import sys
+
+    monkeypatch.delattr(ctypes, "wintypes", raising=False)
+    monkeypatch.delitem(sys.modules, "ctypes.wintypes", raising=False)
+    importlib.reload(secure_store)
+    assert secure_store.MAGIC == "HiCloudMP-DPAPI-v1:"
+
+
 def test_corrupt_vault_fails_loudly(tmp_path):
     p = tmp_path / "cloudfiles.json"
     secure_store.save_json(p, {"ok": 1})

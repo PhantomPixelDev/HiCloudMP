@@ -119,10 +119,10 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install build prerequisites (MPRIS build deps + ccache)
+      - name: Install build prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y ccache python3-dev libglib2.0-dev libdbus-1-dev libdbus-glib-1-dev libcairo2-dev pkg-config
+          sudo apt-get install -y ccache
 
       - name: Install dependencies
         run: |
@@ -132,9 +132,11 @@ jobs:
           python -m pip install "PySide6==6.10.3"
           python -m pip install "nuitka==4.3.1"
           python -m pip install -r requirements.txt
-          # MPRIS (system media keys): PyGObject/dbus-python build from
-          # source against the apt packages installed above.
-          python -m pip install -r requirements-linux.txt
+          # Ruling (2026-10-25): requirements-linux.txt (PyGObject/dbus-python)
+          # stays dev-host-only. PyGObject 3.54 needs system girepository-2.0
+          # at build time, and the packaged app's MPRIS path (mpris_dbus)
+          # already degrades to None without it (main.py try/except). QtDBus
+          # ships inside PySide6 for future MPRIS wiring.
           # Bundled ffmpeg for cover extraction comes from a pinned PyPI
           # package (imageio-ffmpeg ships static per-arch binaries; versioned
           # by PyPI, so no floating download aliases).

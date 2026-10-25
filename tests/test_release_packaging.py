@@ -149,7 +149,7 @@ def test_workflow_has_linux_job():
     assert "build-linux:" in wf
     assert "runs-on: ubuntu-latest" in wf
     assert "--enable-plugin=pyside6" in wf
-    assert "requirements-linux.txt" in wf, "MPRIS deps must ride along"
+    assert "requirements-dev.txt" in wf, "pre-build test suite needs dev deps"
     assert "imageio-ffmpeg==" in wf, "linux ffmpeg must come from a pinned PyPI build"
     assert "get_ffmpeg_exe" in wf
     assert "chmod +x" in wf

@@ -15,6 +15,12 @@ import ctypes
 import json
 import os
 
+# ctypes.wintypes binds implicitly on Windows only; macOS/Linux lack it, so
+# import it explicitly for the class definitions below (non-Windows hosts
+# never touch the DPAPI helpers - they stay plaintext by design).
+if os.name == "nt":
+    import ctypes.wintypes
+
 from utils import atomic_write_text
 
 MAGIC = "HiCloudMP-DPAPI-v1:"
