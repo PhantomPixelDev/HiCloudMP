@@ -119,6 +119,11 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Compute artifact version (branch names contain slashes)
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          echo "VER=${ver//\//-}" >> "$GITHUB_ENV"
+
       - name: Install build prerequisites
         run: |
           sudo apt-get update
@@ -233,18 +238,17 @@ jobs:
             https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
           echo "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0  appimagetool-x86_64.AppImage" | sha256sum -c -
           chmod +x appimagetool-x86_64.AppImage
-          ver="${GITHUB_REF_NAME#v}"
-          ./appimagetool-x86_64.AppImage --appimage-extract-and-run AppDir "HiCloudMP-$ver-linux-x86_64.AppImage"
+          ./appimagetool-x86_64.AppImage --appimage-extract-and-run AppDir "HiCloudMP-${VER}-linux-x86_64.AppImage"
 
       - name: Package portable tarball
         run: |
           set -e
-          tar -czf "HiCloudMP-${GITHUB_REF_NAME#v}-linux-x86_64.tar.gz" -C build main.dist
+          tar -czf "HiCloudMP-${VER}-linux-x86_64.tar.gz" -C build main.dist
 
       - name: Stable alias for releases/latest links
         run: |
           set -e
-          cp "HiCloudMP-${GITHUB_REF_NAME#v}-linux-x86_64.AppImage" HiCloudMP-linux-x86_64.AppImage
+          cp "HiCloudMP-${VER}-linux-x86_64.AppImage" HiCloudMP-linux-x86_64.AppImage
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -265,6 +269,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
+      - name: Compute artifact version (branch names contain slashes)
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          echo "VER=${ver//\//-}" >> "$GITHUB_ENV"
 
       - name: Install dependencies
         run: |
@@ -381,12 +390,12 @@ jobs:
           appdir=$(find build -maxdepth 3 -name "*.app" -type d | head -n 1)
           test -n "$appdir" || { echo "FATAL: no .app bundle under build/"; exit 1; }
           hdiutil create -volname HiCloudMP -srcfolder "$appdir" \
-            -ov -format UDZO "HiCloudMP-${GITHUB_REF_NAME#v}-macos-arm64.dmg"
+            -ov -format UDZO "HiCloudMP-${VER}-macos-arm64.dmg"
 
       - name: Stable alias for releases/latest links
         run: |
           set -e
-          cp "HiCloudMP-${GITHUB_REF_NAME#v}-macos-arm64.dmg" HiCloudMP-macOS.dmg
+          cp "HiCloudMP-${VER}-macos-arm64.dmg" HiCloudMP-macOS.dmg
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
