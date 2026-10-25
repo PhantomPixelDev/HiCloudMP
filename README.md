@@ -13,6 +13,8 @@
 <p align="center">
   <a href="https://github.com/PhantomPixelDev/HiCloudMP/releases/latest/download/HiCloudMP-Setup.exe"><img src="https://img.shields.io/badge/Download_for_Windows-Installer-ab45ed?style=for-the-badge&logo=windows&logoColor=white" alt="Download the Windows installer"></a>
   <a href="https://github.com/PhantomPixelDev/HiCloudMP/releases/latest/download/HiCloudMP-portable.zip"><img src="https://img.shields.io/badge/Portable_version-ZIP-334155?style=for-the-badge&logo=files&logoColor=white" alt="Download the portable ZIP"></a>
+  <a href="https://github.com/PhantomPixelDev/HiCloudMP/releases/latest/download/HiCloudMP-macOS.dmg"><img src="https://img.shields.io/badge/Download_for_macOS-Apple_Silicon-ab45ed?style=for-the-badge&logo=apple&logoColor=white" alt="Download the macOS build (Apple Silicon)"></a>
+  <a href="https://github.com/PhantomPixelDev/HiCloudMP/releases/latest/download/HiCloudMP-linux-x86_64.AppImage"><img src="https://img.shields.io/badge/Download_for_Linux-AppImage-ab45ed?style=for-the-badge&logo=linux&logoColor=white" alt="Download the Linux AppImage"></a>
 </p>
 
 <p align="center">
@@ -29,6 +31,9 @@ Both buttons always download the newest release — no version hunting.
 |---|---|
 | **Installer** <br><sub>recommended</sub> | [**HiCloudMP-Setup.exe**](https://github.com/PhantomPixelDev/HiCloudMP/releases/latest/download/HiCloudMP-Setup.exe) — about 75 MB. Adds HiCloud MP to the Start menu and installs an uninstaller. No Python or extra codecs needed. |
 | **Portable** | [**HiCloudMP-portable.zip**](https://github.com/PhantomPixelDev/HiCloudMP/releases/latest/download/HiCloudMP-portable.zip) — about 112 MB. Unzip it anywhere, run `HiCloudMP.exe`, and take your player with you. |
+| **macOS (Apple Silicon)** | [**HiCloudMP-macOS.dmg**](https://github.com/PhantomPixelDev/HiCloudMP/releases/latest/download/HiCloudMP-macOS.dmg) — ad-hoc signed, not notarized yet; see the first-launch notes below. |
+| **Linux x86_64** | [**HiCloudMP-linux-x86_64.AppImage**](https://github.com/PhantomPixelDev/HiCloudMP/releases/latest/download/HiCloudMP-linux-x86_64.AppImage) — runs on most distributions; libfuse2 needed for direct double-click. |
+| **Linux / macOS portable** | HiCloudMP-\<version\>-linux-x86_64.tar.gz and HiCloudMP-\<version\>-macos-arm64.dmg ship as versioned files on every release. |
 
 > **First launch and SmartScreen.** The app isn't code-signed yet, so Windows
 > may show *"Windows protected your PC"*. Click **More info → Run anyway** —
@@ -36,6 +41,30 @@ Both buttons always download the newest release — no version hunting.
 >
 > Want release notes or an older version? See
 > [all releases](https://github.com/PhantomPixelDev/HiCloudMP/releases).
+
+## First launch notes by platform
+
+**macOS (Apple Silicon only).** Builds are ad-hoc signed but not notarized
+yet (notarization requires a paid Apple Developer account), so macOS may warn
+*"HiCloudMP can't be opened"* or *"can't verify the developer"*. Either:
+
+- **Right-click** `HiCloudMP.app` in the mounted DMG and choose **Open**, then
+  confirm **Open** in the warning dialog - the one-time approval persists; or
+- clear the quarantine flag entirely: run
+  `xattr -dr com.apple.quarantine HiCloudMP.app` in a terminal.
+
+x86_64 (Intel) Macs are not covered; the hosted runners for Intel macOS have
+been retired by GitHub. If you need Intel builds, that becomes a paid-runner
+follow-up.
+
+**Linux (x86_64).** Every release ships an AppImage and a tarball:
+
+- `HiCloudMP-linux-x86_64.AppImage` - make it executable once
+  (`chmod +x HiCloudMP-linux-x86_64.AppImage`) and run it. Double-clicking
+  directly on desktops additionally needs libfuse2
+  (`sudo apt install libfuse2` on Ubuntu/Debian, `fuse2` on Arch).
+- `HiCloudMP-<version>-linux-x86_64.tar.gz` - unpack anywhere and run
+  `./HiCloudMP` from the folder; no fuse requirement.
 
 ## What you can do
 
@@ -113,11 +142,15 @@ pip install -r requirements-dev.txt
 .venv\Scripts\python -m pytest -q
 ```
 
-**Packaging:** `.github/workflows/windows-build.yml` builds the standalone app
-with Nuitka on every push. Pushing a `v*` tag additionally compiles the Inno
-Setup installer and publishes the release with `HiCloudMP-portable.zip`, the
-versioned installer, and the stable `HiCloudMP-Setup.exe` alias used by the
-download buttons above.
+**Packaging:** `.github/workflows/build.yml` builds the standalone app
+with Nuitka on every platform job (Windows, Linux x86_64, macOS arm64) and
+runs the test suite on Linux and macOS before burning Nuitka minutes.
+Pushing a `v*` tag additionally compiles the Inno Setup installer, then a
+single all-or-nothing `release` job publishes one release with
+`HiCloudMP-portable.zip`, the versioned installer plus the stable
+`HiCloudMP-Setup.exe` alias, the Linux AppImage + tarball, and the macOS
+DMG (stable alias `HiCloudMP-macOS.dmg`) - the links used by the download
+buttons above. Tags containing `rc` publish as prereleases.
 
 **Screenshots:** `tools/make_screenshots.py` renders the real UI headlessly
 against a throwaway demo library, so `screen.png` and the site images can be
@@ -125,7 +158,7 @@ regenerated after UI changes.
 
 Contributions are welcome — keep the suite green and open a PR.
 
-[![CI](https://github.com/PhantomPixelDev/HiCloudMP/actions/workflows/windows-build.yml/badge.svg)](https://github.com/PhantomPixelDev/HiCloudMP/actions/workflows/windows-build.yml)
+[![CI](https://github.com/PhantomPixelDev/HiCloudMP/actions/workflows/build.yml/badge.svg)](https://github.com/PhantomPixelDev/HiCloudMP/actions/workflows/build.yml)
 
 </details>
 

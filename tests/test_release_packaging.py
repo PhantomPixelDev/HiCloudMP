@@ -6,9 +6,16 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _wf():
-    wf = ROOT / ".github" / "workflows" / "windows-build.yml"
-    assert wf.exists(), ".github/workflows/windows-build.yml missing"
+    wf = ROOT / ".github" / "workflows" / "build.yml"
+    assert wf.exists(), ".github/workflows/build.yml missing"
     return wf.read_text(encoding="utf-8")
+
+
+def test_build_workflow_replaces_windows_only_workflow():
+    wf_path = ROOT / ".github" / "workflows" / "build.yml"
+    assert wf_path.exists(), ".github/workflows/build.yml missing"
+    assert not (ROOT / ".github" / "workflows" / "windows-build.yml").exists(), \
+        "windows-build.yml must be renamed, not duplicated"
 
 
 def _iss():
@@ -135,3 +142,94 @@ def test_subprocesses_never_flash_console():
     assert runs >= 1, f"expected the ffmpeg spawn flagged, got {runs}"
     # the helper must be a no-op off Windows
     assert 'os.name == "nt"' in src
+# ------------------------------------------------------------ workflow: linux job
+
+def test_workflow_has_linux_job():
+    wf = _wf()
+    assert "build-linux:" in wf
+    assert "runs-on: ubuntu-latest" in wf
+    assert "--enable-plugin=pyside6" in wf
+    assert "requirements-dev.txt" in wf, "pre-build test suite needs dev deps"
+    assert "imageio-ffmpeg==" in wf, "linux ffmpeg must come from a pinned PyPI build"
+    assert "get_ffmpeg_exe" in wf
+    assert "chmod +x" in wf
+
+
+def test_workflow_bundles_linux_qt_multimedia():
+    wf = _wf()
+    assert "plugins/multimedia" in wf
+    assert "libavcodec" in wf and "libswresample" in wf
+
+
+def test_workflow_builds_appimage():
+    wf = _wf()
+    assert "appimagetool" in wf
+    assert "--appimage-extract-and-run" in wf
+    assert "appimagetool/releases/download/" in wf  # versioned release, not continuous
+    assert "HiCloudMP.desktop" in wf
+
+
+def test_linux_artifacts_and_stable_alias():
+    wf = _wf()
+    assert "HiCloudMP-linux-x86_64.AppImage" in wf  # stable alias name
+    assert "linux-x86_64.tar.gz" in wf
+# ------------------------------------------------------------ workflow: macos job
+
+def test_workflow_has_macos_job():
+    wf = _wf()
+    assert "build-macos:" in wf
+    assert "runs-on: macos-15" in wf
+    assert "--macos-create-app-bundle" in wf
+    assert '--macos-app-name="HiCloudMP"' in wf
+    assert "make-icns.sh" in wf
+
+
+def test_workflow_adhoc_signs_app_bundle():
+    wf = _wf()
+    assert "codesign --force --deep --sign -" in wf
+
+
+def test_workflow_bundles_macos_qt_multimedia():
+    wf = _wf()
+    assert "*.dylib" in wf
+    assert "Contents/MacOS" in wf
+
+
+def test_macos_dmg_and_stable_alias():
+    wf = _wf()
+    assert "hdiutil create" in wf and "UDZO" in wf
+    assert "HiCloudMP-macOS.dmg" in wf
+    assert "macos-arm64.dmg" in wf
+# ------------------------------------------------------------ workflow: release
+
+def test_release_publishes_all_platform_assets():
+    wf = _wf()
+    # all-or-nothing: every platform must pass before anything publishes
+    assert "release:" in wf
+    for need in ("build-windows", "build-linux", "build-macos"):
+        assert need in wf
+    assert "download-artifact" in wf
+    assert "softprops/action-gh-release" in wf
+    for asset in ("HiCloudMP-portable.zip", "HiCloudMP-Setup", "HiCloudMP-Setup.exe",
+                  "HiCloudMP-linux-x86_64.AppImage", "linux-x86_64.tar.gz",
+                  "HiCloudMP-macOS.dmg", "macos-arm64.dmg"):
+        assert asset in wf, asset
+    assert "prerelease: ${{ contains(github.ref_name, 'rc') }}" in wf
+# ------------------------------------------------------------ README
+
+def test_readme_documents_all_platform_downloads():
+    src = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "releases/latest/download/HiCloudMP-macOS.dmg" in src
+    assert "releases/latest/download/HiCloudMP-linux-x86_64.AppImage" in src
+
+
+def test_readme_documents_linux_platform_notes():
+    src = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "libfuse2" in src.lower()
+
+
+def test_readme_documents_macos_platform_notes():
+    src = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "Apple Silicon" in src
+    assert "xattr -dr com.apple.quarantine" in src
+    assert ("Right-click" in src or "right-click" in src)

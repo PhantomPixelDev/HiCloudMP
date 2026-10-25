@@ -1,0 +1,466 @@
+name: windows-build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Ruff (syntax errors + pyflakes only)
+        run: |
+          python -m pip install ruff
+          python -m ruff check .
+
+  build-windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write   # only the release step needs this
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Pin the packaged multimedia stack: PySide6 6.10.3 (FFmpeg 7.1.3)
+          # is the runtime the app is tuned and verified against. 6.12.x
+          # (FFmpeg 9) measured slower local decode opens (~0.7 s vs ~0.3 s
+          # first audible) and shipped the buggier playback this app gets
+          # blamed for; ">=6.10.1" otherwise floats to the newest minor.
+          python -m pip install "PySide6==6.10.3"
+          python -m pip install -r requirements.txt
+          # Pin the compiler too: reproducible builds need the same Nuitka
+          # major series (4.3.x handled the PySide6 6.10 packaging fine).
+          python -m pip install "nuitka==4.3.1"
+
+      - name: Build with Nuitka (standalone, PySide6 plugin)
+        run: >
+          python -m nuitka --standalone --assume-yes-for-downloads
+          --enable-plugin=pyside6
+          --windows-console-mode=disable
+          --windows-icon-from-ico=icon.ico
+          --output-dir=build
+          --output-filename=HiCloudMP.exe
+          --include-data-file=web_panel.html=web_panel.html
+          --include-data-file=icon.ico=icon.ico
+          main.py
+
+      - name: Bundle Qt multimedia backend (ffmpegmediaplugin)
+        run: |
+          # Nuitka's PySide6 plugin ships qt6multimedia.dll/QtMultimedia.pyd but
+          # NOT the qt-plugins\multimedia backend - and since Qt 6.8 the ffmpeg
+          # plugin is the ONLY audio decoder. Without it the packaged app plays
+          # nothing (the engine AND the native fallback both need it).
+          $ps = python -c "import PySide6, os; print(os.path.dirname(PySide6.__file__))"
+          $dst = "build\main.dist\PySide6\qt-plugins\multimedia"
+          New-Item -ItemType Directory -Force $dst | Out-Null
+          Copy-Item "$ps\plugins\multimedia\*.dll" $dst -ErrorAction Stop
+          Copy-Item "$ps\avcodec-*.dll","$ps\avformat-*.dll","$ps\avutil-*.dll","$ps\swresample-*.dll","$ps\swscale-*.dll" build\main.dist -ErrorAction Stop
+
+      - name: Bundle ffmpeg for cover extraction
+        run: |
+          # Version-pinned (a "release-essentials" alias silently changes
+          # behavior when Gyan publishes a new build). 9.0.2 essentials:
+          # sha256 60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba
+          curl -L -o ffmpeg.zip https://github.com/GyanD/codexffmpeg/releases/download/9.0.2/ffmpeg-9.0.2-essentials_build.zip
+          powershell -Command "Expand-Archive -Path ffmpeg.zip -DestinationPath ffmpegbuild -Force"
+          $ff = Get-ChildItem -Path ffmpegbuild -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          Copy-Item $ff.FullName build\main.dist\ffmpeg.exe
+
+      - name: Package portable zip
+        run: |
+          Compress-Archive -Path build\main.dist\* -DestinationPath HiCloudMP-portable.zip -Force
+
+      - name: Build installer (Inno Setup)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          choco install innosetup -y --no-progress
+          $ver = $env:GITHUB_REF_NAME.TrimStart('v')
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=$ver packaging\HiCloudMP.iss
+          # Stable-named alias so README/site can link
+          # releases/latest/download/HiCloudMP-Setup.exe forever (the
+          # versioned file remains the canonical download page asset).
+          Copy-Item "packaging\Output\HiCloudMP-Setup-$ver.exe" packaging\Output\HiCloudMP-Setup.exe
+
+      - name: Upload build artifact (portable + installers for the release job)
+        uses: actions/upload-artifact@v4
+        with:
+          name: HiCloudMP-windows
+          path: |
+            HiCloudMP-portable.zip
+            packaging/Output/HiCloudMP-Setup-*.exe
+            packaging/Output/HiCloudMP-Setup.exe
+
+  build-linux:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Compute artifact version (branch names contain slashes)
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          echo "VER=${ver//\//-}" >> "$GITHUB_ENV"
+
+      - name: Install build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ccache
+          # Qt runtime system libs PySide6 needs to dlopen (offscreen still
+          # links libEGL/libgl/glib; QtMultimedia needs libpulse/alsa).
+          # apt-cache resolves t64 (24.04) vs plain (26+) names per image.
+          pick() { apt-cache show "$1" >/dev/null 2>&1 && echo "$1" || echo "$2"; }
+          sudo apt-get install -y libgl1 libegl1 libxkbcommon0 libdbus-1-3 libfontconfig1 \
+            "$(pick libpulse0t64 libpulse0)" \
+            "$(pick libasound2t64 libasound2)" \
+            "$(pick libglib2.0-0t64 libglib2.0-0)"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Same toolchain pins as the Windows job: one Qt, one Nuitka series
+          # across every platform, so behavior and reproducibility match.
+          python -m pip install "PySide6==6.10.3"
+          python -m pip install "nuitka==4.3.1"
+          python -m pip install -r requirements.txt
+          # Ruling (2026-10-25): requirements-linux.txt (PyGObject/dbus-python)
+          # stays dev-host-only. PyGObject 3.54 needs system girepository-2.0
+          # at build time, and the packaged app's MPRIS path (mpris_dbus)
+          # already degrades to None without it (main.py try/except). QtDBus
+          # ships inside PySide6 for future MPRIS wiring.
+          # Bundled ffmpeg for cover extraction comes from a pinned PyPI
+          # package (imageio-ffmpeg ships static per-arch binaries; versioned
+          # by PyPI, so no floating download aliases).
+          python -m pip install "imageio-ffmpeg==0.6.0"
+          # pytest etc. for the pre-build suite (NOT bundled into the app).
+          python -m pip install -r requirements-dev.txt
+
+      - name: Test suite (offscreen Qt) before Nuitka
+        # Verdict comes from the junit report, not the exit code: PySide6 can
+        # segfault while the interpreter tears Qt objects down (ledger runs
+        # 40229404221 / 40231898041), which would mask an otherwise green
+        # suite. A crash *before* sessionfinish leaves no report and fails
+        # the gate, so real failures still fail. Retries absorb a native
+        # flake; every attempt is judged the same way.
+        run: |
+          ok=0
+          for i in 1 2 3; do
+            echo "pytest attempt $i"
+            rm -f pytest-linux.xml
+            python -m pytest -q --junitxml=pytest-linux.xml || true
+            if python tools/junit_gate.py pytest-linux.xml; then ok=1; break; fi
+          done
+          test "$ok" = 1
+
+      - name: Build with Nuitka (standalone, PySide6 plugin)
+        run: >
+          python -m nuitka --standalone --assume-yes-for-downloads
+          --enable-plugin=pyside6
+          --output-dir=build
+          --output-filename=HiCloudMP
+          --include-data-file=web_panel.html=web_panel.html
+          --include-data-file=icon.png=icon.png
+          main.py
+
+      - name: Bundle Qt multimedia backend (ffmpegmediaplugin)
+        run: |
+          set -e
+          # Same v1.0.0-class guard as the Windows job: Nuitka ships the
+          # qt6multimedia libs but NOT the multimedia ffmpeg backend (the
+          # only audio decoder since Qt 6.8).
+          ps=$(python -c "import PySide6, os; print(os.path.dirname(PySide6.__file__))")
+          src=""
+          for cand in "$ps/plugins/multimedia" "$ps/Qt/plugins/multimedia"; do
+            if [ -d "$cand" ]; then src="$cand"; break; fi
+          done
+          if [ -z "$src" ]; then echo "multimedia plugin dir not found under $ps"; ls "$ps"; exit 1; fi
+          mkdir -p build/main.dist/PySide6/qt-plugins/multimedia
+          cp "$src"/*.so build/main.dist/PySide6/qt-plugins/multimedia/
+          # The backend's ffmpeg libs must ride along. Wheel layouts differ
+          # per platform/version (PySide6/, PySide6/Qt/, PySide6/Qt/lib/),
+          # so search the known homes and fail loudly when absent.
+          for lib in libavcodec libavformat libavutil libswresample libswscale; do
+            for dir in "$ps" "$ps/Qt" "$ps/Qt/lib"; do
+              if ls "$dir/$lib"*.so* >/dev/null 2>&1; then
+                cp "$dir/$lib"*.so* build/main.dist/
+                break
+              fi
+            done
+            ls build/main.dist/$lib*.so* >/dev/null 2>&1 \
+              || { echo "FATAL: $lib not found under $ps (Qt/lib included)"; exit 1; }
+          done
+
+      - name: Bundle ffmpeg for cover extraction
+        run: |
+          set -e
+          ff=$(python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())")
+          cp "$ff" build/main.dist/ffmpeg
+          # cover_extractor.find_ffmpeg() looks beside the compiled binary
+          # first, then PATH - a bundled sibling hits the fast path.
+          chmod +x build/main.dist/ffmpeg
+
+      - name: Assemble AppDir
+        run: |
+          set -e
+          mkdir -p AppDir/usr/bin
+          cp -r build/main.dist/* AppDir/usr/bin/
+          if [ -f AppDir/usr/bin/main.bin ] && [ ! -f AppDir/usr/bin/HiCloudMP ]; then
+            mv -f AppDir/usr/bin/main.bin AppDir/usr/bin/HiCloudMP
+          fi
+          cp packaging/linux/HiCloudMP.desktop AppDir/HiCloudMP.desktop
+          cp build/main.dist/icon.png AppDir/HiCloudMP.png
+          ln -sf HiCloudMP.png AppDir/.DirIcon
+          # AppRun is an exec wrapper so the standalone dist keeps resolving
+          # its libs relative to usr/bin (a copied binary would not).
+          echo '#!/bin/sh' > AppDir/AppRun
+          echo 'exec "$(dirname "$0")/usr/bin/HiCloudMP" "$@"' >> AppDir/AppRun
+          chmod +x AppDir/AppRun AppDir/usr/bin/HiCloudMP
+
+      - name: Package AppImage (appimagetool 1.9.1, version-pinned)
+        run: |
+          set -e
+          # Pinned versioned release (asset updated 2025-12-04); continuous
+          # would track a moving target, same rule as the Windows ffmpeg pin.
+          # sha256 ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
+          curl -L -o appimagetool-x86_64.AppImage \
+            https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+          echo "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0  appimagetool-x86_64.AppImage" | sha256sum -c -
+          chmod +x appimagetool-x86_64.AppImage
+          ./appimagetool-x86_64.AppImage --appimage-extract-and-run AppDir "HiCloudMP-${VER}-linux-x86_64.AppImage"
+
+      - name: Package portable tarball
+        run: |
+          set -e
+          tar -czf "HiCloudMP-${VER}-linux-x86_64.tar.gz" -C build main.dist
+
+      - name: Stable alias for releases/latest links
+        run: |
+          set -e
+          cp "HiCloudMP-${VER}-linux-x86_64.AppImage" HiCloudMP-linux-x86_64.AppImage
+
+      - name: Smoke-check AppImage (assembly proof; GUI launch is out of CI scope)
+        run: |
+          set -e
+          img="HiCloudMP-${VER}-linux-x86_64.AppImage"
+          test -s "$img"
+          ls -lh "$img"
+          unzip -p "$img" .appimage_version 2>/dev/null \
+            || echo "(no zip footer; assembly proven by appimagetool success)"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HiCloudMP-linux
+          path: |
+            HiCloudMP-*-linux-x86_64.AppImage
+            HiCloudMP-linux-x86_64.AppImage
+            HiCloudMP-*-linux-x86_64.tar.gz
+
+  build-macos:
+    runs-on: macos-15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Compute artifact version (branch names contain slashes)
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          echo "VER=${ver//\//-}" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Same toolchain pins as the Windows/Linux jobs: one Qt, one
+          # Nuitka series on every platform.
+          python -m pip install "PySide6==6.10.3"
+          python -m pip install "nuitka==4.3.1"
+          python -m pip install -r requirements.txt
+          # Apple Silicon only build (free-hosted runners are arm64);
+          # README documents this. imageio-ffmpeg supplies a pinned static
+          # ffmpeg for cover extraction without any floating alias URL.
+          python -m pip install "imageio-ffmpeg==0.6.0"
+          # pytest etc. for the pre-build suite (NOT bundled into the app).
+          python -m pip install -r requirements-dev.txt
+
+      - name: Test suite (smoke tier) before Nuitka
+        run: |
+          # macOS-CI quirks (ledger rounds 40175625436 / 40177659243):
+          # 1. audio-stack tests segfault on audio-less headless VMs ->
+          #    smoke tier only; real-hardware validation is a follow-up.
+          # 2. main-import tests crash the interpreter at session teardown
+          #    (crashlog/qInstallMessageHandler atexit path) -> excluded
+          #    here; main import coverage runs in the linux + windows jobs.
+          # 3. whatever remains may still segfault AT teardown after
+          #    [100%], masking the exit code -> the junit XML is the
+          #    verdict (missing report fails, never guesses green).
+          python -m pytest tests/test_release_packaging.py \
+            tests/test_secure_cloud_store.py tests/test_platform_open.py \
+            tests/test_update_check.py -q -rf --junitxml=pytest-smoke-mac.xml \
+            || true
+          python tools/junit_gate.py pytest-smoke-mac.xml
+
+      - name: Generate .icns from icon.png
+        run: packaging/macos/make-icns.sh
+
+      - name: Build with Nuitka (standalone, PySide6, .app bundle)
+        run: >
+          python -m nuitka --standalone --assume-yes-for-downloads
+          --enable-plugin=pyside6
+          --macos-create-app-bundle
+          --macos-app-name="HiCloudMP"
+          --macos-app-icon=build/icon.icns
+          --output-dir=build
+          --output-filename=HiCloudMP
+          --include-data-file=web_panel.html=web_panel.html
+          --include-data-file=icon.png=icon.png
+          main.py
+
+      - name: Show bundle layout (layout-drift visibility for CI triage)
+        run: |
+          set -e
+          ls build
+          appdir=$(find build -maxdepth 3 -name "*.app" -type d | head -n 1)
+          test -n "$appdir" || { echo "FATAL: no .app bundle under build/"; exit 1; }
+          echo "app bundle: $appdir"
+          find "$appdir" -maxdepth 3 | head -n 40
+
+      - name: Bundle Qt multimedia backend (ffmpegmediaplugin)
+        run: |
+          set -e
+          # Same v1.0.0-class guard as Windows/Linux: without the multimedia
+          # ffmpeg backend the packaged app plays nothing (only audio decoder
+          # since Qt 6.8). Nuitka's bundler keeps the qt-plugins tree under
+          # PySide6 inside Contents/MacOS; the av/sw dylibs sit beside the
+          # executable.
+          ps=$(python -c "import PySide6, os; print(os.path.dirname(PySide6.__file__))")
+          src=""
+          for cand in "$ps/plugins/multimedia" "$ps/Qt/plugins/multimedia"; do
+            if [ -d "$cand" ]; then src="$cand"; break; fi
+          done
+          if [ -z "$src" ]; then echo "multimedia plugin dir not found under $ps"; ls "$ps"; exit 1; fi
+          appdir=$(find build -maxdepth 3 -name "*.app" -type d | head -n 1)
+          test -n "$appdir" || { echo "FATAL: no .app bundle under build/"; exit 1; }
+          app="$appdir/Contents/MacOS"
+          mkdir -p "$app/PySide6/qt-plugins/multimedia"
+          if ls "$src"/*.dylib >/dev/null 2>&1; then
+            cp "$src"/*.dylib "$app/PySide6/qt-plugins/multimedia/"
+          else
+            cp "$src"/*.so "$app/PySide6/qt-plugins/multimedia/"
+          fi
+          # Wheel layouts differ per platform/version (PySide6/, PySide6/Qt/,
+          # PySide6/Qt/lib/): search the known homes, fail loudly when absent.
+          for lib in libavcodec libavformat libavutil libswresample libswscale; do
+            for dir in "$ps" "$ps/Qt" "$ps/Qt/lib"; do
+              if ls "$dir/$lib"*.dylib >/dev/null 2>&1; then
+                cp "$dir/$lib"*.dylib "$app/"
+                break
+              fi
+            done
+            ls "$app/$lib"*.dylib >/dev/null 2>&1 \
+              || { echo "FATAL: $lib not found under $ps (Qt/lib included)"; exit 1; }
+          done
+
+      - name: Bundle ffmpeg for cover extraction
+        run: |
+          set -e
+          appdir=$(find build -maxdepth 3 -name "*.app" -type d | head -n 1)
+          test -n "$appdir" || { echo "FATAL: no .app bundle under build/"; exit 1; }
+          ff=$(python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())")
+          cp "$ff" "$appdir/Contents/MacOS/ffmpeg"
+          chmod +x "$appdir/Contents/MacOS/ffmpeg"
+
+      - name: Ad-hoc code signature (required to launch unsigned apps on arm64)
+        run: |
+          set -e
+          appdir=$(find build -maxdepth 3 -name "*.app" -type d | head -n 1)
+          test -n "$appdir" || { echo "FATAL: no .app bundle under build/"; exit 1; }
+          codesign --force --deep --sign - "$appdir"
+
+      - name: Package DMG
+        run: |
+          set -e
+          appdir=$(find build -maxdepth 3 -name "*.app" -type d | head -n 1)
+          test -n "$appdir" || { echo "FATAL: no .app bundle under build/"; exit 1; }
+          hdiutil create -volname HiCloudMP -srcfolder "$appdir" \
+            -ov -format UDZO "HiCloudMP-${VER}-macos-arm64.dmg"
+
+      - name: Stable alias for releases/latest links
+        run: |
+          set -e
+          cp "HiCloudMP-${VER}-macos-arm64.dmg" HiCloudMP-macOS.dmg
+
+      - name: Smoke-check DMG and ad-hoc signature
+        run: |
+          set -e
+          dmg="HiCloudMP-${VER}-macos-arm64.dmg"
+          test -s "$dmg"
+          hdiutil imageinfo "$dmg" | head -n 20
+          appdir=$(find build -maxdepth 3 -name "*.app" -type d | head -n 1)
+          codesign -dv "$appdir" 2>&1 | head -n 10
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HiCloudMP-macos
+          path: |
+            HiCloudMP-*-macos-arm64.dmg
+            HiCloudMP-macOS.dmg
+
+  release:
+    runs-on: ubuntu-latest
+    needs: [build-windows, build-linux, build-macos]
+    # All-or-nothing: nothing publishes unless every platform built.
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write   # release needs to push files
+    steps:
+      - name: Download all platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: release-assets
+
+      - name: Publish release (prerelease on rc tags)
+        uses: softprops/action-gh-release@v2
+        with:
+          # ?*-globs cover only the versioned files; the stable alias files
+          # are listed explicitly. Every link lives on releases/latest/download/.
+          files: |
+            release-assets/HiCloudMP-portable.zip
+            release-assets/packaging/Output/HiCloudMP-Setup-*.exe
+            release-assets/packaging/Output/HiCloudMP-Setup.exe
+            release-assets/HiCloudMP-?*-linux-x86_64.AppImage
+            release-assets/HiCloudMP-linux-x86_64.AppImage
+            release-assets/HiCloudMP-?*-linux-x86_64.tar.gz
+            release-assets/HiCloudMP-?*-macos-arm64.dmg
+            release-assets/HiCloudMP-macOS.dmg
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, 'rc') }}
+

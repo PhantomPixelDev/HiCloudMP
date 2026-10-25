@@ -52,11 +52,14 @@ def test_worker_emits_tags_for_scanned_files(tmp_path):
 
 # ---------------------------------------------------------- queue cells
 def test_queue_cells_prefers_cached_local_tags(music_player):
-    f1 = "X:\\music\\tagged.mp3"
+    f1 = "X:\\music\\tagged.mp3"   # fixed strings are cache keys on every OS
     music_player.library_store.add_tags([(f1, "Song", "Artist", "Album")])
     assert music_player.meta.queue_cells(f1) == ("Song", "Artist", "Album")
-    # Untagged files keep the old basename title and empty cells.
-    assert music_player.meta.queue_cells("X:\\music\\none") == ("none", "", "")
+    # Untagged files keep the old basename title and empty cells; the path
+    # uses the host separator so the basename fallback means the same thing
+    # on POSIX (where a backslash path is one component) and Windows.
+    assert music_player.meta.queue_cells(
+        f"X:{os.sep}music{os.sep}none") == ("none", "", "")
 
 
 # --------------------------------------------------------- library tree

@@ -24,6 +24,8 @@ def test_descriptions_unique_with_ids():
 
 
 def test_resolve_default_and_garbage():
+    if len(audio_devices.list_output_devices()) < 2:
+        pytest.skip("no real audio outputs on this host")
     d = audio_devices.resolve_output("")
     assert d is not None  # system default resolves to a real device where HW exists
     assert audio_devices.resolve_output("definitely-not-a-device-id") is None
@@ -39,6 +41,8 @@ def test_resolve_roundtrips_real_device_id():
 
 
 def test_engine_uses_stored_device(qapp):
+    if len(audio_devices.list_output_devices()) < 2:
+        pytest.skip("no real audio outputs on this host")
     from eq_engine import EQEngine
     eng = EQEngine()
     assert eng._choose_output_device() is not None   # default fallback

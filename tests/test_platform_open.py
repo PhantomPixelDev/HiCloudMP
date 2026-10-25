@@ -4,6 +4,7 @@ import sys
 import pytest
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="startfile is the Windows branch (macOS uses open, Linux xdg-open)")
 def test_open_folder_uses_startfile_on_windows(monkeypatch, tmp_path):
     import utils
 
