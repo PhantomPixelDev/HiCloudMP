@@ -11,6 +11,7 @@ written (resolution is the caller's job), file: URIs are decoded, and
 export relativizes an entry only when it lives under ``base_dir``.
 """
 import os
+import re
 from urllib.parse import quote, unquote, urlparse
 from urllib.request import url2pathname
 import xml.etree.ElementTree as ET
@@ -195,6 +196,14 @@ class PlaylistIO:
             parsed = urlparse(location)
             if parsed.scheme in ("file", ""):
                 local = unquote(url2pathname(parsed.path))
+                # POSIX url2pathname keeps the leading "/" of a Windows
+                # drive URI (file:///C:/...); Windows maps it natively.
+                # Playlists travel across hosts, so every host must map
+                # such a URI to the same Windows filespec: a POSIX path
+                # can never start "/C:", the slash always belongs to the
+                # URI, not the filesystem.
+                if re.match(r"^/[A-Za-z]:[\\/]", local):
+                    local = local[1:].replace("\\", "/")
                 return local.replace("\\", "/") if os.name == "nt" else local
         return unquote(location)
 

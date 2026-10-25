@@ -132,6 +132,19 @@ def test_xspf_import_reads_namespaced_location(tmp_path):
     assert ntpath.normpath(b["path"]).lower() == "c:\\music\\tede – sciezka\\02.mp3"
 
 
+def test_xspf_windows_drive_uri_posix_hosts(monkeypatch):
+    """Windows playlists travel: file:///C:/... must land as the same
+    Windows filespec even on macOS/Linux, where POSIX url2pathname keeps
+    the leading "/" of the URI (regression: linux CI saw '\C:\music\...')."""
+    import playlist_io as pio
+    from urllib.parse import unquote as _unquote
+
+    # Simulate the POSIX url2pathname (unquote only, keeps the slash).
+    monkeypatch.setattr(pio, "url2pathname", lambda p: _unquote(p), raising=False)
+    got = pio.PlaylistIO._location_to_path("file:///C:/Music/Tede/02.mp3")
+    assert got == "C:/Music/Tede/02.mp3", got
+
+
 def test_xspf_export_import_roundtrip(tmp_path):
     entries = [
         {"path": "C:/M/T.mp3", "title": "T", "duration": 61},
