@@ -200,3 +200,36 @@ def test_macos_dmg_and_stable_alias():
     assert "hdiutil create" in wf and "UDZO" in wf
     assert "HiCloudMP-macOS.dmg" in wf
     assert "macos-arm64.dmg" in wf
+# ------------------------------------------------------------ workflow: release
+
+def test_release_publishes_all_platform_assets():
+    wf = _wf()
+    # all-or-nothing: every platform must pass before anything publishes
+    assert "release:" in wf
+    for need in ("build-windows", "build-linux", "build-macos"):
+        assert need in wf
+    assert "download-artifact" in wf
+    assert "softprops/action-gh-release" in wf
+    for asset in ("HiCloudMP-portable.zip", "HiCloudMP-Setup", "HiCloudMP-Setup.exe",
+                  "HiCloudMP-linux-x86_64.AppImage", "linux-x86_64.tar.gz",
+                  "HiCloudMP-macOS.dmg", "macos-arm64.dmg"):
+        assert asset in wf, asset
+    assert "prerelease: ${{ contains(github.ref_name, 'rc') }}" in wf
+# ------------------------------------------------------------ README
+
+def test_readme_documents_all_platform_downloads():
+    src = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "releases/latest/download/HiCloudMP-macOS.dmg" in src
+    assert "releases/latest/download/HiCloudMP-linux-x86_64.AppImage" in src
+
+
+def test_readme_documents_linux_platform_notes():
+    src = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "libfuse2" in src.lower()
+
+
+def test_readme_documents_macos_platform_notes():
+    src = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "Apple Silicon" in src
+    assert "xattr -dr com.apple.quarantine" in src
+    assert ("Right-click" in src or "right-click" in src)
