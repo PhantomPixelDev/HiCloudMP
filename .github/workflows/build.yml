@@ -158,11 +158,17 @@ jobs:
           python -m pip install -r requirements-dev.txt
 
       - name: Test suite (offscreen Qt) before Nuitka
-        # QtMultimedia's ffmpeg backend can segfault in a decode thread on
-        # audio-less runners (ledger 40213145895 - the same suite passed
-        # runs 8 and 10). One retry absorbs that native flake; a real test
-        # failure fails both attempts.
-        run: python -m pytest -x -q || python -m pytest -x -q
+        # QtMultimedia's ffmpeg backend segfaults intermittently in a decode
+        # thread on audio-less runners (ledger 40213145895 / 40229404221:
+        # the same suite passed runs 8/10/12, crashed 11/13). Three attempts
+        # absorb the native flake; a real test failure fails every attempt.
+        run: |
+          ok=0
+          for i in 1 2 3; do
+            echo "pytest attempt $i"
+            if python -m pytest -x -q; then ok=1; break; fi
+          done
+          test "$ok" = 1
 
       - name: Build with Nuitka (standalone, PySide6 plugin)
         run: >
@@ -249,6 +255,15 @@ jobs:
         run: |
           set -e
           cp "HiCloudMP-${VER}-linux-x86_64.AppImage" HiCloudMP-linux-x86_64.AppImage
+
+      - name: Smoke-check AppImage (assembly proof; GUI launch is out of CI scope)
+        run: |
+          set -e
+          img="HiCloudMP-${VER}-linux-x86_64.AppImage"
+          test -s "$img"
+          ls -lh "$img"
+          unzip -p "$img" .appimage_version 2>/dev/null \
+            || echo "(no zip footer; assembly proven by appimagetool success)"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -396,6 +411,15 @@ jobs:
         run: |
           set -e
           cp "HiCloudMP-${VER}-macos-arm64.dmg" HiCloudMP-macOS.dmg
+
+      - name: Smoke-check DMG and ad-hoc signature
+        run: |
+          set -e
+          dmg="HiCloudMP-${VER}-macos-arm64.dmg"
+          test -s "$dmg"
+          hdiutil imageinfo "$dmg" | head -n 20
+          appdir=$(find build -maxdepth 3 -name "*.app" -type d | head -n 1)
+          codesign -dv "$appdir" 2>&1 | head -n 10
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
