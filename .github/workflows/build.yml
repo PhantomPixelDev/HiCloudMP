@@ -179,10 +179,18 @@ jobs:
           if [ -z "$src" ]; then echo "multimedia plugin dir not found under $ps"; ls "$ps"; exit 1; fi
           mkdir -p build/main.dist/PySide6/qt-plugins/multimedia
           cp "$src"/*.so build/main.dist/PySide6/qt-plugins/multimedia/
-          # The backend's ffmpeg libs must ride along (wheels keep them in
-          # the PySide6 package dir; try the root first, then Qt/).
+          # The backend's ffmpeg libs must ride along. Wheel layouts differ
+          # per platform/version (PySide6/, PySide6/Qt/, PySide6/Qt/lib/),
+          # so search the known homes and fail loudly when absent.
           for lib in libavcodec libavformat libavutil libswresample libswscale; do
-            cp "$ps/$lib"*.so* build/main.dist/ 2>/dev/null || cp "$ps/Qt/$lib"*.so* build/main.dist/
+            for dir in "$ps" "$ps/Qt" "$ps/Qt/lib"; do
+              if ls "$dir/$lib"*.so* >/dev/null 2>&1; then
+                cp "$dir/$lib"*.so* build/main.dist/
+                break
+              fi
+            done
+            ls build/main.dist/$lib*.so* >/dev/null 2>&1 \
+              || { echo "FATAL: $lib not found under $ps (Qt/lib included)"; exit 1; }
           done
 
       - name: Bundle ffmpeg for cover extraction
@@ -326,8 +334,17 @@ jobs:
           else
             cp "$src"/*.so "$app/PySide6/qt-plugins/multimedia/"
           fi
+          # Wheel layouts differ per platform/version (PySide6/, PySide6/Qt/,
+          # PySide6/Qt/lib/): search the known homes, fail loudly when absent.
           for lib in libavcodec libavformat libavutil libswresample libswscale; do
-            cp "$ps/$lib"*.dylib "$app/" 2>/dev/null || cp "$ps/Qt/$lib"*.dylib "$app/"
+            for dir in "$ps" "$ps/Qt" "$ps/Qt/lib"; do
+              if ls "$dir/$lib"*.dylib >/dev/null 2>&1; then
+                cp "$dir/$lib"*.dylib "$app/"
+                break
+              fi
+            done
+            ls "$app/$lib"*.dylib >/dev/null 2>&1 \
+              || { echo "FATAL: $lib not found under $ps (Qt/lib included)"; exit 1; }
           done
 
       - name: Bundle ffmpeg for cover extraction
