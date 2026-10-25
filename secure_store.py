@@ -15,19 +15,18 @@ import ctypes
 import json
 import os
 
-# ctypes.wintypes binds implicitly on Windows only; macOS/Linux lack it, so
-# import it explicitly for the class definitions below (non-Windows hosts
-# never touch the DPAPI helpers - they stay plaintext by design).
-if os.name == "nt":
-    import ctypes.wintypes
-
 from utils import atomic_write_text
 
 MAGIC = "HiCloudMP-DPAPI-v1:"
 
-
+# Portable field types with CRYPT_DATA_BLOB's ABI: DWORD is a 32-bit
+# unsigned long on Windows (LLP64 keeps ctypes.c_ulong 4 bytes there) and
+# wintypes.DWORD literally aliases ctypes.c_ulong. Referencing
+# ctypes.wintypes at module level crashed every import on macOS/Linux, so
+# the struct avoids it entirely; the DPAPI calls still only ever run on
+# Windows (os.name gates below), other hosts stay plaintext.
 class _CRYPTOAPI_BLOB(ctypes.Structure):
-    _fields_ = [("cbData", ctypes.wintypes.DWORD),
+    _fields_ = [("cbData", ctypes.c_ulong),
                 ("pbData", ctypes.POINTER(ctypes.c_byte))]
 
 

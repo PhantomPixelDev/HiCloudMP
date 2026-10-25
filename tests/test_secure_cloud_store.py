@@ -35,14 +35,15 @@ def test_plaintext_file_still_loads(tmp_path):
     assert secure_store.load_json(p) == data
 
 
-def test_secure_store_importable_without_ctypes_wintypes(monkeypatch):
-    """Non-Windows hosts have no ctypes.wintypes: not bound on 'import
-    ctypes', not in sys.modules. secure_store must import cleanly under
-    that condition, or macOS/Linux CI dies at collection time."""
+def test_secure_store_importable_off_windows(monkeypatch):
+    """macOS/Linux reality: os.name != 'nt' and ctypes.wintypes absent
+    (not bound by 'import ctypes', not in sys.modules). Module import
+    must not touch any DPAPI types during definition."""
     import ctypes
     import importlib
     import sys
 
+    monkeypatch.setattr(os, "name", "posix")
     monkeypatch.delattr(ctypes, "wintypes", raising=False)
     monkeypatch.delitem(sys.modules, "ctypes.wintypes", raising=False)
     importlib.reload(secure_store)

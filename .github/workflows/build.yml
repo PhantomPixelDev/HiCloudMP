@@ -123,6 +123,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ccache
+          # Qt runtime system libs PySide6 needs to dlopen (offscreen still
+          # links libEGL/libgl/glib). The t64-suffix fallback covers the
+          # ubuntu-24.04 <-> 26 packaging rename.
+          sudo apt-get install -y libgl1 libegl1 libxkbcommon0 libdbus-1-3 libfontconfig1 \
+            || true
+          sudo apt-get install -y libglib2.0-0 || sudo apt-get install -y libglib2.0-0t64
 
       - name: Install dependencies
         run: |
