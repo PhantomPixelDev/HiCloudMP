@@ -1,10 +1,16 @@
-name: windows-build
+name: CI
 
 on:
   push:
     branches: [main]
     tags: ['v*']
   pull_request:
+    branches: [main]
+    # Doc-only PRs have no code to compile: skip the three-platform Nuitka
+    # build. A PR touching any code still runs the full pipeline.
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
   workflow_dispatch:
 
 permissions:
@@ -279,9 +285,25 @@ jobs:
             HiCloudMP-*-linux-x86_64.tar.gz
 
   build-macos:
-    runs-on: macos-15
+    # Nuitka compiles one architecture per build (it has no universal2
+    # output), so each Mac arch gets a native build on its own runner.
+    # PySide6 itself ships universal2 wheels - Nuitka is the bottleneck.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15        # Apple Silicon
+            arch: arm64
+            alias: HiCloudMP-macOS.dmg
+          - runner: macos-15-intel  # Intel
+            arch: x86_64
+            alias: HiCloudMP-macOS-intel.dmg
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
+    env:
+      ARCH: ${{ matrix.arch }}
+      ALIAS: ${{ matrix.alias }}
     steps:
       - uses: actions/checkout@v4
 
@@ -302,9 +324,9 @@ jobs:
           python -m pip install "PySide6==6.10.3"
           python -m pip install "nuitka==4.3.1"
           python -m pip install -r requirements.txt
-          # Apple Silicon only build (free-hosted runners are arm64);
-          # README documents this. imageio-ffmpeg supplies a pinned static
-          # ffmpeg for cover extraction without any floating alias URL.
+          # Native build per arch (arm64 / x86_64); README documents both.
+          # imageio-ffmpeg supplies a pinned static ffmpeg for cover
+          # extraction without any floating alias URL.
           python -m pip install "imageio-ffmpeg==0.6.0"
           # pytest etc. for the pre-build suite (NOT bundled into the app).
           python -m pip install -r requirements-dev.txt
@@ -334,6 +356,7 @@ jobs:
           python -m nuitka --standalone --assume-yes-for-downloads
           --enable-plugin=pyside6
           --macos-create-app-bundle
+          --macos-target-arch=${{ matrix.arch }}
           --macos-app-name="HiCloudMP"
           --macos-app-icon=build/icon.icns
           --output-dir=build
@@ -409,17 +432,17 @@ jobs:
           appdir=$(find build -maxdepth 3 -name "*.app" -type d | head -n 1)
           test -n "$appdir" || { echo "FATAL: no .app bundle under build/"; exit 1; }
           hdiutil create -volname HiCloudMP -srcfolder "$appdir" \
-            -ov -format UDZO "HiCloudMP-${VER}-macos-arm64.dmg"
+            -ov -format UDZO "HiCloudMP-${VER}-macos-${ARCH}.dmg"
 
       - name: Stable alias for releases/latest links
         run: |
           set -e
-          cp "HiCloudMP-${VER}-macos-arm64.dmg" HiCloudMP-macOS.dmg
+          cp "HiCloudMP-${VER}-macos-${ARCH}.dmg" "$ALIAS"
 
       - name: Smoke-check DMG and ad-hoc signature
         run: |
           set -e
-          dmg="HiCloudMP-${VER}-macos-arm64.dmg"
+          dmg="HiCloudMP-${VER}-macos-${ARCH}.dmg"
           test -s "$dmg"
           hdiutil imageinfo "$dmg" | head -n 20
           appdir=$(find build -maxdepth 3 -name "*.app" -type d | head -n 1)
@@ -428,10 +451,10 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: HiCloudMP-macos
+          name: HiCloudMP-macos-${{ matrix.arch }}
           path: |
-            HiCloudMP-*-macos-arm64.dmg
-            HiCloudMP-macOS.dmg
+            HiCloudMP-*-macos-${{ matrix.arch }}.dmg
+            ${{ matrix.alias }}
 
   release:
     runs-on: ubuntu-latest
@@ -461,6 +484,8 @@ jobs:
             release-assets/HiCloudMP-?*-linux-x86_64.tar.gz
             release-assets/HiCloudMP-?*-macos-arm64.dmg
             release-assets/HiCloudMP-macOS.dmg
+            release-assets/HiCloudMP-?*-macos-x86_64.dmg
+            release-assets/HiCloudMP-macOS-intel.dmg
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, 'rc') }}
 

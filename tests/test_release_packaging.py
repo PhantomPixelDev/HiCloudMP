@@ -18,6 +18,26 @@ def test_build_workflow_replaces_windows_only_workflow():
         "windows-build.yml must be renamed, not duplicated"
 
 
+def test_workflow_name_is_platform_neutral():
+    """The workflow builds Windows, Linux and two macOS arches; a name
+    that still says 'windows-build' misleads every Actions run list."""
+    import re
+    wf = _wf()
+    name = re.search(r"^name:\s*(.+)$", wf, re.MULTILINE).group(1).strip()
+    assert name != "windows-build"
+    assert name == "CI", f"expected 'name: CI', got {name!r}"
+
+
+def test_pull_request_builds_are_scoped():
+    """A bare `pull_request:` runs a full three-platform Nuitka build on
+    every PR. Scope it to main and skip doc-only PRs (no code to compile)."""
+    wf = _wf()
+    block = wf.split("pull_request:", 1)[1].split("workflow_dispatch:", 1)[0]
+    assert "branches: [main]" in block, "PR trigger must be scoped to main"
+    assert "paths-ignore:" in block
+    assert "'**.md'" in block and "'docs/**'" in block
+
+
 def _iss():
     iss = ROOT / "packaging" / "HiCloudMP.iss"
     assert iss.exists(), "packaging/HiCloudMP.iss missing"
@@ -178,7 +198,11 @@ def test_linux_artifacts_and_stable_alias():
 def test_workflow_has_macos_job():
     wf = _wf()
     assert "build-macos:" in wf
-    assert "runs-on: macos-15" in wf
+    # Both Mac arches, built natively: Nuitka has no universal2 output, so
+    # a real Intel DMG needs the x64 runner (PySide6 itself is universal2).
+    assert "runner: macos-15" in wf, "Apple Silicon leg missing"
+    assert "runner: macos-15-intel" in wf, "Intel leg missing"
+    assert "runs-on: ${{ matrix.runner }}" in wf
     assert "--macos-create-app-bundle" in wf
     assert '--macos-app-name="HiCloudMP"' in wf
     assert "make-icns.sh" in wf
@@ -198,8 +222,10 @@ def test_workflow_bundles_macos_qt_multimedia():
 def test_macos_dmg_and_stable_alias():
     wf = _wf()
     assert "hdiutil create" in wf and "UDZO" in wf
+    # One versioned DMG per arch plus one stable alias each.
+    assert "macos-${ARCH}.dmg" in wf
     assert "HiCloudMP-macOS.dmg" in wf
-    assert "macos-arm64.dmg" in wf
+    assert "HiCloudMP-macOS-intel.dmg" in wf
 # ------------------------------------------------------------ workflow: release
 
 def test_release_publishes_all_platform_assets():
@@ -212,7 +238,8 @@ def test_release_publishes_all_platform_assets():
     assert "softprops/action-gh-release" in wf
     for asset in ("HiCloudMP-portable.zip", "HiCloudMP-Setup", "HiCloudMP-Setup.exe",
                   "HiCloudMP-linux-x86_64.AppImage", "linux-x86_64.tar.gz",
-                  "HiCloudMP-macOS.dmg", "macos-arm64.dmg"):
+                  "HiCloudMP-macOS.dmg", "macos-arm64.dmg",
+                  "HiCloudMP-macOS-intel.dmg", "macos-x86_64.dmg"):
         assert asset in wf, asset
     assert "prerelease: ${{ contains(github.ref_name, 'rc') }}" in wf
 # ------------------------------------------------------------ README
@@ -233,3 +260,21 @@ def test_readme_documents_macos_platform_notes():
     assert "Apple Silicon" in src
     assert "xattr -dr com.apple.quarantine" in src
     assert ("Right-click" in src or "right-click" in src)
+
+
+def test_readme_documents_both_macos_arches():
+    """Nuitka cannot emit a universal2 binary, so Intel Macs get a native
+    x86_64 DMG instead of being told they are unsupported."""
+    src = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "releases/latest/download/HiCloudMP-macOS-intel.dmg" in src
+    assert "Intel" in src
+    assert "runners for Intel macOS have\nbeen retired" not in src
+
+
+def test_readme_no_longer_claims_packaged_builds_are_windows_only():
+    src = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "packaged\nbuilds are Windows-only" not in src
+    assert "packaged builds are Windows-only" not in src
+    # the docs must name every shipped platform somewhere
+    for platform in ("Windows", "macOS", "Linux"):
+        assert platform in src, platform
