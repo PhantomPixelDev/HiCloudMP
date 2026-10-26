@@ -6,7 +6,7 @@ runs on the engine's pump thread budget in microseconds.
 """
 import numpy as np
 
-from spectrum import compute_spectrum
+from hicloudmp.audio.spectrum import compute_spectrum
 
 
 def _sine(freq, seconds=0.3, amp=8000, rate=44100):

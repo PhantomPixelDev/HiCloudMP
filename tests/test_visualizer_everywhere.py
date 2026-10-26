@@ -90,9 +90,8 @@ def test_eq_engine_keeps_user_gains(music_player, monkeypatch):
 
 
 def test_all_routing_sites_use_the_gate():
-    from pathlib import Path
-    src = (Path(__file__).resolve().parents[1] / "player.py").read_text(
-        encoding="utf-8")
+    from sourcepaths import read
+    src = read("ui/player.py")
     # the three play()-family routing sites must call the combined gate;
     # _eq_active survives only inside _route_through_engine and the
     # visualizer-toggle's EQ-stays-on-the-engine guard
@@ -101,7 +100,7 @@ def test_all_routing_sites_use_the_gate():
 
 
 def test_settings_persist_visualizer(music_player):
-    import player as player_mod
+    from hicloudmp.ui import player as player_mod
     mp = music_player
     dlg = player_mod.SettingsDialog(mp)
     assert hasattr(dlg, "visualizer_checkbox")

@@ -7,7 +7,7 @@ import os
 
 import pytest
 
-import player as player_mod
+from hicloudmp.ui import player as player_mod
 
 
 class _PlayerFacade:

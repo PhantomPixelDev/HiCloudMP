@@ -21,7 +21,7 @@ def _cloud_item(**overrides):
 
 def test_cloud_track_uses_scan_name_without_a_blocking_probe(
         music_player):
-    import cover_extractor as cover_mod
+    from hicloudmp.core import cover_extractor as cover_mod
 
     # Structural: the blocking ffprobe metadata path no longer exists (the
     # packaged build never shipped ffprobe.exe; metadata comes from the

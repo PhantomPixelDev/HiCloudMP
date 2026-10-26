@@ -47,6 +47,7 @@ def test_startup_paths_missing_only_is_noop(music_player, tmp_path):
 
 
 def test_main_passes_cli_paths():
-    src = (ROOT / "main.py").read_text(encoding="utf-8")
-    assert "startup_paths" in src, "main.py must forward CLI paths"
+    from sourcepaths import read
+    src = read("app.py")
+    assert "startup_paths" in src, "the app entry point must forward CLI paths"
     assert "sys.argv" in src

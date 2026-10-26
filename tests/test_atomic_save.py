@@ -1,9 +1,10 @@
 import pytest
 
+from sourcepaths import read
 
 
 def test_write_and_no_leftovers(tmp_path):
-    import utils
+    from hicloudmp import utils
 
     target = tmp_path / "clouds.json"
     utils.atomic_write_text(str(target), '{"a": 1}')
@@ -12,7 +13,7 @@ def test_write_and_no_leftovers(tmp_path):
 
 
 def test_failed_replace_keeps_previous_file(tmp_path, monkeypatch):
-    import utils
+    from hicloudmp import utils
 
     target = tmp_path / "playlists.json"
     target.write_text("OLD", encoding="utf-8")
@@ -29,13 +30,13 @@ def test_failed_replace_keeps_previous_file(tmp_path, monkeypatch):
 
 def test_download_worker_requests_have_timeout():
     """workers.py DownloadWorker.run must not issue open-ended requests."""
-    src_txt = (__import__("pathlib").Path(__file__).resolve().parents[1] / "workers.py").read_text(encoding="utf-8")
+    src_txt = read("core/workers.py")
     assert "timeout=" in src_txt, "requests.get without timeout found in workers.py"
 
 
 def test_save_methods_use_atomic_writes():
     """Regression pin: the three save_* methods route through atomic_write_text."""
-    src_txt = (__import__("pathlib").Path(__file__).resolve().parents[1] / "player.py").read_text(encoding="utf-8")
+    src_txt = read("ui/player.py")
     assert "atomic_write_text" in src_txt
     assert 'with open(CLOUD_FILES_FILE, "w")' not in src_txt
     assert 'with open(PLAYLISTS_FILE, "w")' not in src_txt
@@ -45,13 +46,16 @@ def test_save_media_folders_survives_and_writes_correct_json(music_player, monke
     """Behavioral: save_media_folders writes valid JSON into the isolated config dir."""
     music_player.media_folders = [r"C:\music"]
     saved = []
-    real_atomic = __import__("utils").atomic_write_text
+    from hicloudmp import utils
+    from hicloudmp.ui import player as player_mod
+
+    real_atomic = utils.atomic_write_text
 
     def recording_atomic(path, text):
         saved.append((path, text))
         real_atomic(path, text)
 
-    monkeypatch.setattr(__import__("player"), "atomic_write_text", recording_atomic)
+    monkeypatch.setattr(player_mod, "atomic_write_text", recording_atomic)
     music_player.save_media_folders()
     assert saved, "save_media_folders did not write anything"
     import json

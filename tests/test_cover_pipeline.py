@@ -3,8 +3,8 @@ import types
 
 from PySide6.QtWidgets import QMenuBar  # noqa: F401  (ensures widgets initialized via conftest)
 
-import metadata as metadata_mod
-from metadata import CoverArtWorker
+from hicloudmp.core import metadata as metadata_mod
+from hicloudmp.core.metadata import CoverArtWorker
 from PIL import Image
 
 
@@ -66,7 +66,7 @@ def test_cover_worker_url_cover(monkeypatch):
 
 
 def test_subsonic_rows_carry_getcoverart_url():
-    from cloud_handlers import SubsonicHandler
+    from hicloudmp.cloud.cloud_handlers import SubsonicHandler
 
     h = SubsonicHandler({"subsonic_url": "https://h", "subsonic_user": "u", "subsonic_password": "p"})
 
@@ -93,7 +93,7 @@ def test_subsonic_rows_carry_getcoverart_url():
 
 
 def test_ampache_rows_carry_art_url():
-    from cloud_handlers import AmpacheHandler
+    from hicloudmp.cloud.cloud_handlers import AmpacheHandler
 
     class FakeResp:
         def __init__(self, text):
@@ -165,7 +165,7 @@ def test_no_now_playing_toasts(music_player):
 
 
 def test_metadata_display_skips_ffprobe_when_row_complete(music_player):
-    import cover_extractor as cover_mod
+    from hicloudmp.core import cover_extractor as cover_mod
     mp = music_player
     # Structural: no ffprobe path exists to call (see the deletion ruling).
     assert not hasattr(cover_mod.CoverExtractor, "extract_metadata")

@@ -3,7 +3,7 @@ import os
 from PySide6.QtCore import Qt, QThread, QTimer, QUrl, Signal
 from PySide6.QtGui import QPixmap, QPainter
 
-from cover_extractor import CoverExtractor
+from hicloudmp.core.cover_extractor import CoverExtractor
 
 # Cover-art QThreads that are still running when the app closes must keep a
 # strong reference until they finish: destroying a running QThread from
@@ -14,7 +14,7 @@ _ORPHAN_THREADS = []
 # Same fatal has a second, subtler trigger at PROCESS EXIT: interpreter
 # finalization clears this list while a retired thread still runs. The exit
 # guard runs before module globals are cleared; see thread_teardown.
-from thread_teardown import register_exit_guard as _register_exit_guard  # noqa: E402
+from hicloudmp.core.thread_teardown import register_exit_guard as _register_exit_guard  # noqa: E402
 
 _register_exit_guard(lambda: list(_ORPHAN_THREADS))
 

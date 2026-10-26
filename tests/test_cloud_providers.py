@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 def test_cloud_types_register_new_providers():
-    from cloud_handlers import CLOUD_TYPES
+    from hicloudmp.cloud.cloud_handlers import CLOUD_TYPES
 
     assert "ampache" in CLOUD_TYPES
     assert "subsonic" in CLOUD_TYPES
@@ -17,7 +17,7 @@ def test_cloud_types_register_new_providers():
 
 
 def test_ampache_double_hash_handshake_and_song_parse(monkeypatch, tmp_path):
-    import cloud_handlers as ch
+    from hicloudmp.cloud import cloud_handlers as ch
 
     catalog_xml = (
         '<root><auth>t0ken123</auth><songcount>2</songcount>'
@@ -67,7 +67,7 @@ def test_ampache_double_hash_handshake_and_song_parse(monkeypatch, tmp_path):
 
 
 def test_subsonic_legacy_password_scan(monkeypatch):
-    import cloud_handlers as ch
+    from hicloudmp.cloud import cloud_handlers as ch
 
     ping = {"subsonic-response": {"status": "ok"}}
     albums = {"subsonic-response": {"albumList2": {"album": [
@@ -125,7 +125,7 @@ def test_subsonic_legacy_password_scan(monkeypatch):
 def test_subsonic_token_auth_scan(monkeypatch):
     """Token auth (t=md5(pw+salt), s=salt) is the wire default: plaintext
     passwords must not ride in URLs that get stored on disk."""
-    import cloud_handlers as ch
+    from hicloudmp.cloud import cloud_handlers as ch
 
     ping = {"subsonic-response": {"status": "ok"}}
     albums = {"subsonic-response": {"albumList2": {"album": [
@@ -190,7 +190,7 @@ def test_subsonic_falls_back_to_legacy_on_error_41(monkeypatch):
     """Servers without token support (Nextcloud Music answers Subsonic
     error 41 'Token authentication not supported') must keep working:
     fall back silently to legacy u/p auth for the session."""
-    import cloud_handlers as ch
+    from hicloudmp.cloud import cloud_handlers as ch
 
     def resp(status_key, code=None):
         body = {"subsonic-response": {"status": status_key}}
@@ -243,7 +243,7 @@ def test_subsonic_falls_back_to_legacy_on_error_41(monkeypatch):
 
 def test_webdav_file_url_includes_root(monkeypatch):
     """webdav_root must be prefixed into the generated file URL."""
-    import cloud_handlers as ch
+    from hicloudmp.cloud import cloud_handlers as ch
 
     class FakeClient:
         def list(self, path):
@@ -307,7 +307,7 @@ def test_play_cloud_file_streams_ampache_directly(music_player, monkeypatch, qtb
 
 def test_add_cloud_dialog_provider_roundtrip(qtbot):
     """Provider combo switches forms; get_data emits provider-shaped config."""
-    import dialogs
+    from hicloudmp.ui import dialogs
 
     dlg = dialogs.AddCloudDialog()
     dlg.type_combo.setCurrentIndex(1)
@@ -331,7 +331,7 @@ def test_add_cloud_dialog_provider_roundtrip(qtbot):
 
 
 def test_edit_cloud_dialog_ampache_prefill(qtbot):
-    import dialogs
+    from hicloudmp.ui import dialogs
 
     dlg = dialogs.EditCloudDialog({
         "type": "ampache", "name": "Existing",

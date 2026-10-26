@@ -8,7 +8,6 @@ here re-enters the event loop while the flow is half-way through state
 changes: queued clicks and progress-dialog callbacks run against
 inconsistent state, which is exactly what processEvents is infamous for.
 """
-import pathlib
 
 
 def _stub_flow_tails(mp, monkeypatch):
@@ -51,6 +50,6 @@ def test_no_production_process_events():
     """Tripwire: player.py must stay free of processEvents. Any future
     occurrence needs a written justification peer to the four removed
     here (re-entrant event delivery mid-flow is the failure mode)."""
-    src = (pathlib.Path(__file__).resolve().parent.parent
-           / "player.py").read_text(encoding="utf-8")
+    from sourcepaths import read
+    src = read("ui/player.py")
     assert "processEvents" not in src

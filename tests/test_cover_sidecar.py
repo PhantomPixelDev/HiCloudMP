@@ -10,7 +10,7 @@ import io
 
 from PIL import Image
 
-from cover_extractor import CoverExtractor
+from hicloudmp.core.cover_extractor import CoverExtractor
 
 ART = "artwork"
 

@@ -3,8 +3,8 @@ from PySide6.QtWidgets import QMenu, QSystemTrayIcon, QWidgetAction, QSlider, QI
 from PySide6.QtWidgets import QStyle
 import os
 
-import icons as _icons
-from utils import open_folder
+from hicloudmp.ui import icons as _icons
+from hicloudmp.utils import open_folder
 
 
 class TrayController:
@@ -226,7 +226,7 @@ class TrayController:
         def _new_with_current():
             name, ok = QInputDialog.getText(self.app, "New Playlist", "Playlist name:")
             if ok and name:
-                from playlist import Playlist as _P
+                from hicloudmp.core.playlist import Playlist as _P
                 pl = _P(name)
                 item = self._get_current_item()
                 if item is not None:

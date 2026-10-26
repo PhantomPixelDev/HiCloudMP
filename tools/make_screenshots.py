@@ -66,8 +66,8 @@ from PySide6.QtCore import QSettings as QtQSettings, Qt  # noqa: E402
 from PySide6.QtGui import QFont, QFontDatabase  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-import theme  # noqa: E402
-import utils  # noqa: E402
+from hicloudmp.ui import theme  # noqa: E402
+from hicloudmp import utils  # noqa: E402
 
 # Fictional demo catalog: title, artist, album, displayed length, tone (Hz)
 TRACKS = [
@@ -196,7 +196,7 @@ def main():
     settings.sync()
     theme.apply_app_theme(app, settings=settings)
 
-    import player as player_mod
+    from hicloudmp.ui import player as player_mod
     player_mod.QSettings = _settings_factory
 
     mp = player_mod.MusicPlayer()
@@ -207,7 +207,7 @@ def main():
     wait_for_scan(app, mp, paths)
 
     # Stage a playing state using the app's own rendering paths.
-    from playlist import Playlist
+    from hicloudmp.core.playlist import Playlist
     evening = Playlist("Evening Drive", list(paths))
     focus = Playlist("Focus", list(paths[:4]))
     mp.playlists = [evening, focus]
@@ -259,8 +259,8 @@ def main():
     save(mp, os.path.join(ROOT, "screen.png"),
         os.path.join(SITES, "main.png"))
 
-    from dsp import PRESETS
-    from dialogs import EqualizerDialog
+    from hicloudmp.audio.dsp import PRESETS
+    from hicloudmp.ui.dialogs import EqualizerDialog
     dlg = EqualizerDialog(mp, PRESETS["Rock"], True, "Rock",
                           mp.make_eq_apply_cb())
     dlg.show()

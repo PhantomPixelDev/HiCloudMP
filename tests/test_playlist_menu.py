@@ -6,7 +6,7 @@ import os
 
 from PySide6.QtWidgets import QFileDialog
 
-from utils import SUPPORTED_EXTS
+from hicloudmp.utils import SUPPORTED_EXTS
 
 
 def _song(dir_path, name):

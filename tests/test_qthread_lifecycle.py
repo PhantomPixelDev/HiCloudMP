@@ -38,7 +38,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QThread, Signal
 
-import player as player_mod
+from hicloudmp.ui import player as player_mod
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -235,6 +235,37 @@ def test_download_replacement_retires_old_thread_and_starts_new(music_player, mo
     qtbot.waitUntil(lambda: not thread2.isRunning(), timeout=8000)
 
 
+def test_retire_releases_thread_when_finished_signal_was_missed(music_player, qtbot):
+    """A thread can finish between the isRunning() check and
+    finished.connect() (the Python scheduler switches every few ms). The
+    signal is then already gone, so the retire list must release the pair
+    through its own check instead of keeping it for the process lifetime."""
+    class _Signal:
+        def connect(self, *_a, **_k):
+            pass  # simulates finished having been emitted already
+
+        def disconnect(self):
+            pass
+
+    class _RacingThread:
+        def __init__(self):
+            self.finished = _Signal()
+            self._calls = 0
+
+        def isRunning(self):
+            # Running when retired; finished by the time connect() returned.
+            self._calls += 1
+            return self._calls == 1
+
+    thread = _RacingThread()
+    music_player._retire_qthread(thread, None)
+    assert any(t is thread for t, _w in music_player._retired_qthreads)
+    qtbot.waitUntil(
+        lambda: not any(t is thread for t, _w in music_player._retired_qthreads),
+        timeout=3000,
+    )
+
+
 def test_scan_restart_keeps_running_threads_alive(music_player, monkeypatch, qtbot):
     """Re-scanning while the previous scan still runs must not destroy the
     old QThreads (menu action bypasses the disabled button)."""
@@ -273,7 +304,7 @@ def test_metadata_stop_detaches_running_cover_thread(music_player, monkeypatch, 
     teardown; it detaches and keeps a reference until the worker finishes."""
     import threading
 
-    import metadata as md_mod
+    from hicloudmp.core import metadata as md_mod
 
     extraction_started = threading.Event()
 
@@ -311,7 +342,7 @@ def test_metadata_stop_detaches_running_cover_thread(music_player, monkeypatch, 
 def test_cover_fetch_sequencing_tracks_refs(music_player, monkeypatch, qtbot):
     """Sequential cover fetches must each clean up their own thread/worker and
     never clobber the newer fetch's state (identity-guarded _cleanup)."""
-    import metadata as md_mod
+    from hicloudmp.core import metadata as md_mod
 
     class _SlowExtractor:
         @staticmethod
@@ -349,7 +380,7 @@ def test_cover_application_marshals_to_ui_thread(music_player, monkeypatch, qtbo
     """
     import threading
 
-    import metadata as md_mod
+    from hicloudmp.core import metadata as md_mod
 
     class _SlowExtractor:
         @staticmethod
@@ -385,7 +416,7 @@ def test_pending_cover_restart_runs_after_replacement(music_player, monkeypatch,
     gone; a QTimer created there never fires, so the pending restart has to be
     marshalled to the UI thread.
     """
-    import metadata as md_mod
+    from hicloudmp.core import metadata as md_mod
 
     started = []
 

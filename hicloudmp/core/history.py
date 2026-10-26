@@ -9,7 +9,7 @@ import os
 
 from PySide6.QtCore import QSettings  # noqa: F401  (kept for patch parity)
 
-from utils import atomic_write_text
+from hicloudmp.utils import atomic_write_text
 
 # Last N entries kept; menus show the top 15.
 HISTORY_LIMIT = 50

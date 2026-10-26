@@ -6,7 +6,7 @@ Running threads still get the existing retire path and a 100 ms recheck.
 """
 import pytest
 
-import player as player_mod
+from hicloudmp.ui import player as player_mod
 
 
 class _Destroyed:

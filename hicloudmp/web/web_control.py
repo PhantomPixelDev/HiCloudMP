@@ -5,6 +5,8 @@ import time
 from flask import Flask, request, send_from_directory, jsonify
 from flask_socketio import SocketIO, emit
 
+from hicloudmp.resources import resources_dir
+
 DEFAULT_HOST = "127.0.0.1"
 
 
@@ -78,7 +80,7 @@ class WebControlServer:
         return jsonify({"error": "unauthorized"}), 401
 
     def _setup_routes(self):
-        base_dir = os.path.dirname(os.path.abspath(__file__))
+        base_dir = str(resources_dir())
         static_dir = os.path.join(base_dir, 'static')
 
         @self.app.route('/')

@@ -39,7 +39,7 @@ def test_eq_dialog_accept_flushes_settings(music_player, monkeypatch):
             calls["exec"] = True
             return 1
 
-    import dialogs
+    from hicloudmp.ui import dialogs
     monkeypatch.setattr(dialogs, "EqualizerDialog", _FakeDlg)
 
     mp.open_eq_dialog()
@@ -74,7 +74,7 @@ def test_eq_toggle_flushes_enabled_state(music_player, monkeypatch):
 def test_settings_dialog_save_flushes(music_player):
     mp = music_player
     log = []
-    import player as player_mod
+    from hicloudmp.ui import player as player_mod
     monkeypatch = None
     # direct instance patch (no monkeypatch fixture here: keep it simple)
     real_sync = mp.settings.sync

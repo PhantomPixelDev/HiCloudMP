@@ -2,6 +2,8 @@
 installer script. These files are the contract for end-user builds."""
 from pathlib import Path
 
+from sourcepaths import read
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -50,8 +52,14 @@ def test_workflow_builds_with_nuitka_pyside6():
     assert "nuitka" in wf.lower()
     assert "--enable-plugin=pyside6" in wf
     assert "main.py" in wf
-    # real data files only: the panel html + app icon; no phantom dirs
-    for data_needle in ("web_panel.html", "icon.ico"):
+    # Runtime assets live inside the package now: one package-data rule
+    # replaces per-file --include-data-file lines, and the icon paths
+    # point at hicloudmp/assets.
+    assert "--include-package-data=hicloudmp" in wf
+    assert "--include-data-file" not in wf, \
+        "package data is covered by --include-package-data=hicloudmp"
+    for data_needle in ("hicloudmp/assets/icon.ico",
+                        "hicloudmp/assets/icon.png"):
         assert data_needle in wf, data_needle
     assert "--include-data-dir" not in wf, \
         "include-data-dir must reference a directory that exists in-repo"
@@ -130,7 +138,7 @@ def test_iss_optional_desktop_shortcut():
 
 # ---------------------------------------------- runtime: ffmpeg lookup
 def test_find_ffmpeg_prefers_bundled_binary(tmp_path):
-    import cover_extractor
+    from hicloudmp.core import cover_extractor
     fake = tmp_path / ("ffmpeg.exe" if __import__("os").name == "nt" else "ffmpeg")
     fake.write_bytes(b"\x00")
     out = cover_extractor.find_ffmpeg(str(tmp_path))
@@ -139,14 +147,14 @@ def test_find_ffmpeg_prefers_bundled_binary(tmp_path):
 
 def test_find_ffmpeg_falls_back_to_path(monkeypatch, tmp_path):
     import shutil
-    import cover_extractor
+    from hicloudmp.core import cover_extractor
     monkeypatch.setattr(shutil, "which", lambda *_: None)
     out = cover_extractor.find_ffmpeg(str(tmp_path))  # empty dir
     assert out in ("ffmpeg", "ffmpeg.exe", None)
 
 
 def test_extract_uses_find_ffmpeg():
-    src = (ROOT / "cover_extractor.py").read_text(encoding="utf-8")
+    src = read("core/cover_extractor.py")
     assert "find_ffmpeg()" in src, "_extract_with_ffmpeg must resolve via helper"
 
 
@@ -154,7 +162,7 @@ def test_subprocesses_never_flash_console():
     """v1.0.0 regression: packaged GUI app flashed a console window on
     every play (ffmpeg cover extraction). All spawns must pass
     CREATE_NO_WINDOW on Windows."""
-    src = (ROOT / "cover_extractor.py").read_text(encoding="utf-8")
+    src = read("core/cover_extractor.py")
     assert "CREATE_NO_WINDOW" in src
     runs = src.count("creationflags=_NO_WINDOW")
     # Exactly one spawn remains: the ffmpeg cover extraction (the ffprobe
@@ -226,6 +234,18 @@ def test_macos_dmg_and_stable_alias():
     assert "macos-${ARCH}.dmg" in wf
     assert "HiCloudMP-macOS.dmg" in wf
     assert "HiCloudMP-macOS-intel.dmg" in wf
+def test_macos_bundle_executable_avoids_case_insensitive_collision():
+    """macOS APFS is case-insensitive: Contents/MacOS/HiCloudMP and the
+    hicloudmp package data directory are the same path, so Nuitka fails with
+    NotADirectoryError while copying package data. The executable must have a
+    different name, and the bundle users see must stay HiCloudMP.app."""
+    wf = _wf()
+    macos = wf.split("build-macos:", 1)[1].split("release:", 1)[0]
+    assert "--output-filename=HiCloudMPApp" in macos
+    assert "--output-filename=HiCloudMP " not in macos, \
+        "HiCloudMP collides with hicloudmp/ on a case-insensitive filesystem"
+    assert "--output-folder-name=HiCloudMP" in macos
+    assert 'test "$(basename "$appdir")" = "HiCloudMP.app"' in macos
 # ------------------------------------------------------------ workflow: release
 
 def test_release_publishes_all_platform_assets():

@@ -2,7 +2,7 @@
 and a plain-language Web Remote page."""
 import pytest
 
-import player as player_mod
+from hicloudmp.ui import player as player_mod
 
 
 @pytest.fixture

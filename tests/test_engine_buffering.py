@@ -9,8 +9,8 @@ be deep enough to smooth network streams.
 """
 import numpy as np
 
-import dsp
-from eq_engine import EQEngine
+from hicloudmp.audio import dsp
+from hicloudmp.audio.eq_engine import EQEngine
 
 
 class FakeBuffer:
@@ -171,7 +171,7 @@ def test_late_buffer_ready_after_stop_is_ignored(qapp):
 
 
 def test_position_duration_accessors_safe_when_idle(qapp):
-    from eq_engine import EQEngine
+    from hicloudmp.audio.eq_engine import EQEngine
     e = EQEngine()
     assert e.position_ms() == 0
     assert e.duration_ms() == 0

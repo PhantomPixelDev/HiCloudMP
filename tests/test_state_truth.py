@@ -32,7 +32,7 @@ class _EngineStub:
 
 
 def _make(player_state, using_engine=False, engine=None):
-    from player import MusicPlayer
+    from hicloudmp.ui.player import MusicPlayer
     obj = MusicPlayer.__new__(MusicPlayer)  # skip __init__; only mixin logic
     obj.player = player_state
     obj._using_engine = using_engine
@@ -68,7 +68,7 @@ def test_native_path_passthrough():
 
 
 def test_eq_engine_is_paused_flag():
-    from eq_engine import EQEngine
+    from hicloudmp.audio.eq_engine import EQEngine
     e = EQEngine()
     # no sink loaded -> neither playing nor paused
     assert e.is_playing() is False
@@ -81,7 +81,7 @@ def test_eq_engine_is_paused_flag():
 
 def test_web_status_state_engine_aware(music_player, monkeypatch):
     """_get_status rides the unified state instead of the idle native one."""
-    import web_control
+    from hicloudmp.web import web_control
     server = web_control.WebControlServer(music_player, host="127.0.0.1",
                                           port=5099, token="t")
     mp = music_player
@@ -93,7 +93,7 @@ def test_web_status_state_engine_aware(music_player, monkeypatch):
 
 
 def test_tray_uses_effective_state():
-    import tray
+    from hicloudmp.ui import tray
     src = tray.__file__
     src = __import__("pathlib").Path(src).read_text(encoding="utf-8")
     assert "effective_playback_state" in src, \

@@ -58,7 +58,7 @@ def test_stream_handler_slots_reset(music_player):
 
 
 def test_theme_contains_structural_rules():
-    import theme as theme_mod
+    from hicloudmp.ui import theme as theme_mod
     qss = theme_mod.build_qss(theme="Dark", accent="#10b981", density="comfortable")
     for anchor in ("QWidget#sidebar", "QToolButton#playBtn", "QFrame#transportBar",
                    "QLabel#trackTitle", "QLabel#brandTitle"):

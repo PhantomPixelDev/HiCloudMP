@@ -3,7 +3,7 @@ import time
 
 from PySide6.QtWidgets import QProgressDialog
 
-import cloud_handlers
+from hicloudmp.cloud import cloud_handlers
 
 
 class _FakeHandler:
@@ -60,7 +60,7 @@ def test_scan_uses_status_bar_not_modal_dialog(music_player, qtbot, monkeypatch)
 
 
 def test_subsonic_parallel_album_fetch_preserves_order():
-    from cloud_handlers import SubsonicHandler
+    from hicloudmp.cloud.cloud_handlers import SubsonicHandler
 
     albums = [{"id": f"a{i}", "artist": "Ar", "name": f"Al{i}"} for i in range(6)]
 

@@ -7,9 +7,11 @@ __pycache__/
 .superpowers/
 # build outputs + local caches (never ship or commit)
 build/
+build-local/
 dist/
 packaging/Output/
 tmpappdata/
 .pytest_cache/
 .clcache/
 *.spec.bak
+nuitka-crash-report.xml

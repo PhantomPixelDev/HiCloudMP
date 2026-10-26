@@ -5,7 +5,7 @@ cannot drift from the actions it describes.
 """
 from PySide6.QtWidgets import QLabel
 
-import player as player_mod
+from hicloudmp.ui import player as player_mod
 
 
 def _help_menu(mp):

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="icon.png" width="104" alt="HiCloud MP app icon — a white music note and play triangle on a purple circle">
+  <img src="hicloudmp/assets/icon.png" width="104" alt="HiCloud MP app icon - a white music note and play triangle on a purple circle">
 </p>
 
 <h1 align="center">HiCloud MP</h1>
@@ -172,6 +172,15 @@ python main.py
 
 On Linux, also install `requirements-linux.txt` (MPRIS/media keys) and the
 PyGObject packages your distro needs.
+
+**Repository layout.** `main.py` is a thin launcher (the Nuitka entry point).
+The application is the `hicloudmp/` package: `core/` (library, metadata,
+playlists, workers), `audio/` (playback, DSP/EQ, MPRIS), `cloud/` (WebDAV,
+Subsonic, Ampache handlers), `ui/` (window, dialogs, theme, tray) and `web/`
+(the phone remote). Bundled assets live in `hicloudmp/assets/` and are
+resolved through `hicloudmp.resources.resource_path()`, so they work from a
+checkout and inside a Nuitka build alike. Tests and packaging stay outside the
+package.
 
 **Tests** (headless/offscreen, no audio device required):
 

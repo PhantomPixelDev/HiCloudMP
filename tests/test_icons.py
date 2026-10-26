@@ -2,7 +2,7 @@
 
 from PySide6.QtGui import QColor
 
-import player as player_mod
+from hicloudmp.ui import player as player_mod
 
 REQUIRED_GLYPHS = (
     "play", "pause", "stop", "skip-back", "skip-forward", "shuffle",
@@ -12,7 +12,7 @@ REQUIRED_GLYPHS = (
 
 
 def test_all_required_glyphs_render_with_ink(qapp):
-    import icons
+    from hicloudmp.ui import icons
     for name in REQUIRED_GLYPHS:
         img = icons.pixmap(name, size=32, color="#e6e9ef").toImage()
         assert not img.isNull(), f"{name}: null image"
@@ -25,14 +25,14 @@ def test_all_required_glyphs_render_with_ink(qapp):
 
 
 def test_unknown_glyph_is_honest_null(qapp):
-    import icons
+    from hicloudmp.ui import icons
     assert icons.icon("does-not-exist").isNull()
     img = icons.pixmap("does-not-exist", size=24).toImage()
     assert img.isNull()
 
 
 def test_play_glyph_is_solid_and_tinted(qapp):
-    import icons
+    from hicloudmp.ui import icons
     img = icons.pixmap("play", size=32, color="#ff0000").toImage()
     reds = 0
     for x in range(0, img.width(), 2):
@@ -54,7 +54,7 @@ def test_play_glyph_is_solid_and_tinted(qapp):
 
 
 def test_cache_reuse_and_invalidation(qapp):
-    import icons
+    from hicloudmp.ui import icons
     icons.invalidate()
     p1 = icons.pixmap("shuffle", size=24, color="#123456")
     p2 = icons.pixmap("shuffle", size=24, color="#123456")
@@ -104,7 +104,7 @@ def test_player_buttons_carry_factory_icons(music_player):
 
 
 def test_theme_change_retints_icons(music_player, qapp):
-    import icons
+    from hicloudmp.ui import icons
     mp = music_player
     mp.icon_factory.set_colors("#8b5cf6", "#1a2233", None)
     assert mp.icon_factory.accent_color == "#8b5cf6"
@@ -118,7 +118,7 @@ def test_theme_change_retints_icons(music_player, qapp):
 def test_tray_badge_is_accent_filled_with_contrast_glyph(qapp):
     """Tray icon = accent-filled round badge (not a stock QStyle glyph) whose
     glyph is white when the fill is dark enough."""
-    import icons
+    from hicloudmp.ui import icons
 
     ico = icons.tray_icon("pause", "#10b981")
     assert not ico.isNull()
@@ -144,7 +144,7 @@ def test_tray_badge_is_accent_filled_with_contrast_glyph(qapp):
 
 
 def test_tray_badge_glyph_darkens_on_light_accents(qapp):
-    import icons
+    from hicloudmp.ui import icons
 
     img = icons.tray_icon("play", "#fde047").pixmap(48, 48).toImage()
     assert not img.isNull()
@@ -163,7 +163,7 @@ def test_tray_badge_glyph_darkens_on_light_accents(qapp):
 
 
 def test_tray_badge_cache_and_invalidate(qapp):
-    import icons
+    from hicloudmp.ui import icons
     assert icons.tray_icon("no-such-glyph", "#10b981").isNull()  # honest null
     icons.invalidate()
     first = icons.tray_icon("stop", "#10b981")
@@ -175,9 +175,9 @@ def test_tray_badge_cache_and_invalidate(qapp):
 def test_tray_controller_uses_accent_badges(qapp):
     """TrayController swaps in accent badges for play/pause/stop states
     instead of stock QStyle icons, tinted from the live factory accent."""
-    import icons
+    from hicloudmp.ui import icons
     from PySide6.QtWidgets import QSystemTrayIcon
-    from tray import TrayController
+    from hicloudmp.ui.tray import TrayController
 
     class _Player:
         class PlaybackState:

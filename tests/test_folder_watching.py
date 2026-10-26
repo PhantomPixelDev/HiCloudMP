@@ -7,7 +7,7 @@ is bounded.
 """
 import os
 
-import folder_watch
+from hicloudmp.core import folder_watch
 
 
 def test_watcher_watches_existing_directories(music_player, tmp_path):
