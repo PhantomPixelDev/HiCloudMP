@@ -2,7 +2,6 @@
 (mute, playback speed, Play Next queue visibility + clear) and desktop
 changes are pushed to connected browsers instead of waiting for a poll.
 """
-import os
 
 
 def test_status_reports_parity_fields(web_server, music_player):
@@ -81,9 +80,8 @@ def test_desktop_volume_change_is_pushed(web_server, music_player,
 
 
 def test_panel_html_exposes_new_controls():
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    with open(os.path.join(root, "web_panel.html"), encoding="utf-8") as f:
-        html = f.read()
+    from sourcepaths import resource
+    html = resource("web_panel.html").read_text(encoding="utf-8")
     for marker in ('id="mute"', 'id="rate"', 'id="queue-badge"',
                    "toggle_mute", "set_rate", "clear_queue"):
         assert marker in html, marker

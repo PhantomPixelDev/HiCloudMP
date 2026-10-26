@@ -1,9 +1,9 @@
 """Structural guard for the bounded player.py split: play history and
 folder watching are owned by their mixins, not duplicated back into the
 MusicPlayer class."""
-from folder_watch import FolderWatchMixin
-from history import PlayHistoryMixin
-import player as player_mod
+from hicloudmp.core.folder_watch import FolderWatchMixin
+from hicloudmp.core.history import PlayHistoryMixin
+from hicloudmp.ui import player as player_mod
 
 
 def test_mixins_are_mixed_into_the_player(music_player):

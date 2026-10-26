@@ -22,12 +22,13 @@ import platformdirs  # noqa: E402
 TMPDIR = tempfile.mkdtemp(prefix="hicloudmp-forensics-child-")
 platformdirs.user_data_dir = lambda *a, **k: TMPDIR  # type: ignore
 
-import main  # noqa: E402
+import main  # noqa: E402,F401  (the launcher must open the crash log on import)
+from hicloudmp import app as app_mod  # noqa: E402
 
 from PySide6.QtCore import qWarning  # noqa: E402
 
 qWarning("child-forensics-marker")
-main._crash_log.flush()
+app_mod._crash_log.flush()
 
 with open(os.path.join(TMPDIR, "crashlog.txt"), encoding="utf-8", errors="replace") as fh:
     text = fh.read()

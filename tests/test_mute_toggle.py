@@ -65,7 +65,7 @@ def test_mute_from_zero_restores_sensible_level(music_player, monkeypatch):
 
 
 def test_tray_mute_silences_engine_sink(music_player, monkeypatch):
-    from tray import TrayController
+    from hicloudmp.ui.tray import TrayController
     mp = music_player
     spy = _EngineSpy()
     monkeypatch.setattr(mp, "eq_engine", spy, raising=False)

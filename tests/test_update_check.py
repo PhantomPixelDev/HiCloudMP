@@ -6,8 +6,8 @@ when a NEWER release exists (user-initiated check, not per-track noise).
 
 from PySide6.QtWidgets import QMessageBox
 
-import updates_check
-from updates_check import compare_versions, latest_release
+from hicloudmp.core import updates_check
+from hicloudmp.core.updates_check import compare_versions, latest_release
 
 
 class _FakeResponse:
@@ -48,7 +48,7 @@ def test_latest_release_parses_and_sends_ua(monkeypatch):
 
 
 def test_dialog_has_update_row(music_player):
-    import player as player_mod
+    from hicloudmp.ui import player as player_mod
     dlg = player_mod.SettingsDialog(music_player)
     assert hasattr(dlg, "update_btn")
     assert hasattr(dlg, "update_result_label")
@@ -56,7 +56,7 @@ def test_dialog_has_update_row(music_player):
 
 
 def test_check_reports_newer_release(music_player, monkeypatch, qtbot):
-    import player as player_mod
+    from hicloudmp.ui import player as player_mod
     dlg = player_mod.SettingsDialog(music_player)
     opened = []
     monkeypatch.setattr(updates_check, "latest_release",
@@ -74,7 +74,7 @@ def test_check_reports_newer_release(music_player, monkeypatch, qtbot):
 
 
 def test_check_up_to_date_is_calm(music_player, monkeypatch, qtbot):
-    import player as player_mod
+    from hicloudmp.ui import player as player_mod
     dlg = player_mod.SettingsDialog(music_player)
     popped = []
     monkeypatch.setattr(QMessageBox, "information",
@@ -90,7 +90,7 @@ def test_check_up_to_date_is_calm(music_player, monkeypatch, qtbot):
 
 
 def test_check_failure_shows_error_no_popup(music_player, monkeypatch, qtbot):
-    import player as player_mod
+    from hicloudmp.ui import player as player_mod
     dlg = player_mod.SettingsDialog(music_player)
     popped = []
     monkeypatch.setattr(QMessageBox, "information",

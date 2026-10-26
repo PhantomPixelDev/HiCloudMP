@@ -3,9 +3,9 @@ import threading
 import requests
 from PySide6.QtCore import QObject, Signal
 from io import BytesIO
-from cover_extractor import CoverExtractor
-from cloud_handlers import CLOUD_TYPES
-from utils import is_music_file
+from hicloudmp.core.cover_extractor import CoverExtractor
+from hicloudmp.cloud.cloud_handlers import CLOUD_TYPES
+from hicloudmp.utils import is_music_file
 
 class LibraryScanWorker:
     """Walks media folders and hands every result to `dispatch`.

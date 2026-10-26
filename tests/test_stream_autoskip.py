@@ -4,7 +4,7 @@ when the exhausted stream is the playlist row being played, playback
 advances to the next entry. Each give-up moves the index forward, so a
 playlist of dead stream URLs terminates.
 """
-import player as player_mod
+from hicloudmp.ui import player as player_mod
 
 
 class _TimerSpy:

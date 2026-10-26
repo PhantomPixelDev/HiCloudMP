@@ -14,7 +14,7 @@ def _texts_index(combo, text):
 
 
 def test_sort_and_filter_survive_restart(qtbot, monkeypatch, tmp_path):
-    import player as player_mod
+    from hicloudmp.ui import player as player_mod
 
     ini = str(tmp_path / "state.ini")
 

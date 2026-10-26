@@ -9,8 +9,8 @@ import os
 import wave
 
 
-from library_store import LibraryStore
-from workers import LibraryScanWorker
+from hicloudmp.core.library_store import LibraryStore
+from hicloudmp.core.workers import LibraryScanWorker
 
 
 # ---------------------------------------------------------------- store
@@ -116,7 +116,7 @@ def test_library_tree_cloud_rows_show_metadata(music_player):
 # ------------------------------------------------------------- playlist
 def test_sort_prefers_scanned_tags_over_disk_reads(music_player,
                                                    monkeypatch, tmp_path):
-    import player as player_mod
+    from hicloudmp.ui import player as player_mod
 
     f1 = tmp_path / "b.mp3"
     f2 = tmp_path / "a.mp3"

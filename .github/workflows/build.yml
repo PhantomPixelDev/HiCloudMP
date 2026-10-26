@@ -61,11 +61,10 @@ jobs:
           python -m nuitka --standalone --assume-yes-for-downloads
           --enable-plugin=pyside6
           --windows-console-mode=disable
-          --windows-icon-from-ico=icon.ico
+          --windows-icon-from-ico=hicloudmp/resources/icon.ico
           --output-dir=build
           --output-filename=HiCloudMP.exe
-          --include-data-file=web_panel.html=web_panel.html
-          --include-data-file=icon.ico=icon.ico
+          --include-package-data=hicloudmp
           main.py
 
       - name: Bundle Qt multimedia backend (ffmpegmediaplugin)
@@ -186,8 +185,7 @@ jobs:
           --enable-plugin=pyside6
           --output-dir=build
           --output-filename=HiCloudMP
-          --include-data-file=web_panel.html=web_panel.html
-          --include-data-file=icon.png=icon.png
+          --include-package-data=hicloudmp
           main.py
 
       - name: Bundle Qt multimedia backend (ffmpegmediaplugin)
@@ -236,7 +234,7 @@ jobs:
             mv -f AppDir/usr/bin/main.bin AppDir/usr/bin/HiCloudMP
           fi
           cp packaging/linux/HiCloudMP.desktop AppDir/HiCloudMP.desktop
-          cp build/main.dist/icon.png AppDir/HiCloudMP.png
+          cp hicloudmp/resources/icon.png AppDir/HiCloudMP.png
           ln -sf HiCloudMP.png AppDir/.DirIcon
           # AppRun is an exec wrapper so the standalone dist keeps resolving
           # its libs relative to usr/bin (a copied binary would not).
@@ -361,8 +359,7 @@ jobs:
           --macos-app-icon=build/icon.icns
           --output-dir=build
           --output-filename=HiCloudMP
-          --include-data-file=web_panel.html=web_panel.html
-          --include-data-file=icon.png=icon.png
+          --include-package-data=hicloudmp
           main.py
 
       - name: Show bundle layout (layout-drift visibility for CI triage)

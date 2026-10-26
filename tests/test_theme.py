@@ -10,7 +10,7 @@ import os
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QMainWindow
 
-import theme as theme_mod
+from hicloudmp.ui import theme as theme_mod
 
 
 def test_build_qss_interpolates_accent():
@@ -61,7 +61,7 @@ def test_apply_theme_sets_stylesheet_with_accent(qtbot):
 
 def test_settings_dialog_persists_appearance(music_player, qtbot, monkeypatch):
     """Combos write ui/accent + ui/density alongside theme via isolated QSettings."""
-    import player as player_mod
+    from hicloudmp.ui import player as player_mod
 
     dlg = player_mod.SettingsDialog(music_player)
     dlg.theme_combo.setCurrentText("Light")
@@ -75,7 +75,7 @@ def test_settings_dialog_persists_appearance(music_player, qtbot, monkeypatch):
 
 
 def test_settings_dialog_defaults_read_back(music_player, qtbot):
-    import player as player_mod
+    from hicloudmp.ui import player as player_mod
 
     dlg = player_mod.SettingsDialog(music_player)
     assert dlg.accent_combo.currentText() == "Emerald"

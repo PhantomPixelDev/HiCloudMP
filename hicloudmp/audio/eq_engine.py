@@ -13,7 +13,7 @@ from PySide6.QtCore import QObject, QTimer, QUrl, Signal
 from PySide6.QtMultimedia import (QAudioDecoder, QAudioFormat, QAudioSink,
                                   QMediaDevices)
 
-import dsp
+from hicloudmp.audio import dsp
 
 
 class EQEngine(QObject):
@@ -555,7 +555,7 @@ class EQEngine(QObject):
     def _tap_spectrum(self, chunk):
         """Roll the written (post-EQ = audible) audio through the analyzer."""
         try:
-            import spectrum
+            from hicloudmp.audio import spectrum
             mono = chunk.astype(np.float32).mean(axis=1)
             self._spec_buf = np.concatenate(
                 [self._spec_buf, mono])[-spectrum.N_FFT:]

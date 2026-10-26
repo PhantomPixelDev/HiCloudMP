@@ -70,7 +70,7 @@ def session_appdata() -> Path:
 @pytest.fixture()
 def music_player(qtbot, monkeypatch):
     """Fully isolated MusicPlayer: offscreen Qt, stubbed user dirs, no registry writes."""
-    import player as player_mod
+    from hicloudmp.ui import player as player_mod
 
     monkeypatch.setattr(player_mod, "QSettings", isolated_qsettings_factory(monkeypatch))
     mp = player_mod.MusicPlayer()
@@ -83,7 +83,7 @@ def music_player(qtbot, monkeypatch):
 @pytest.fixture()
 def web_server(music_player, monkeypatch):
     """Real WebControlServer against an isolated MusicPlayer, explicit token."""
-    import player as player_mod
+    from hicloudmp.ui import player as player_mod
 
     server = player_mod.WebControlServer(music_player, host="127.0.0.1", port=5000, token="testtoken123")
     yield server

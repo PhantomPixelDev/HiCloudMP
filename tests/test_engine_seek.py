@@ -52,7 +52,7 @@ def _wait_position(app, engine, pred, timeout_s=6.0):
 
 @pytest.fixture
 def engine_and_tone(tmp_path, qapp):
-    from eq_engine import EQEngine
+    from hicloudmp.audio.eq_engine import EQEngine
     tone = tmp_path / "tone9.wav"
     _make_tone(tone)
     engine = EQEngine()

@@ -2,7 +2,7 @@
 The UI tree renders from the store - os.walk must never run on the UI
 thread, and search must never touch the filesystem."""
 
-from library_store import LibraryStore
+from hicloudmp.core.library_store import LibraryStore
 
 
 def test_store_merges_folder_scan(tmp_path):
@@ -57,7 +57,7 @@ def test_search_local_matches_basename_case_insensitive(tmp_path):
 
 
 def test_worker_walks_and_emits(tmp_path):
-    from workers import LibraryScanWorker
+    from hicloudmp.core.workers import LibraryScanWorker
 
     root = tmp_path / "lib"
     (root / "sub").mkdir(parents=True)
@@ -89,7 +89,7 @@ def test_worker_walks_and_emits(tmp_path):
 
 
 def test_worker_respects_abort(tmp_path):
-    from workers import LibraryScanWorker
+    from hicloudmp.core.workers import LibraryScanWorker
 
     root = tmp_path / "lib"
     root.mkdir()
@@ -153,7 +153,7 @@ def test_file_menu_has_rescan_library(music_player):
 def test_view_tree_and_search_use_store_not_walk(music_player, tmp_path, monkeypatch):
     """update_library_tree + search_music render from the store; os.walk
     in the library module is forbidden (UI-thread freeze regression)."""
-    import library_view
+    from hicloudmp.ui import library_view
 
     mp = music_player
     mp.media_folders = [str(tmp_path)]

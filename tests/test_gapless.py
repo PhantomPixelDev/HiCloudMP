@@ -7,7 +7,7 @@ last row deliberately stay on the normal path.
 """
 import numpy as np
 
-import eq_engine as eq_mod
+from hicloudmp.audio import eq_engine as eq_mod
 
 
 class _SignalStub:

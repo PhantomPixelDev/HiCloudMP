@@ -3,8 +3,8 @@ import pytest
 
 from PySide6.QtWidgets import QMessageBox
 
-import dsp
-from dialogs import EqualizerDialog
+from hicloudmp.audio import dsp
+from hicloudmp.ui.dialogs import EqualizerDialog
 
 
 @pytest.fixture(autouse=True)
@@ -195,7 +195,7 @@ class _FakeSink:
 
 def test_pump_writes_via_push_device_and_consumes_pending(qtbot):
     import numpy as np
-    from eq_engine import EQEngine
+    from hicloudmp.audio.eq_engine import EQEngine
 
     engine = EQEngine()
     io = _FakeIO()
@@ -214,7 +214,7 @@ def test_pump_writes_via_push_device_and_consumes_pending(qtbot):
 
 def test_pump_exception_reports_error_for_native_fallback(qtbot):
     import numpy as np
-    from eq_engine import EQEngine
+    from hicloudmp.audio.eq_engine import EQEngine
 
     engine = EQEngine()
     engine._sink = _FakeSink(None)
@@ -261,7 +261,7 @@ class _FakeDecoder:
 
 
 def test_seek_restarts_decoder_and_discards_until_target(qtbot):
-    from eq_engine import EQEngine
+    from hicloudmp.audio.eq_engine import EQEngine
 
     engine = EQEngine()
     dec = _FakeDecoder()
@@ -282,7 +282,7 @@ def test_seek_restarts_decoder_and_discards_until_target(qtbot):
 
 def test_process_or_discard_drops_pretarget_buffers(qtbot):
     import numpy as np
-    from eq_engine import EQEngine
+    from hicloudmp.audio.eq_engine import EQEngine
 
     engine = EQEngine()
     engine._proc = dsp.EQProcessor(44100, 2, (0,) * 10)

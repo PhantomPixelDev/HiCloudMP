@@ -11,7 +11,7 @@ are untouched (the knee engages strictly above 0 dBFS).
 """
 import numpy as np
 
-import dsp
+from hicloudmp.audio import dsp
 
 USER_CURVE = (12, 7, 5, 3, 1, 0, 0, 0, 12, 12)
 

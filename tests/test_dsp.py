@@ -1,7 +1,7 @@
 """DSP math: 10-band EQ gain curves and overlap-add processing."""
 import numpy as np
 
-import dsp
+from hicloudmp.audio import dsp
 
 
 def _sine(freq, seconds, sr=44100, amp=12000):

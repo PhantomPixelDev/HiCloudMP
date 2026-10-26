@@ -5,5 +5,5 @@ def test_ffprobe_metadata_path_is_gone():
     (ffprobe-based, zero callers) was a silent no-op at best. The
     metadata path lives in the scan worker's mutagen tags now; the
     extractor must not drift back to spawning a missing binary."""
-    from cover_extractor import CoverExtractor
+    from hicloudmp.core.cover_extractor import CoverExtractor
     assert not hasattr(CoverExtractor, "extract_metadata")

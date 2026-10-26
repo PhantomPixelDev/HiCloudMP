@@ -31,7 +31,7 @@ def _pump(pred, timeout_ms=3000):
 
 
 def test_probe_detects_running_instance():
-    from single_instance import InstanceLock
+    from hicloudmp.core.single_instance import InstanceLock
 
     name = _name("a")
     primary = InstanceLock(name)
@@ -48,7 +48,7 @@ def test_probe_detects_running_instance():
 
 
 def test_second_launch_activates_running_window(qapp):
-    from single_instance import InstanceLock
+    from hicloudmp.core.single_instance import InstanceLock
 
     name = _name("b")
     lock = InstanceLock(name)
@@ -72,7 +72,7 @@ def test_second_launch_activates_running_window(qapp):
 
 
 def test_release_allows_reaquisition():
-    from single_instance import InstanceLock
+    from hicloudmp.core.single_instance import InstanceLock
 
     name = _name("c")
     first = InstanceLock(name)

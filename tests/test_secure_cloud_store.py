@@ -11,7 +11,7 @@ Rulings:
 import json
 import os
 
-import secure_store
+from hicloudmp.core import secure_store
 
 
 def test_roundtrip_encrypts_at_rest(tmp_path):
@@ -78,7 +78,7 @@ def test_unicode_secret_survives(tmp_path):
 
 def test_player_save_clouds_encrypts_and_reloads(music_player, monkeypatch,
                                                  tmp_path):
-    import player as player_mod
+    from hicloudmp.ui import player as player_mod
 
     p = tmp_path / "cloudfiles.json"
     monkeypatch.setattr(player_mod, "CLOUD_FILES_FILE", str(p))

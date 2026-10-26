@@ -60,7 +60,7 @@ class _ConfigEditStubDialog:
 
 
 def test_add_cloud_saves_config_edits(qtbot, monkeypatch, music_player):
-    import player as player_mod
+    from hicloudmp.ui import player as player_mod
 
     music_player.clouds = [{"type": "webdav", "name": "Box", "config": {"webdav_password": "orig"}, "files": [], "last_sync": "Never"}]
     monkeypatch.setattr(player_mod, "CloudAccountsDialog", _ConfigEditStubDialog)
@@ -85,7 +85,7 @@ class _StubWebServer:
 
 
 def test_open_web_panel_auto_start_branch_carries_token(music_player, qtbot, monkeypatch):
-    import web_control as web_control_mod
+    from hicloudmp.web import web_control as web_control_mod
 
     urls = []
     monkeypatch.setattr(web_control_mod, "WebControlServer", _StubWebServer)
@@ -145,7 +145,7 @@ def test_stop_does_not_block_on_join(web_server_holder, monkeypatch):
 
 @pytest.fixture()
 def web_server_holder(music_player):
-    import player as player_mod
+    from hicloudmp.ui import player as player_mod
 
     server = player_mod.WebControlServer(music_player, host="127.0.0.1", port=5000, token="tok")
     return server, music_player
@@ -154,5 +154,6 @@ def web_server_holder(music_player):
 # ---- Minor (branch-introduced): exactly one play handler registration ----
 
 def test_single_play_handler_registration():
-    src_txt = (__import__("pathlib").Path(__file__).resolve().parents[1] / "web_control.py").read_text(encoding="utf-8")
+    from sourcepaths import read
+    src_txt = read("web/web_control.py")
     assert src_txt.count("@self.socketio.on('play')") == 1, "duplicate play handler registration"

@@ -64,7 +64,7 @@ def test_invalid_media_local_never_modals(toast_spy, monkeypatch):
     modals = []
     monkeypatch.setattr(
         mp, "player", _Facade(mp.player, stop=lambda: None), raising=False)
-    from player import QMessageBox as player_QMessageBox
+    from hicloudmp.ui.player import QMessageBox as player_QMessageBox
 
     class _Box:
         @staticmethod
@@ -84,7 +84,7 @@ def test_invalid_media_local_never_modals(toast_spy, monkeypatch):
 def test_invalid_media_cloud_keeps_retry_path(toast_spy, monkeypatch):
     mp, toasts = toast_spy
     monkeypatch.setattr(mp, "player", _Facade(mp.player), raising=False)
-    from player import QMessageBox as player_QMessageBox
+    from hicloudmp.ui.player import QMessageBox as player_QMessageBox
 
     class _Box:
         @staticmethod

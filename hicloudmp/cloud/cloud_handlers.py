@@ -3,7 +3,7 @@ import os
 import secrets
 import concurrent.futures
 import threading
-from utils import is_music_file, SUPPORTED_EXTS
+from hicloudmp.utils import is_music_file, SUPPORTED_EXTS
 
 # --- Cloud Handlers ---
 class CloudHandlerBase:

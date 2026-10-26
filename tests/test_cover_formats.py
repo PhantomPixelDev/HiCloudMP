@@ -13,7 +13,7 @@ from io import BytesIO
 
 from PIL import Image
 
-from cover_extractor import CoverExtractor
+from hicloudmp.core.cover_extractor import CoverExtractor
 
 
 def _png_bytes(size, color):

@@ -5,8 +5,8 @@ import json
 
 import pytest
 
-import player
-import web_control
+from hicloudmp.ui import player
+from hicloudmp.web import web_control
 
 
 @pytest.fixture
@@ -105,7 +105,7 @@ def test_start_web_interface_plain_message(music_player, qtbot, monkeypatch):
         def stop(self):
             self.started = False
 
-    import web_control as wc
+    from hicloudmp.web import web_control as wc
     monkeypatch.setattr(wc, "WebControlServer", StubServer)
     # never let a failure path open a modal in offscreen tests
     monkeypatch.setattr(player.QMessageBox, "warning", lambda *a, **k: None)

@@ -7,7 +7,7 @@ lands as its own change.
 """
 import pytest
 
-from playlist_io import PlaylistIO
+from hicloudmp.core.playlist_io import PlaylistIO
 
 
 def _write(path, text, encoding="utf-8"):
@@ -136,7 +136,7 @@ def test_xspf_windows_drive_uri_posix_hosts(monkeypatch):
     r"""Windows playlists travel: file:///C:/... must land as the same
     Windows filespec even on macOS/Linux, where POSIX url2pathname keeps
     the leading "/" of the URI (regression: linux CI saw backslash-C:\...)."""
-    import playlist_io as pio
+    from hicloudmp.core import playlist_io as pio
     from urllib.parse import unquote as _unquote
 
     # Simulate the POSIX url2pathname (unquote only, keeps the slash).

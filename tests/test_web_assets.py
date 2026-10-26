@@ -1,11 +1,10 @@
 import re
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+from sourcepaths import resource
 
 
 def _panel_source():
-    return (ROOT / "web_panel.html").read_text(encoding="utf-8")
+    return resource("web_panel.html").read_text(encoding="utf-8")
 
 
 def test_slider_background_helper_defined_before_first_use():

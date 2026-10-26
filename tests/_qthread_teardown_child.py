@@ -34,8 +34,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication        # noqa: E402
 from PySide6.QtCore import QTimer, QSettings      # noqa: E402
 
-import player as player_mod          # noqa: E402
-import metadata as metadata_mod      # noqa: E402
+from hicloudmp.ui import player as player_mod          # noqa: E402
+from hicloudmp.core import metadata as metadata_mod      # noqa: E402
 
 INI = os.path.join(TMPDIR, "settings.ini")
 

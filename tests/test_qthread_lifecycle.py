@@ -38,7 +38,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QThread, Signal
 
-import player as player_mod
+from hicloudmp.ui import player as player_mod
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -273,7 +273,7 @@ def test_metadata_stop_detaches_running_cover_thread(music_player, monkeypatch, 
     teardown; it detaches and keeps a reference until the worker finishes."""
     import threading
 
-    import metadata as md_mod
+    from hicloudmp.core import metadata as md_mod
 
     extraction_started = threading.Event()
 
@@ -311,7 +311,7 @@ def test_metadata_stop_detaches_running_cover_thread(music_player, monkeypatch, 
 def test_cover_fetch_sequencing_tracks_refs(music_player, monkeypatch, qtbot):
     """Sequential cover fetches must each clean up their own thread/worker and
     never clobber the newer fetch's state (identity-guarded _cleanup)."""
-    import metadata as md_mod
+    from hicloudmp.core import metadata as md_mod
 
     class _SlowExtractor:
         @staticmethod
@@ -349,7 +349,7 @@ def test_cover_application_marshals_to_ui_thread(music_player, monkeypatch, qtbo
     """
     import threading
 
-    import metadata as md_mod
+    from hicloudmp.core import metadata as md_mod
 
     class _SlowExtractor:
         @staticmethod
@@ -385,7 +385,7 @@ def test_pending_cover_restart_runs_after_replacement(music_player, monkeypatch,
     gone; a QTimer created there never fires, so the pending restart has to be
     marshalled to the UI thread.
     """
-    import metadata as md_mod
+    from hicloudmp.core import metadata as md_mod
 
     started = []
 

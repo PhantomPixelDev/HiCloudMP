@@ -5,7 +5,7 @@ import pytest
 def web_server(music_player, monkeypatch):
     """Real WebControlServer against an isolated MusicPlayer, explicit token.
     (Implementation shared via tests/conftest.py)"""
-    import player as player_mod
+    from hicloudmp.ui import player as player_mod
 
     server = player_mod.WebControlServer(music_player, host="127.0.0.1", port=5000, token="testtoken123")
     yield server
@@ -13,7 +13,7 @@ def web_server(music_player, monkeypatch):
 
 
 def test_default_host_is_loopback(music_player):
-    import player as player_mod
+    from hicloudmp.ui import player as player_mod
 
     import inspect
     sig = inspect.signature(player_mod.WebControlServer.__init__)
@@ -68,9 +68,9 @@ def test_socket_bad_payload_is_ignored(sio_client_drained):
 
 
 def test_cors_not_wildcard():
-    from pathlib import Path
+    from sourcepaths import read
 
-    src_txt = (Path(__file__).resolve().parents[1] / "web_control.py").read_text(encoding="utf-8")
+    src_txt = read("web/web_control.py")
     assert "cors_allowed_origins='*'" not in src_txt
     assert 'cors_allowed_origins="*"' not in src_txt
 

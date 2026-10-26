@@ -1,7 +1,7 @@
 import os
 from datetime import datetime
 from PySide6.QtWidgets import QInputDialog, QMessageBox
-from playlist import Playlist
+from hicloudmp.core.playlist import Playlist
 
 class PlaylistsManager:
     def __init__(self, app):

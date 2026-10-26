@@ -8,7 +8,7 @@ curve turns the EQ on; Cancel still restores the state captured at open.
 """
 import pytest
 
-from dialogs import EqualizerDialog
+from hicloudmp.ui.dialogs import EqualizerDialog
 
 
 @pytest.fixture()

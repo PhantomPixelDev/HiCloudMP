@@ -7,7 +7,7 @@ was required to set a level. ClickJumpSlider makes click-and-drag absolute.
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
 
-from slider import ClickJumpSlider
+from hicloudmp.ui.slider import ClickJumpSlider
 
 
 def _slider(qtbot):

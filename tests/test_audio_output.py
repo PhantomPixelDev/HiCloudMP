@@ -6,7 +6,7 @@ track start). Empty selection = system default.
 """
 import pytest
 
-import audio_devices
+from hicloudmp.audio import audio_devices
 
 
 def test_default_entry_always_present():
@@ -43,7 +43,7 @@ def test_resolve_roundtrips_real_device_id():
 def test_engine_uses_stored_device(qapp):
     if len(audio_devices.list_output_devices()) < 2:
         pytest.skip("no real audio outputs on this host")
-    from eq_engine import EQEngine
+    from hicloudmp.audio.eq_engine import EQEngine
     eng = EQEngine()
     assert eng._choose_output_device() is not None   # default fallback
 
@@ -61,7 +61,7 @@ def test_engine_uses_stored_device(qapp):
 
 
 def test_settings_dialog_lists_devices(music_player, monkeypatch):
-    import player as player_mod
+    from hicloudmp.ui import player as player_mod
     monkeypatch.setattr(audio_devices, "list_output_devices",
                         lambda: [("", "System default"),
                                  ("DEV1", "Speakers"),
@@ -73,7 +73,7 @@ def test_settings_dialog_lists_devices(music_player, monkeypatch):
 
 
 def test_settings_roundtrip_device(music_player, monkeypatch):
-    import player as player_mod
+    from hicloudmp.ui import player as player_mod
     monkeypatch.setattr(audio_devices, "list_output_devices",
                         lambda: [("", "System default"),
                                  ("DEV1", "Speakers")])

@@ -8,7 +8,7 @@ owned by one list.
 
 import pytest
 
-from utils import SUPPORTED_EXTS, is_music_file, scan_music_files
+from hicloudmp.utils import SUPPORTED_EXTS, is_music_file, scan_music_files
 
 
 @pytest.mark.parametrize("ext", [

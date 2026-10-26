@@ -15,7 +15,7 @@ import ctypes
 import json
 import os
 
-from utils import atomic_write_text
+from hicloudmp.utils import atomic_write_text
 
 MAGIC = "HiCloudMP-DPAPI-v1:"
 

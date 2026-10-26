@@ -19,7 +19,7 @@ class _StubDialog(QDialog):
 def test_add_cloud_saves_once_without_double_append(qtbot, monkeypatch, music_player):
     """Task 5 regression: add_cloud must not call a nonexistent get_data() and must
     not double-append entries the dialog already added to the shared list."""
-    import player as player_mod
+    from hicloudmp.ui import player as player_mod
 
     monkeypatch.setattr(player_mod, "CloudAccountsDialog", _StubDialog)
     saved = []
@@ -38,7 +38,7 @@ def test_add_cloud_saves_once_without_double_append(qtbot, monkeypatch, music_pl
 def test_cloud_accounts_dialog_has_done_button(qtbot, music_player):
     """Without a Done button, exec() can only ever return Rejected, making the
     whole dialog flow unusable."""
-    import player as player_mod
+    from hicloudmp.ui import player as player_mod
 
     from PySide6.QtWidgets import QDialogButtonBox
 

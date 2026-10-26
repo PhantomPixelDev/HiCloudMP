@@ -5,7 +5,7 @@ pinning the 20 Hz cadence - this only clips needless repaints.
 """
 import pytest
 
-from visualizer import SFVisualizer
+from hicloudmp.ui.visualizer import SFVisualizer
 
 
 @pytest.fixture

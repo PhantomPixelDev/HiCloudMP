@@ -23,7 +23,7 @@ SolidCompression=yes
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\HiCloudMP.exe
-SetupIconFile=..\icon.ico
+SetupIconFile=..\hicloudmp\resources\icon.ico
 PrivilegesRequiredOverridesAllowed=dialog
 
 [Tasks]
