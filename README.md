@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="icon.png" width="104" alt="HiCloud MP app icon — a white music note and play triangle on a purple circle">
+  <img src="hicloudmp/assets/icon.png" width="104" alt="HiCloud MP app icon - a white music note and play triangle on a purple circle">
 </p>
 
 <h1 align="center">HiCloud MP</h1>

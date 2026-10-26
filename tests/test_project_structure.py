@@ -5,6 +5,7 @@ launcher, docs, tests and packaging. These tests exist so the root cannot
 quietly fill up with modules again.
 """
 import ast
+import re
 from pathlib import Path
 
 from sourcepaths import PKG, ROOT
@@ -86,6 +87,19 @@ def test_bundled_data_dir_does_not_shadow_the_helper_module():
     assert not (PKG / "resources").exists(), \
         "hicloudmp/resources would collide with hicloudmp/resources.py in Nuitka"
     assert (PKG / "resources.py").is_file()
+
+
+def test_readme_relative_images_exist():
+    """Moving files must not leave dead image links in the README."""
+    src = (ROOT / "README.md").read_text(encoding="utf-8")
+    refs = re.findall(r'<img[^>]+src="([^"]+)"', src)
+    refs += re.findall(r'!\[[^\]]*\]\(([^)]+)\)', src)
+    missing = [
+        ref for ref in refs
+        if not ref.startswith(("http://", "https://", "data:"))
+        and not (ROOT / ref).is_file()
+    ]
+    assert missing == [], f"README references missing files: {missing}"
 
 
 def test_resources_live_inside_the_package_and_resolve():
