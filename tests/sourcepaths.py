@@ -28,4 +28,4 @@ def root_file(name: str) -> str:
 
 def resource(name: str) -> Path:
     """Path of a bundled runtime asset (``"web_panel.html"``)."""
-    return PKG / "resources" / name
+    return PKG / "assets" / name

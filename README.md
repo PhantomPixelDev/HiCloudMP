@@ -177,7 +177,7 @@ PyGObject packages your distro needs.
 The application is the `hicloudmp/` package: `core/` (library, metadata,
 playlists, workers), `audio/` (playback, DSP/EQ, MPRIS), `cloud/` (WebDAV,
 Subsonic, Ampache handlers), `ui/` (window, dialogs, theme, tray) and `web/`
-(the phone remote). Bundled assets live in `hicloudmp/resources/` and are
+(the phone remote). Bundled assets live in `hicloudmp/assets/` and are
 resolved through `hicloudmp.resources.resource_path()`, so they work from a
 checkout and inside a Nuitka build alike. Tests and packaging stay outside the
 package.

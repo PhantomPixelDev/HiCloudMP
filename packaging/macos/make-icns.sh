@@ -7,8 +7,8 @@ set -e
 # make-icns.sh lives at packaging/macos/, so the repo root is TWO levels up
 # (ledger 40183856769: "/.." landed in packaging/ where icon.png isn't).
 cd "$(dirname "$0")/../.."
-test -f hicloudmp/resources/icon.png || { echo "FATAL: hicloudmp/resources/icon.png not present in $(pwd)"; exit 1; }
-python tools/make_iconset.py build/icon.iconset hicloudmp/resources/icon.png
+test -f hicloudmp/assets/icon.png || { echo "FATAL: hicloudmp/assets/icon.png not present in $(pwd)"; exit 1; }
+python tools/make_iconset.py build/icon.iconset hicloudmp/assets/icon.png
 iconutil -c icns build/icon.iconset -o build/icon.icns
 test -s build/icon.icns
 echo "build/icon.icns ready"

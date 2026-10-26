@@ -8,15 +8,15 @@ _HERE = Path(__file__).resolve().parent
 def resources_dir() -> Path:
     """Directory holding the data files shipped with the app.
 
-    In a source checkout this is ``hicloudmp/resources``. Nuitka sets module
+    In a source checkout this is ``hicloudmp/assets``. Nuitka sets module
     ``__file__`` values inside the standalone dist, so the same relative path
     resolves there too; the executable-directory fallback covers layouts that
     flatten ``__file__``.
     """
-    candidate = _HERE / "resources"
+    candidate = _HERE / "assets"
     if candidate.is_dir():
         return candidate
-    return Path(sys.argv[0]).resolve().parent / "hicloudmp" / "resources"
+    return Path(sys.argv[0]).resolve().parent / "hicloudmp" / "assets"
 
 
 def resource_path(name: str) -> str:

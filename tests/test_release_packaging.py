@@ -54,12 +54,12 @@ def test_workflow_builds_with_nuitka_pyside6():
     assert "main.py" in wf
     # Runtime assets live inside the package now: one package-data rule
     # replaces per-file --include-data-file lines, and the icon paths
-    # point at hicloudmp/resources.
+    # point at hicloudmp/assets.
     assert "--include-package-data=hicloudmp" in wf
     assert "--include-data-file" not in wf, \
         "package data is covered by --include-package-data=hicloudmp"
-    for data_needle in ("hicloudmp/resources/icon.ico",
-                        "hicloudmp/resources/icon.png"):
+    for data_needle in ("hicloudmp/assets/icon.ico",
+                        "hicloudmp/assets/icon.png"):
         assert data_needle in wf, data_needle
     assert "--include-data-dir" not in wf, \
         "include-data-dir must reference a directory that exists in-repo"

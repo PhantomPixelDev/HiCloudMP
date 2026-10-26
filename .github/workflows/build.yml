@@ -61,7 +61,7 @@ jobs:
           python -m nuitka --standalone --assume-yes-for-downloads
           --enable-plugin=pyside6
           --windows-console-mode=disable
-          --windows-icon-from-ico=hicloudmp/resources/icon.ico
+          --windows-icon-from-ico=hicloudmp/assets/icon.ico
           --output-dir=build
           --output-filename=HiCloudMP.exe
           --include-package-data=hicloudmp
@@ -234,7 +234,7 @@ jobs:
             mv -f AppDir/usr/bin/main.bin AppDir/usr/bin/HiCloudMP
           fi
           cp packaging/linux/HiCloudMP.desktop AppDir/HiCloudMP.desktop
-          cp hicloudmp/resources/icon.png AppDir/HiCloudMP.png
+          cp hicloudmp/assets/icon.png AppDir/HiCloudMP.png
           ln -sf HiCloudMP.png AppDir/.DirIcon
           # AppRun is an exec wrapper so the standalone dist keeps resolving
           # its libs relative to usr/bin (a copied binary would not).
