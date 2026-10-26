@@ -2044,6 +2044,16 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
             thread.finished.connect(_done)
         except Exception:
             pass
+        # Close the race where the thread finished between the isRunning()
+        # check above and the connect(): finished is already gone, so the
+        # pair would never be released. _done schedules the same guarded
+        # release, which runs on the caller's (UI) thread.
+        try:
+            still_running = thread.isRunning()
+        except RuntimeError:
+            still_running = False
+        if not still_running:
+            _done()
 
     def _download_and_play(self, url, cloud_type, config, display_name, auth=None):
         """Download the cloud track to a temporary file then play locally.
@@ -2124,7 +2134,13 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
                         self.play_downloaded_file(path)
                     self.run_on_ui.emit(_apply_finished)
                 finally:
-                    _stop_thread()
+                    # Queue the teardown on the UI thread: this handler is
+                    # connected to a worker signal and therefore runs inside
+                    # the download thread, where quit()+wait() on its own
+                    # QThread only warns ("Thread tried to wait on itself")
+                    # and a QTimer-based retire cleanup would be lost when
+                    # that thread's event loop exits.
+                    self.run_on_ui.emit(_stop_thread)
 
             dl_worker.finished.connect(on_finished)
 
@@ -2141,7 +2157,7 @@ class MusicPlayer(QMainWindow, PlaybackEngineMixin, PlayHistoryMixin,
                         self._play_stream(url, display_name)
                     self.run_on_ui.emit(_apply_error)
                 finally:
-                    _stop_thread()
+                    self.run_on_ui.emit(_stop_thread)
 
             dl_worker.error.connect(on_error)
 

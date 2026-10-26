@@ -235,6 +235,37 @@ def test_download_replacement_retires_old_thread_and_starts_new(music_player, mo
     qtbot.waitUntil(lambda: not thread2.isRunning(), timeout=8000)
 
 
+def test_retire_releases_thread_when_finished_signal_was_missed(music_player, qtbot):
+    """A thread can finish between the isRunning() check and
+    finished.connect() (the Python scheduler switches every few ms). The
+    signal is then already gone, so the retire list must release the pair
+    through its own check instead of keeping it for the process lifetime."""
+    class _Signal:
+        def connect(self, *_a, **_k):
+            pass  # simulates finished having been emitted already
+
+        def disconnect(self):
+            pass
+
+    class _RacingThread:
+        def __init__(self):
+            self.finished = _Signal()
+            self._calls = 0
+
+        def isRunning(self):
+            # Running when retired; finished by the time connect() returned.
+            self._calls += 1
+            return self._calls == 1
+
+    thread = _RacingThread()
+    music_player._retire_qthread(thread, None)
+    assert any(t is thread for t, _w in music_player._retired_qthreads)
+    qtbot.waitUntil(
+        lambda: not any(t is thread for t, _w in music_player._retired_qthreads),
+        timeout=3000,
+    )
+
+
 def test_scan_restart_keeps_running_threads_alive(music_player, monkeypatch, qtbot):
     """Re-scanning while the previous scan still runs must not destroy the
     old QThreads (menu action bypasses the disabled button)."""
