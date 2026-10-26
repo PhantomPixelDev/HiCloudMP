@@ -75,6 +75,19 @@ def test_no_bare_flat_imports_remain():
     assert offenders == [], "flat imports survived the move:\n" + "\n".join(offenders)
 
 
+def test_bundled_data_dir_does_not_shadow_the_helper_module():
+    """Nuitka writes package data next to the frozen modules.
+
+    A data directory called ``resources`` would try to occupy the same path as
+    ``hicloudmp/resources.py`` inside a macOS ``.app`` and break the build with
+    ``NotADirectoryError``.
+    """
+    assert (PKG / "assets").is_dir(), "bundled data lives in hicloudmp/assets"
+    assert not (PKG / "resources").exists(), \
+        "hicloudmp/resources would collide with hicloudmp/resources.py in Nuitka"
+    assert (PKG / "resources.py").is_file()
+
+
 def test_resources_live_inside_the_package_and_resolve():
     from hicloudmp.resources import resource_path, resources_dir
 
