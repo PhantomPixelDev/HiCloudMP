@@ -4,11 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>HiCloud MP — your music, local and cloud</title>
-<meta name="description" content="A Windows music player for local files and cloud libraries, with a real 10-band equalizer, playlists and a web remote for your phone. Free and open source.">
+<meta name="description" content="A fast desktop music player for Windows, macOS and Linux. Stream from your own Nextcloud, WebDAV, Subsonic or Ampache server, keep a local library, and use your phone as the remote. Free and open source, no account.">
 <meta name="theme-color" content="#0f1218">
 <meta property="og:type" content="website">
 <meta property="og:title" content="HiCloud MP — your music, local and cloud">
-<meta property="og:description" content="A Windows music player with a real 10-band equalizer, cloud streaming and a phone remote. Free, open source, no account.">
+<meta property="og:description" content="Native desktop music player for Windows, macOS and Linux: your own cloud, a local library, a phone remote. No account, no telemetry, no Electron.">
 <meta property="og:image" content="https://raw.githubusercontent.com/PhantomPixelDev/HiCloudMP/main/screen.png">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="favicon.ico">
@@ -286,37 +286,7 @@
     line-height: 1.65;
   }
 
-  /* ------------------------------ equalizer ----------------------------- */
-  .split {
-    display: grid;
-    grid-template-columns: 1.05fr .95fr;
-    gap: 48px;
-    align-items: center;
-    margin-top: 32px;
-  }
-
-  .split-media {
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    overflow: hidden;
-    background: var(--surface);
-  }
-
-  .split h3 {
-    margin: 0 0 10px;
-    font-size: clamp(1.3rem, 2vw, 1.55rem);
-    line-height: 1.25;
-    letter-spacing: -.018em;
-    font-weight: 650;
-  }
-
-  .split p {
-    margin: 0 0 18px;
-    color: var(--muted);
-    font-size: .95rem;
-    line-height: 1.7;
-  }
-
+  /* ------------------------------- lists -------------------------------- */
   .list {
     list-style: none;
     margin: 0;
@@ -396,6 +366,39 @@
   }
 
   .download-card .btn { margin-top: 18px; }
+
+  .download-card .btn + .btn { margin-top: 8px; }
+
+  /* -------------------------------- stats ------------------------------- */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+    margin: 28px 0 26px;
+  }
+
+  .stat {
+    padding: 22px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+
+  .stat strong {
+    display: block;
+    font-size: 1.55rem;
+    font-weight: 700;
+    letter-spacing: -.02em;
+    color: var(--accent-bright);
+  }
+
+  .stat span {
+    display: block;
+    margin-top: 6px;
+    color: var(--muted);
+    font-size: .86rem;
+    line-height: 1.55;
+  }
 
   .notice {
     margin-top: 20px;
@@ -510,7 +513,6 @@
   /* ------------------------------ responsive ---------------------------- */
   @media (max-width: 940px) {
     .features { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .split { grid-template-columns: 1fr; gap: 30px; }
     .hero { padding-top: 52px; }
     .section { padding-top: 68px; }
   }
@@ -524,6 +526,7 @@
     .hero h1 { font-size: clamp(2.15rem, 9vw, 2.6rem); }
     .cta-row .btn { width: 100%; }
     .features { grid-template-columns: 1fr; gap: 26px; }
+    .stats { grid-template-columns: 1fr; }
     .download-grid { grid-template-columns: 1fr; }
     .faq { grid-template-columns: 1fr; gap: 0; }
     .site-footer { margin-top: 64px; }
@@ -547,7 +550,7 @@
 
     <nav class="site-nav" aria-label="Primary">
       <a href="#features">Features</a>
-      <a href="#screens">Equalizer</a>
+      <a href="#light">Why it's light</a>
       <a href="#download">Download</a>
       <a class="nav-gh" href="https://github.com/PhantomPixelDev/HiCloudMP">GitHub</a>
     </nav>
@@ -561,21 +564,21 @@
            alt="HiCloud MP app icon: a white music note and play triangle on a purple circle">
       <h1>All your music.<br><span class="accent-text">Local and cloud.</span></h1>
       <p class="lede">
-        HiCloud MP is a Windows music player for the files on your PC and the
-        music you keep on your own server. Real 10-band equalizer, playlists,
-        cover art, and your phone as the remote.
+        HiCloud MP streams from your own servers and plays the files on your
+        machine — one fast native app for Windows, macOS and Linux. Playlists,
+        a queue that remembers, cover art, and your phone as the remote.
       </p>
 
       <div class="cta-row">
         <a class="btn btn-primary" href="https://github.com/PhantomPixelDev/HiCloudMP/releases/latest/download/HiCloudMP-Setup.exe">
-          Download installer
+          Download for Windows
         </a>
-        <a class="btn btn-secondary" href="https://github.com/PhantomPixelDev/HiCloudMP/releases/latest/download/HiCloudMP-portable.zip">
-          Portable ZIP
+        <a class="btn btn-secondary" href="#download">
+          macOS &amp; Linux
         </a>
       </div>
 
-      <p class="fineprint">Windows 10 / 11 · 64-bit · No account · Free and open source</p>
+      <p class="fineprint">Windows 10 / 11 · macOS 13+ · Linux x86_64 · No account · Free and open source</p>
 
       <figure class="hero-shot">
         <img src="assets/main.png" width="2560" height="1760" fetchpriority="high"
@@ -598,8 +601,8 @@
               <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
             </svg>
           </div>
-          <h3>Local library</h3>
-          <p>Add your folders once. Browse by name, artist and album, search as you type, and filter the queue as you go.</p>
+          <h3>Local library that keeps up</h3>
+          <p>Add folders once. Scanning runs off the UI thread, search is instant, and folder watching rescans when new files appear.</p>
         </article>
 
         <article class="feature">
@@ -608,34 +611,30 @@
               <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>
             </svg>
           </div>
-          <h3>Cloud libraries</h3>
-          <p>Stream from Nextcloud or any WebDAV server, Subsonic-compatible servers, and Ampache. Albums scan in the background.</p>
+          <h3>Your own cloud, first-class</h3>
+          <p>Nextcloud or any WebDAV server, Subsonic-compatible servers (Subsonic, Navidrome, Airsonic, Nextcloud Music) and Ampache. Background scans, no sync step.</p>
         </article>
 
         <article class="feature">
           <div class="feature-icon" aria-hidden="true">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/>
-              <line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/>
-              <line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/>
-              <line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/>
-              <line x1="17" y1="16" x2="23" y2="16"/>
+              <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/>
+              <line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/>
+              <line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
             </svg>
           </div>
-          <h3>10-band equalizer</h3>
-          <p>Presets or your own curve, applied live to local and streamed audio. Flat settings bypass the DSP bit-exactly.</p>
+          <h3>Playlists and a queue that behaves</h3>
+          <p>Import and export M3U, M3U8, PLS and XSPF. Drag to reorder, Play Next, shuffle, repeat — sort and filter survive restarts.</p>
         </article>
 
         <article class="feature">
           <div class="feature-icon" aria-hidden="true">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/>
-              <polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/>
-              <line x1="4" y1="4" x2="9" y2="9"/>
+              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
             </svg>
           </div>
-          <h3>Queue and playback</h3>
-          <p>Shuffle, repeat, Play Next, drag to reorder. Sorts and filters stay put between sessions.</p>
+          <h3>Light on resources</h3>
+          <p>One native Qt process, about 180 MB at idle in our Linux measurement. No Electron, no Chromium, no background services.</p>
         </article>
 
         <article class="feature">
@@ -646,7 +645,7 @@
             </svg>
           </div>
           <h3>Phone remote</h3>
-          <p>Turn it on and open the link on the same Wi-Fi. No app to install, token protected, and local unless you allow other devices.</p>
+          <p>Open a token-protected link on the same Wi-Fi. No app to install, and it stays on your LAN unless you allow other devices.</p>
         </article>
 
         <article class="feature">
@@ -655,54 +654,65 @@
               <path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>
             </svg>
           </div>
-          <h3>Plays your files</h3>
-          <p>MP3, FLAC, WAV, OGG, Opus, AAC, M4A, WMA and more, decoded by the bundled FFmpeg backend. No conversion.</p>
+          <h3>Your formats, your tags</h3>
+          <p>MP3, FLAC, WAV, OGG, Opus, AAC, M4A, WMA and more through the bundled FFmpeg, with cover art pulled from the files.</p>
         </article>
       </div>
     </div>
   </section>
 
-  <section class="section" id="screens" aria-labelledby="screens-title">
+  <section class="section" id="light" aria-labelledby="light-title">
     <div class="wrap">
       <div class="section-head">
-        <h2 id="screens-title">Equalizer</h2>
-        <p class="section-note">10 bands · 31 Hz to 16 kHz</p>
+        <h2 id="light-title">Why it's light</h2>
+        <p class="section-note">Measured, not claimed</p>
       </div>
 
-      <div class="split">
-        <figure class="split-media">
-          <img src="assets/equalizer.png" width="840" height="640" loading="lazy"
-               alt="HiCloud MP's 10-band equalizer dialog with the Rock preset selected.">
-        </figure>
-        <div>
-          <h3>Ten bands from 31 Hz to 16 kHz.</h3>
-          <p>Pick a preset or draw your own curve. Changes apply to local and streamed tracks while they play, and a flat curve steps out of the signal path entirely.</p>
-          <ul class="list">
-            <li>Presets for rock, bass, vocals and more</li>
-            <li>Live changes, no restart</li>
-            <li>Bit-exact bypass at flat settings</li>
-          </ul>
+      <p class="section-lede">
+        HiCloud MP is a native Qt application compiled with Nuitka. It is not
+        an Electron app and it does not ship a browser: one process handles the
+        library, the queue, the audio and the phone remote.
+      </p>
+
+      <div class="stats">
+        <div class="stat">
+          <strong>~180 MB</strong>
+          <span>resident at idle, measured on the packaged Linux build</span>
+        </div>
+        <div class="stat">
+          <strong>1 process</strong>
+          <span>no Chromium helper zoo, no background daemons</span>
+        </div>
+        <div class="stat">
+          <strong>0 accounts</strong>
+          <span>no sign-up, no telemetry, no cloud lock-in</span>
         </div>
       </div>
+
+      <ul class="list">
+        <li>Your servers stay your servers — WebDAV, Subsonic and Ampache, not somebody else's catalog.</li>
+        <li>Everything needed is in the download: Qt, the FFmpeg multimedia backend and cover-art FFmpeg.</li>
+        <li>Settings, playlists and history are plain files in the standard per-user folder.</li>
+      </ul>
     </div>
   </section>
 
   <section class="section" id="download" aria-labelledby="download-title">
     <div class="wrap">
       <div class="section-head">
-        <h2 id="download-title">Download for Windows</h2>
-        <p class="section-note">Always the latest release</p>
+        <h2 id="download-title">Download</h2>
+        <p class="section-note">Windows · macOS · Linux</p>
       </div>
 
       <p class="section-lede">
-        Both builds include everything the app needs, including FFmpeg. Your
+        Every build includes everything the app needs, including FFmpeg. Your
         music stays where it is, and settings survive installs and upgrades.
       </p>
 
       <div class="download-grid">
         <article class="download-card primary-card">
           <span class="tag">Recommended</span>
-          <h3>Installer</h3>
+          <h3>Windows installer</h3>
           <p>Adds HiCloud MP to your Start menu and installs an uninstaller. No Python, no extra codecs.</p>
           <p class="size">Windows 10 / 11 · 64-bit · about 75 MB</p>
           <a class="btn btn-primary btn-block" href="https://github.com/PhantomPixelDev/HiCloudMP/releases/latest/download/HiCloudMP-Setup.exe">
@@ -711,17 +721,41 @@
         </article>
 
         <article class="download-card">
-          <h3>Portable</h3>
+          <h3>Windows portable</h3>
           <p>Unzip anywhere and run HiCloudMP.exe. Handy for a USB stick or a PC you don't administer.</p>
           <p class="size">Windows 10 / 11 · 64-bit · about 112 MB</p>
           <a class="btn btn-secondary btn-block" href="https://github.com/PhantomPixelDev/HiCloudMP/releases/latest/download/HiCloudMP-portable.zip">
             Download portable ZIP
           </a>
         </article>
+
+        <article class="download-card">
+          <h3>macOS</h3>
+          <p>Native builds for both Mac architectures. Ad-hoc signed, not notarized yet.</p>
+          <p class="size">macOS 13+ · about 120 MB each</p>
+          <a class="btn btn-primary btn-block" href="https://github.com/PhantomPixelDev/HiCloudMP/releases/latest/download/HiCloudMP-macOS.dmg">
+            Apple Silicon (arm64)
+          </a>
+          <a class="btn btn-secondary btn-block" href="https://github.com/PhantomPixelDev/HiCloudMP/releases/latest/download/HiCloudMP-macOS-intel.dmg">
+            Intel (x86_64)
+          </a>
+        </article>
+
+        <article class="download-card">
+          <h3>Linux x86_64</h3>
+          <p>One file, no install. Double-clicking on some desktops needs libfuse2; the tarball never does.</p>
+          <p class="size">Built on Ubuntu 24.04 · about 129 MB</p>
+          <a class="btn btn-primary btn-block" href="https://github.com/PhantomPixelDev/HiCloudMP/releases/latest/download/HiCloudMP-linux-x86_64.AppImage">
+            Download AppImage
+          </a>
+          <a class="btn btn-secondary btn-block" href="https://github.com/PhantomPixelDev/HiCloudMP/releases">
+            Versioned tarball
+          </a>
+        </article>
       </div>
 
       <div class="notice">
-        <strong>First launch:</strong> the app isn't code-signed yet, so Windows may show “Windows protected your PC”. Choose <em>More info → Run anyway</em>.
+        <strong>First launch:</strong> the Windows build isn't code-signed yet, so SmartScreen may say “Windows protected your PC” — choose <em>More info → Run anyway</em>. On macOS, right-click the app and choose <em>Open</em>, or run <code>xattr -dr com.apple.quarantine HiCloudMP.app</code>.
         <a href="https://github.com/PhantomPixelDev/HiCloudMP/releases">All releases &amp; notes →</a>
       </div>
     </div>
@@ -737,19 +771,27 @@
       <div class="faq">
         <div class="faq-item">
           <h3>Where does my data live?</h3>
-          <p>Settings, playlists and cloud accounts live in <code>%LOCALAPPDATA%\HiCloudMP\HiCloudMP</code>. Installing, upgrading or uninstalling never deletes them.</p>
+          <p>Settings, playlists and history sit in the standard per-user folder: <code>%LOCALAPPDATA%\HiCloudMP\HiCloudMP</code> on Windows, <code>~/Library/Application Support/HiCloudMP</code> on macOS, <code>~/.local/share/HiCloudMP</code> on Linux. Installing, upgrading or uninstalling never deletes them.</p>
+        </div>
+        <div class="faq-item">
+          <h3>Is it an Electron app?</h3>
+          <p>No. HiCloud MP is a native Qt application compiled with Nuitka: one process, no Chromium, no bundled browser. The packaged Linux build measured about 180 MB resident at idle.</p>
         </div>
         <div class="faq-item">
           <h3>Does it phone home?</h3>
           <p>No telemetry and no account. The app only talks to the servers you add, and to GitHub when you ask it to check for updates.</p>
         </div>
         <div class="faq-item">
-          <h3>How do I uninstall it?</h3>
-          <p>Settings → Apps → HiCloud MP. Your music and settings stay exactly where they are.</p>
+          <h3>Which cloud servers work?</h3>
+          <p>Nextcloud and any WebDAV server (ownCloud included), Subsonic-compatible servers such as Navidrome, Airsonic and Nextcloud Music, and Ampache. An app password is fine.</p>
         </div>
         <div class="faq-item">
-          <h3>What about Linux?</h3>
-          <p>The source runs on Linux with MPRIS media keys; packaged builds are Windows-only for now.</p>
+          <h3>How do I uninstall it?</h3>
+          <p>Windows: <em>Settings → Apps → HiCloud MP</em>. macOS: drag the app to the Trash. Linux: delete the AppImage or the unpacked folder. Your music and settings stay exactly where they are.</p>
+        </div>
+        <div class="faq-item">
+          <h3>Are the macOS and Linux builds first-class?</h3>
+          <p>Yes. Linux ships an AppImage and a tarball; macOS ships native arm64 and x86_64 DMGs. The Mac builds are ad-hoc signed but not notarized yet, so the first launch needs a right-click → Open.</p>
         </div>
       </div>
     </div>
