@@ -350,6 +350,12 @@ jobs:
         run: packaging/macos/make-icns.sh
 
       - name: Build with Nuitka (standalone, PySide6, .app bundle)
+        # macOS APFS is case-insensitive: an executable called "HiCloudMP"
+        # and the "hicloudmp" package data directory resolve to the same path
+        # inside Contents/MacOS, and Nuitka fails with NotADirectoryError
+        # while copying package data. The bundle executable is therefore
+        # HiCloudMPApp, while CFBundleName stays HiCloudMP and the bundle
+        # itself is HiCloudMP.app (output-folder-name).
         run: >
           python -m nuitka --standalone --assume-yes-for-downloads
           --enable-plugin=pyside6
@@ -358,7 +364,8 @@ jobs:
           --macos-app-name="HiCloudMP"
           --macos-app-icon=build/icon.icns
           --output-dir=build
-          --output-filename=HiCloudMP
+          --output-filename=HiCloudMPApp
+          --output-folder-name=HiCloudMP
           --include-package-data=hicloudmp
           main.py
 
@@ -368,6 +375,8 @@ jobs:
           ls build
           appdir=$(find build -maxdepth 3 -name "*.app" -type d | head -n 1)
           test -n "$appdir" || { echo "FATAL: no .app bundle under build/"; exit 1; }
+          test "$(basename "$appdir")" = "HiCloudMP.app" \
+            || { echo "FATAL: bundle is $(basename "$appdir"), expected HiCloudMP.app"; exit 1; }
           echo "app bundle: $appdir"
           find "$appdir" -maxdepth 3 | head -n 40
 

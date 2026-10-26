@@ -234,6 +234,18 @@ def test_macos_dmg_and_stable_alias():
     assert "macos-${ARCH}.dmg" in wf
     assert "HiCloudMP-macOS.dmg" in wf
     assert "HiCloudMP-macOS-intel.dmg" in wf
+def test_macos_bundle_executable_avoids_case_insensitive_collision():
+    """macOS APFS is case-insensitive: Contents/MacOS/HiCloudMP and the
+    hicloudmp package data directory are the same path, so Nuitka fails with
+    NotADirectoryError while copying package data. The executable must have a
+    different name, and the bundle users see must stay HiCloudMP.app."""
+    wf = _wf()
+    macos = wf.split("build-macos:", 1)[1].split("release:", 1)[0]
+    assert "--output-filename=HiCloudMPApp" in macos
+    assert "--output-filename=HiCloudMP " not in macos, \
+        "HiCloudMP collides with hicloudmp/ on a case-insensitive filesystem"
+    assert "--output-folder-name=HiCloudMP" in macos
+    assert 'test "$(basename "$appdir")" = "HiCloudMP.app"' in macos
 # ------------------------------------------------------------ workflow: release
 
 def test_release_publishes_all_platform_assets():
